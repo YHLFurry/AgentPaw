@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      Base application theme. Compose supplies the real colour scheme at
+      runtime (Material You / dynamic colour); this theme only needs to give
+      the window a sensible background before the first frame is drawn.
+    -->
+    <style name="Theme.AgentPaw" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/seed_secondary</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">true</item>
+    </style>
+</resources>

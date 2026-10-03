@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">AgentPaw</string>
+
+    <string name="nav_chat">对话</string>
+    <string name="nav_settings">LLM 设置</string>
+
+    <string name="chat_title">AgentPaw</string>
+    <string name="chat_input_hint">给 AgentPaw 发消息…</string>
+    <string name="chat_send">发送</string>
+    <string name="chat_stop">停止</string>
+    <string name="chat_new_conversation">新对话</string>
+    <string name="chat_clear">清空对话</string>
+    <string name="chat_empty_title">爪印待命</string>
+    <string name="chat_empty_subtitle">先在设置里配置 LLM，然后开始对话。</string>
+    <string name="chat_open_settings">前往 LLM 设置</string>
+    <string name="chat_thinking">思考中…</string>
+    <string name="chat_retry">重试</string>
+    <string name="chat_stopped">已停止</string>
+
+    <string name="role_user">你</string>
+    <string name="role_assistant">AgentPaw</string>
+    <string name="role_system">系统</string>
+    <string name="role_tool">工具</string>
+
+    <string name="settings_title">LLM 设置</string>
+    <string name="settings_section_provider">服务商</string>
+    <string name="settings_section_connection">连接</string>
+    <string name="settings_section_model">模型</string>
+    <string name="settings_section_sampling">采样参数</string>
+    <string name="settings_section_system_prompt">系统提示词</string>
+    <string name="settings_section_appearance">外观</string>
+    <string name="settings_section_about">关于</string>
+
+    <string name="settings_provider">服务商</string>
+    <string name="settings_base_url">接口地址</string>
+    <string name="settings_api_key">API Key</string>
+    <string name="settings_model">模型</string>
+    <string name="settings_temperature">温度</string>
+    <string name="settings_max_tokens">最大输出 Token</string>
+    <string name="settings_top_p">Top P</string>
+    <string name="settings_stream">流式输出</string>
+    <string name="settings_stream_summary">逐字显示模型返回内容</string>
+    <string name="settings_system_prompt">系统提示词</string>
+    <string name="settings_system_prompt_hint">每次对话前都会附加这段指令</string>
+    <string name="settings_dynamic_color">Material You 动态取色</string>
+    <string name="settings_dynamic_color_summary">跟随壁纸配色变化</string>
+    <string name="settings_dark_theme">深色主题</string>
+
+    <string name="settings_save">保存</string>
+    <string name="settings_saved">设置已保存</string>
+    <string name="settings_test_connection">测试连接</string>
+    <string name="settings_testing">测试中…</string>
+    <string name="settings_test_ok">连接成功</string>
+    <string name="settings_test_failed">连接失败</string>
+    <string name="settings_reset">恢复默认</string>
+    <string name="settings_show_api_key">显示 API Key</string>
+    <string name="settings_hide_api_key">隐藏 API Key</string>
+    <string name="settings_api_key_stored">仅保存在本机</string>
+    <string name="settings_version">版本</string>
+
+    <string name="error_base_url_required">接口地址不能为空</string>
+    <string name="error_base_url_invalid">请输入合法的 http(s) 地址</string>
+    <string name="error_model_required">模型名称不能为空</string>
+    <string name="error_api_key_required">该服务商需要填写 API Key</string>
+    <string name="error_temperature_range">温度需在 0 到 2 之间</string>
+    <string name="error_max_tokens_range">最大 Token 需在 1 到 32768 之间</string>
+    <string name="error_top_p_range">Top P 需在 0 到 1 之间</string>
+
+    <string name="cd_paw_logo">AgentPaw 标志</string>
+    <string name="cd_back">返回</string>
+    <string name="cd_clear_all">清空对话</string>
+</resources>

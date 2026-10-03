@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">AgentPaw</string>
+
+    <!-- Navigation -->
+    <string name="nav_chat">Chat</string>
+    <string name="nav_settings">LLM Settings</string>
+
+    <!-- Chat -->
+    <string name="chat_title">AgentPaw</string>
+    <string name="chat_input_hint">Message AgentPaw…</string>
+    <string name="chat_send">Send</string>
+    <string name="chat_stop">Stop</string>
+    <string name="chat_new_conversation">New chat</string>
+    <string name="chat_clear">Clear conversation</string>
+    <string name="chat_empty_title">Paw at your service</string>
+    <string name="chat_empty_subtitle">Configure an LLM in settings, then start a conversation.</string>
+    <string name="chat_open_settings">Open LLM settings</string>
+    <string name="chat_thinking">Thinking…</string>
+    <string name="chat_retry">Retry</string>
+    <string name="chat_stopped">Stopped</string>
+
+    <!-- Roles -->
+    <string name="role_user">You</string>
+    <string name="role_assistant">AgentPaw</string>
+    <string name="role_system">System</string>
+    <string name="role_tool">Tool</string>
+
+    <!-- LLM settings -->
+    <string name="settings_title">LLM Settings</string>
+    <string name="settings_section_provider">Provider</string>
+    <string name="settings_section_connection">Connection</string>
+    <string name="settings_section_model">Model</string>
+    <string name="settings_section_sampling">Sampling</string>
+    <string name="settings_section_system_prompt">System prompt</string>
+    <string name="settings_section_appearance">Appearance</string>
+    <string name="settings_section_about">About</string>
+
+    <string name="settings_provider">Provider</string>
+    <string name="settings_base_url">Base URL</string>
+    <string name="settings_api_key">API key</string>
+    <string name="settings_model">Model</string>
+    <string name="settings_temperature">Temperature</string>
+    <string name="settings_max_tokens">Max output tokens</string>
+    <string name="settings_top_p">Top P</string>
+    <string name="settings_stream">Stream responses</string>
+    <string name="settings_stream_summary">Show tokens as they arrive</string>
+    <string name="settings_system_prompt">System prompt</string>
+    <string name="settings_system_prompt_hint">Instructions prepended to every conversation</string>
+    <string name="settings_dynamic_color">Material You dynamic color</string>
+    <string name="settings_dynamic_color_summary">Tint the app with your wallpaper palette</string>
+    <string name="settings_dark_theme">Dark theme</string>
+
+    <string name="settings_save">Save</string>
+    <string name="settings_saved">Settings saved</string>
+    <string name="settings_test_connection">Test connection</string>
+    <string name="settings_testing">Testing…</string>
+    <string name="settings_test_ok">Connection successful</string>
+    <string name="settings_test_failed">Connection failed</string>
+    <string name="settings_reset">Reset to defaults</string>
+    <string name="settings_show_api_key">Show API key</string>
+    <string name="settings_hide_api_key">Hide API key</string>
+    <string name="settings_api_key_stored">Stored on-device only</string>
+    <string name="settings_version">Version</string>
+
+    <!-- Validation -->
+    <string name="error_base_url_required">Base URL is required</string>
+    <string name="error_base_url_invalid">Enter a valid http(s) URL</string>
+    <string name="error_model_required">Model name is required</string>
+    <string name="error_api_key_required">API key is required for this provider</string>
+    <string name="error_temperature_range">Temperature must be between 0 and 2</string>
+    <string name="error_max_tokens_range">Max tokens must be between 1 and 32768</string>
+    <string name="error_top_p_range">Top P must be between 0 and 1</string>
+
+    <!-- Content descriptions -->
+    <string name="cd_paw_logo">AgentPaw logo</string>
+    <string name="cd_back">Back</string>
+    <string name="cd_clear_all">Clear conversation</string>
+</resources>
