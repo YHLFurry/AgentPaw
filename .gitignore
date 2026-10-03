@@ -6,6 +6,10 @@ build/
 # Local configuration file (sdk path, etc)
 local.properties
 
+# Signing material
+*.jks
+*.keystore
+
 # Log/OS Files
 *.log
 
@@ -24,12 +28,12 @@ misc.xml
 deploymentTargetDropDown.xml
 render.experimental.xml
 
-# Keystore files
-*.jks
-*.keystore
-
 # Google Services (e.g. APIs or Firebase)
 google-services.json
 
 # Android Profiling
 *.hprof
+
+# OS
+.DS_Store
+Thumbs.db

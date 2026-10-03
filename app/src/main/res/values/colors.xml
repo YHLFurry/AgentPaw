@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      Brand seed. Compose turns this into a full Material 3 scheme and, on
+      Android 12+, may override it with the wallpaper-derived dynamic palette.
+    -->
+    <color name="seed_primary">#FF4F46E5</color>
+    <color name="seed_secondary">#FF7C3AED</color>
+    <color name="seed_tertiary">#FF9333EA</color>
+</resources>

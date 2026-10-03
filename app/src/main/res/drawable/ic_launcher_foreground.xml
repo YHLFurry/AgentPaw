@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  AgentPaw app icon — a beast paw print.
+
+  Drawn on the 108x108 adaptive-icon canvas. The inner 72x72dp region
+  (18..90 on both axes) is the safe zone, so every shape below stays inside it.
+
+  All fills are #FFFFFF on purpose:
+    - the launcher can tint the foreground for themed icons
+    - the foreground composites cleanly over the gradient background layer
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Heel pad: the large pad at the bottom of the print. -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,64m-17.5,0a17.5,12.5 0,1 1,35 0a17.5,12.5 0,1 1,-35 0" />
+
+    <!--
+      Four toe pads in an arc. The inner pair sits slightly higher and larger
+      than the outer pair, which reads as a paw rather than a row of dots.
+    -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M36.8,44.5m-5.4,0a5.4,6.6 0,1 1,10.8 0a5.4,6.6 0,1 1,-10.8 0" />
+
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M48,38.5m-5.8,0a5.8,7 0,1 1,11.6 0a5.8,7 0,1 1,-11.6 0" />
+
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M60,38.5m-5.8,0a5.8,7 0,1 1,11.6 0a5.8,7 0,1 1,-11.6 0" />
+
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M71.2,44.5m-5.4,0a5.4,6.6 0,1 1,10.8 0a5.4,6.6 0,1 1,-10.8 0" />
+
+</vector>
