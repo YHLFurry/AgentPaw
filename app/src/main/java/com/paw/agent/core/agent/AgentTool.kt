@@ -24,14 +24,21 @@ interface AgentTool {
 }
 
 /**
- * Per-run state handed to tools: which conversation is active, and whether the
- * user has asked to stop.
+ * Per-run state handed to tools: which conversation is active, how deep the
+ * agent is nested, and whether the user has asked to stop.
+ *
+ * [depth] starts at 0 for a top-level turn and increases with each delegated
+ * sub-agent, which is what stops mutually-delegating agents from looping.
  */
 class AgentContext(
     val conversationId: String,
+    val depth: Int = 0,
     private val cancelledCheck: () -> Boolean = { false },
 ) {
     fun isCancelled(): Boolean = cancelledCheck()
+
+    /** True when another delegation level is still permitted. */
+    fun canNest(limit: Int): Boolean = depth < limit
 }
 
 /**

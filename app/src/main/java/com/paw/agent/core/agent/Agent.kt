@@ -65,9 +65,10 @@ class Agent(
         config: LlmConfig,
         history: List<Message>,
         isCancelled: () -> Boolean = { false },
+        depth: Int = 0,
     ): Flow<AgentEvent> = flow {
         val conversationId = "conversation"
-        val context = AgentContext(conversationId) { isCancelled() }
+        val context = AgentContext(conversationId, depth) { isCancelled() }
 
         var workingHistory = history
         var assistantId: String? = null
