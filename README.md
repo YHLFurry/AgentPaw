@@ -19,7 +19,9 @@ The app id is `com.paw.agent`; the launcher icon is a beast paw print.
 | LLM client (OpenAI-compatible, SSE streaming)  | ✅ implemented                             |
 | LLM settings (provider, key, model, sampling)  | ✅ implemented                             |
 | Chat UI (Material You, streaming, stop/cancel) | ✅ implemented                             |
-| Tool implementations                           | ⬜ none yet — the registry is wired, empty |
+| Sub-agent delegation (depth-limited)           | ✅ implemented                             |
+| Script sandbox (built-in shell)               | ✅ implemented                             |
+| Web search (keyless)                          | ✅ implemented                             |
 | Conversation persistence                       | ⬜ in-memory only                          |
 | Release build / signing                        | ⬜ not configured                          |
 
@@ -31,7 +33,10 @@ com.paw.agent
 │   ├── model/                Message, Conversation, ToolCall, ToolDefinition
 │   ├── llm/                  LlmClient (the seam), LlmConfig, OpenAiCompatibleClient
 │   │   └── dto/              Wire format for chat-completions
-│   └── agent/                Agent (the loop), AgentTool, ToolRegistry
+│   ├── agent/                Agent (the loop), AgentTool, ToolRegistry
+│   ├── shell/                Script sandbox: Lexer, Parser, Interpreter, commands
+│   ├── search/               SearchBackend + DuckDuckGo implementation
+│   └── tool/                 The built-in AgentTool implementations
 ├── data/
 │   ├── settings/             AppSettings + DataStore repository
 │   └── conversation/         ConversationRepository (in-memory)
@@ -85,6 +90,74 @@ Register the tool and it is advertised to the provider automatically; the loop
 handles dispatch, result plumbing, and error recovery (a failed tool returns an  
 error string to the model instead of aborting the turn).
 
+## Built-in tools
+
+Three tools ship in the box, wired in `AppContainer.toolRegistry`.
+
+### `run_script` — the script sandbox
+
+A shell-like interpreter written from scratch in pure Kotlin: `Lexer` → `Parser`
+→ `Interpreter`, plus ~30 built-in commands. It runs **in-process** — no process
+is spawned and no native binary is executed.
+
+That last point is the reason it is hand-written rather than a real shell.
+Since Android 10, `execve()` on anything in the app's data directory is a W^X
+violation (the fix is to ship binaries in `jniLibs` as `lib___.so` and run them
+from the native library dir, as Termux does). A bootstrap zip is the right answer
+for a *terminal*; for an agent that just needs arithmetic and text processing, an
+interpreter is smaller, safer, and needs no per-ABI binaries.
+
+```bash
+seq 1 100 | grep 3 | wc -l
+expr (2 + 3) * 4
+printf 'b\na\nb\n' | sort | uniq
+i=0; while test $i -lt 3; do echo $i; i=$(expr $i + 1); done
+```
+
+What it supports:
+
+- pipelines `|`, sequencing `;` `&&` `||`, redirection `>` `>>` `<` `2>`
+- `for` / `if` / `while` blocks
+- variables (`NAME=value`, `$NAME`), command substitution (`$( … )`)
+- arithmetic via a shunting-yard evaluator with `+ - * / % ^`, parentheses, and
+  `sqrt abs floor ceil round min max pow` — no `eval`, so a generated expression
+  can never escape into host code
+
+What it will not do, by design: no process spawning, no network, no globbing, no
+command substitution into a shell, and every path is resolved through
+`ShellEnvironment.resolvePath`, which refuses to leave the sandbox root.
+
+Runaway scripts are bounded by `SandboxLimits`: wall-clock timeout, max AST steps
+(so `while true` dies instead of hanging the app), max pipeline depth, and output
+truncation.
+
+### `web_search` — keyless lookup
+
+`DuckDuckGoSearchBackend` uses the Instant Answer API, which needs **no API key
+and no account**, so the feature works on a fresh install.
+
+The honest trade-off: it answers entity-style questions ("rust", "kotlin") well
+and open-ended ones poorly. When it has nothing, the tool says so and tells the
+model to answer from its own knowledge and flag that it could not verify — rather
+than leaving a gap the model quietly fills. `SearchBackend` is an interface, so
+adding Tavily or Brave later means one new class, no UI change.
+
+### `delegate_task` — sub-agents
+
+Delegates a self-contained sub-task to a nested agent with its own system prompt
+and **no tools**, returning its final answer to the caller.
+
+```
+main agent ──delegate_task──▶ sub agent (own prompt, no tools, no delegation)
+         ◀── final answer ───┘
+```
+
+This keeps a long multi-step chain out of the main context and lets one prompt own
+a whole sub-task end to end. Recursion is bounded twice: by `maxDepth` (2) on
+`AgentContext`, and by the sub-agent getting an empty `ToolRegistry`, so
+delegation is always a leaf and cannot loop.
+
+
 ## LLM support
 
 `OpenAiCompatibleClient` speaks the OpenAI chat-completions protocol, so these  
@@ -119,21 +192,44 @@ Requires JDK 17+ and the Android SDK (compileSdk 36, minSdk 26).
 ```bash
 git clone https://github.com/YHLFurry/AgentPaw.git
 cd AgentPaw
-./gradlew :app:assembleDebug
+./gradlew :app:assembleDebug      # debug APK
+./gradlew :app:testDebugUnitTest  # 56 unit tests
 ```
 
 The debug APK lands at `app/build/outputs/apk/debug/app-debug.apk`.
 
+## Tests
+
+`./gradlew :app:testDebugUnitTest` runs 56 JVM tests, no device needed:
+
+| Suite                   | Covers                                                        |
+| ----------------------- | ------------------------------------------------------------- |
+| `AgentTest`             | tool dispatch, multi-round loop, cancellation, failure paths  |
+| `InterpreterTest`       | the shell: pipelines, control flow, redirection, and escapes  |
+| `DuckDuckGoSearchBackendTest` | response parsing against recorded payloads            |
+| `DuckDuckGoSearchBackendLiveTest` | one live call, auto-skipped when offline        |
+| `BuiltInToolsTest`      | the three tools, including sub-agent depth limiting           |
+
+The sandbox tests use a real temp directory rather than mocks, so the path
+guards are genuinely exercised — including attempts to read `/etc/passwd` and
+`../../..`.
+
 ## Tech stack
 
-Kotlin 2.2.21 · AGP 8.13.2 · Gradle 8.13 · Compose BOM 2026.09.00 ·  
+Kotlin 2.2.21 · AGP 8.13.2 · Gradle 8.13 · Compose BOM 2026.06.01 ·  
 Material 3 · DataStore · OkHttp · kotlinx.serialization · Navigation Compose
+
+> The Compose BOM is pinned to `2026.06.01` (Compose 1.11.4). `2026.08.00` and
+> later require AGP 9.1+ and compileSdk 37; revisit once AGP 9 settles.
 
 ## Roadmap
 
-- [ ] Built-in tools (web search, time, calculator)
+- [x] Built-in tools: script sandbox, web search, sub-agent delegation
 - [ ] Conversation history persisted with Room
 - [ ] Multiple conversations with a drawer
+- [ ] A real Termux-style bootstrap (per-ABI binaries in `jniLibs`) as an
+      alternative sandbox backend, for when a full shell is actually needed
+- [ ] More sandbox commands (`sed`, `awk`, `jq`-style filters)
 - [ ] Vision / image input
 - [ ] Release build config and CI
 

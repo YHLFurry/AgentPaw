@@ -1,6 +1,7 @@
 package com.paw.agent.ui
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -30,6 +31,12 @@ fun AgentPawApp(
         .collectAsStateWithLifecycle(
             initialValue = com.paw.agent.data.settings.AppSettings.Default,
         )
+
+    // Keep the container's cached config current so tools that spawn a
+    // sub-agent read the same settings as this turn.
+    LaunchedEffect(settings.llm) {
+        container.onLlmConfigChanged(settings.llm)
+    }
 
     val chatViewModel: ChatViewModel = viewModel(
         factory = ChatViewModel.Factory(
