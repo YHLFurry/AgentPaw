@@ -22,3 +22,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "AgentPaw"
 include(":app")
+include(":agentpaw-core")

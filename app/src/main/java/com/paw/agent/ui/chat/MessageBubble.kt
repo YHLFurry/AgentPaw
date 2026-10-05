@@ -111,7 +111,7 @@ fun MessageBubble(
                 message.status == MessageStatus.FAILED && message.error != null -> {
                     Spacer(Modifier.height(6.dp))
                     StatusPill(
-                        text = message.error,
+                        text = message.error.orEmpty(),
                         container = MaterialTheme.colorScheme.errorContainer,
                         content = MaterialTheme.colorScheme.onErrorContainer,
                     )
