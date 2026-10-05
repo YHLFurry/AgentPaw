@@ -41,10 +41,8 @@ dependencies {
     testImplementation(libs.kotlinx.coroutines.test)
 }
 
-val sourcesJar = tasks.register<Jar>("sourcesJar") {
-    archiveClassifier = "sources"
-    from(android.sourceSets.getByName("main").java.srcDirs)
-}
+// Note: AGP 8.13+ already wires a sources jar (task `releaseSourcesJar`) into the
+// release component, so it is published automatically — no manual artifact needed.
 
 afterEvaluate {
     publishing {
@@ -55,7 +53,6 @@ afterEvaluate {
                 version = agentpawVersion
 
                 from(components.getByName("release"))
-                artifact(sourcesJar)
 
                 pom {
                     name = "AgentPaw Core"
