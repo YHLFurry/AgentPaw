@@ -190,7 +190,11 @@ fun ChatScreen(
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(vertical = 12.dp),
                     ) {
-                        items(items = messages, key = { it.id }) { message ->
+                        // 不以 message.id 作为 key：部分 OpenAI 兼容后端会返回重复或
+                        // 空的 tool-call id，重复 key 会让 LazyColumn 直接抛
+                        // "Key was already used" 崩掉整个对话界面。消息列表只追加
+                        // 不重排，默认的位置 key 足够且更稳。
+                        items(items = messages) { message ->
                             MessageBubble(message = message)
                         }
                     }
