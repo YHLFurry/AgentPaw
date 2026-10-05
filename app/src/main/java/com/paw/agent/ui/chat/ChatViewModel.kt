@@ -98,6 +98,8 @@ class ChatViewModel(
         )
 
         cancelled = false
+        // 重置上一轮的用户停止标志，否则停止一次后无障碍操作永远快速失败
+        com.paw.agent.device.accessibility.AgentAccessibilityService.instance?.clearUserStop()
         stepCount = 0
         maxSteps = config.maxToolRounds
         AgentExecutionController.markStarted(maxSteps)
@@ -197,6 +199,8 @@ class ChatViewModel(
         cancelled = true
         runJob?.cancel()
         runJob = null
+        // 同步停止无障碍操作：中止进行中/后续手势，确保"停止"立即生效
+        com.paw.agent.device.accessibility.AgentAccessibilityService.instance?.requestUserStop()
         AgentExecutionController.requestStop()
         _uiState.value = _uiState.value.copy(isGenerating = false)
     }

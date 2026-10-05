@@ -13,6 +13,8 @@ class ShizukuController {
 
     val isAvailable: Boolean
         get() = runCatching {
+            // 确保监听已注册（幂等），避免未初始化时 binder 状态未知
+            ShizukuInitializer.initialize()
             Shizuku.pingBinder() && Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
         }.getOrDefault(false)
 

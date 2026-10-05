@@ -239,6 +239,43 @@ dependencies {
 }
 ```
 
+### Shizuku integration
+
+`agentpaw-core` ships everything needed for Shizuku — the
+`moe.shizuku.manager.permission.API_V23` permission and the
+`rikka.shizuku.ShizukuProvider` (`${applicationId}.shizuku`) are merged into your
+manifest automatically from the library manifest. Initialize once at startup
+(`Application.onCreate`):
+
+```kotlin
+ShizukuInitializer.initialize() // registers binder + permission-result listeners
+
+// request authorization (pops the Shizuku Manager dialog when the service is running);
+// returns false when Shizuku is not running, e.g. to guide the user to open the app:
+val dispatched = DevicePermissionManager.requestShizukuPermission()
+```
+
+The current state is observable via `DevicePermissionManager.observeShizukuState()`
+(`NOT_RUNNING` / `RUNNING_NO_PERMISSION` / `GRANTED`) — it updates live when the
+binder arrives and when the user responds to the authorization dialog.
+
+### Stop floating button (accessibility operations)
+
+While the agent drives the device through the accessibility service, host apps
+can show a floating red stop pill:
+
+```kotlin
+AgentStopFloatingButton.show(context) {
+    // optional: also cancel your agent loop here
+}
+```
+
+Tapping it calls `AgentAccessibilityService.requestUserStop()` (in-flight and
+subsequent gestures/inputs abort immediately) and hides the button. It needs the
+`SYSTEM_ALERT_WINDOW` permission (also merged from the library manifest — grant
+the overlay permission before showing). Reset per turn with
+`AgentAccessibilityService.instance?.clearUserStop()`.
+
 ## Building
 
 Requires JDK 17+ and the Android SDK (compileSdk 36, minSdk 26).

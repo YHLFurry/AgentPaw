@@ -10,6 +10,9 @@ import android.os.Build
 import android.provider.Settings
 import android.text.TextUtils
 import com.paw.agent.device.accessibility.AgentAccessibilityService
+import com.paw.agent.device.shizuku.ShizukuInitializer
+import com.paw.agent.device.shizuku.ShizukuStatus
+import kotlinx.coroutines.flow.StateFlow
 import rikka.shizuku.Shizuku
 
 /**
@@ -49,7 +52,7 @@ object DevicePermissionManager {
     }
 
     /**
-     * 检测 Shizuku 服务是否运行
+     * 检测 Shizuku 服务是否运行（binder 是否就绪）
      */
     fun isShizukuRunning(): Boolean {
         return runCatching {
@@ -67,14 +70,40 @@ object DevicePermissionManager {
     }
 
     /**
-     * 申请 Shizuku 权限
+     * 订阅 Shizuku 状态（NOT_RUNNING / RUNNING_NO_PERMISSION / GRANTED）。
+     * 首次调用会触发 [ShizukuInitializer.initialize]。
      */
-    fun requestShizukuPermission(requestCode: Int = 1001) {
-        runCatching {
-            if (Shizuku.pingBinder() && Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED) {
-                Shizuku.requestPermission(requestCode)
-            }
-        }
+    fun observeShizukuState(): StateFlow<ShizukuStatus> {
+        ShizukuInitializer.initialize()
+        return ShizukuInitializer.status
+    }
+
+    /**
+     * 申请 Shizuku 权限（会拉起 Shizuku Manager 授权对话框，
+     * 授权结果通过 [observeShizukuState] 实时回调）。
+     *
+     * @return true 表示授权请求已成功发起；false 表示 Shizuku 未运行或请求失败，
+     *         调用方可引导用户先启动 Shizuku 服务（见 [openShizukuApp]）。
+     */
+    fun requestShizukuPermission(requestCode: Int = ShizukuInitializer.DEFAULT_REQUEST_CODE): Boolean {
+        return runCatching {
+            ShizukuInitializer.requestAuthorization(requestCode)
+        }.getOrDefault(false)
+    }
+
+    /**
+     * 尝试打开 Shizuku 应用（用于 Shizuku 服务未运行时引导用户启动）。
+     *
+     * @return true 表示已成功跳转；false 表示设备上未安装 Shizuku。
+     */
+    fun openShizukuApp(context: Context): Boolean {
+        return runCatching {
+            val intent = context.packageManager.getLaunchIntentForPackage(SHIZUKU_PACKAGE)
+                ?: return@runCatching false
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            context.startActivity(intent)
+            true
+        }.getOrDefault(false)
     }
 
     /**
@@ -102,4 +131,6 @@ object DevicePermissionManager {
             context.startActivity(intent)
         }
     }
+
+    private const val SHIZUKU_PACKAGE = "moe.shizuku.privileged.api"
 }

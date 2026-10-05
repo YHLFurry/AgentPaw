@@ -56,11 +56,21 @@ class AgentFloatingService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP_TASK) {
+            stopAccessibilityOperations()
             AgentExecutionController.requestStop()
             stopSelf()
             return START_NOT_STICKY
         }
         return START_STICKY
+    }
+
+    /**
+     * 联动 core 层停止无障碍操作：中止进行中/后续手势与输入，
+     * 确保用户点"停止"后 Agent 不会继续操作手机。
+     */
+    private fun stopAccessibilityOperations() {
+        com.paw.agent.device.accessibility.AgentAccessibilityService.instance?.requestUserStop()
+        com.paw.agent.device.floating.AgentStopFloatingButton.hide()
     }
 
     private fun startForegroundNotification() {
@@ -174,6 +184,7 @@ class AgentFloatingService : Service() {
             minHeight = dpToPx(28)
             minimumHeight = dpToPx(28)
             setOnClickListener {
+                stopAccessibilityOperations()
                 AgentExecutionController.requestStop()
             }
         }

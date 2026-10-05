@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 无障碍服务描述：库模块自带，避免独立构建时资源链接失败 -->
+    <string name="accessibility_service_description">AgentPaw 手机智能体控制服务：用于代用户执行界面点击、滑动、输入与截屏等操作</string>
+    <string name="accessibility_service_label">AgentPaw 智能体控制</string>
+</resources>
