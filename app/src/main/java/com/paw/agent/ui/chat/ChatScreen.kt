@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -19,6 +20,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.outlined.EditNote
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -96,6 +98,12 @@ fun ChatScreen(
                 actions = {
                     IconButton(onClick = onNewConversation) {
                         Icon(
+                            imageVector = Icons.Outlined.EditNote,
+                            contentDescription = stringResource(R.string.chat_new_conversation),
+                        )
+                    }
+                    IconButton(onClick = onOpenSettings) {
+                        Icon(
                             imageVector = Icons.Outlined.Settings,
                             contentDescription = stringResource(R.string.chat_open_settings),
                         )
@@ -110,32 +118,81 @@ fun ChatScreen(
             Composer(
                 draft = draft,
                 isGenerating = isGenerating,
+                configReady = configReady,
                 enabled = draft.isNotBlank() || isGenerating,
                 onDraftChange = onDraftChange,
                 onSendOrStop = onSendOrStop,
+                onOpenSettings = onOpenSettings,
             )
         },
         containerColor = MaterialTheme.colorScheme.background,
     ) { padding ->
-        Box(
-            Modifier
+        val context = androidx.compose.ui.platform.LocalContext.current
+        val permTick = androidx.compose.runtime.remember { androidx.compose.runtime.mutableIntStateOf(0) }
+        androidx.lifecycle.compose.LifecycleEventEffect(androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+            permTick.intValue++
+        }
+        val isAccessibilityEnabled = androidx.compose.runtime.remember(permTick.intValue) {
+            com.paw.agent.device.DevicePermissionManager.isAccessibilityServiceEnabled(context)
+        }
+
+        Column(
+            modifier = Modifier
                 .fillMaxSize()
                 .padding(padding),
         ) {
-            if (messages.isEmpty()) {
-                EmptyChatState(
-                    configured = configReady,
-                    modifier = Modifier.align(Alignment.Center),
-                    onOpenSettings = onOpenSettings,
-                )
-            } else {
-                LazyColumn(
-                    state = listState,
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(vertical = 12.dp),
+            if (!isAccessibilityEnabled) {
+                androidx.compose.material3.Card(
+                    onClick = { com.paw.agent.device.DevicePermissionManager.openAccessibilitySettings(context) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                    shape = MaterialTheme.shapes.medium,
+                    colors = androidx.compose.material3.CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                    ),
                 ) {
-                    items(items = messages, key = { it.id }) { message ->
-                        MessageBubble(message = message)
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = "💡 手机控制服务尚未开启，点击开启无障碍服务以自主操作手机",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onTertiaryContainer,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        androidx.compose.material3.OutlinedButton(
+                            onClick = { com.paw.agent.device.DevicePermissionManager.openAccessibilitySettings(context) },
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                        ) {
+                            Text("开启", style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
+                }
+            }
+
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+            ) {
+                if (messages.isEmpty()) {
+                    EmptyChatState(
+                        configured = configReady,
+                        modifier = Modifier.align(Alignment.Center),
+                        onOpenSettings = onOpenSettings,
+                    )
+                } else {
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(vertical = 12.dp),
+                    ) {
+                        items(items = messages, key = { it.id }) { message ->
+                            MessageBubble(message = message)
+                        }
                     }
                 }
             }
@@ -147,9 +204,11 @@ fun ChatScreen(
 private fun Composer(
     draft: String,
     isGenerating: Boolean,
+    configReady: Boolean,
     enabled: Boolean,
     onDraftChange: (String) -> Unit,
     onSendOrStop: () -> Unit,
+    onOpenSettings: () -> Unit,
 ) {
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainer,
@@ -176,8 +235,14 @@ private fun Composer(
                 )
 
                 Surface(
-                    onClick = onSendOrStop,
-                    enabled = enabled,
+                    onClick = {
+                        if (!configReady && !isGenerating) {
+                            onOpenSettings()
+                        } else {
+                            onSendOrStop()
+                        }
+                    },
+                    enabled = enabled || !configReady,
                     shape = RoundedCornerShape(percent = 50),
                     color = if (isGenerating) {
                         MaterialTheme.colorScheme.errorContainer

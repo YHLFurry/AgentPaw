@@ -53,6 +53,20 @@ class AppContainer(application: Application) {
         activeLlmConfig = config
     }
 
+    val phoneController: com.paw.agent.device.PhoneController by lazy {
+        com.paw.agent.device.HybridPhoneController(application)
+    }
+
+    val skillRegistry: com.paw.agent.core.skill.SkillRegistry by lazy {
+        com.paw.agent.core.skill.SkillRegistry(
+            listOf(
+                com.paw.agent.core.skill.ReturnHomeAndResetSkill(),
+                com.paw.agent.core.skill.OpenAndSearchSkill(),
+                com.paw.agent.core.skill.ScrollAndFindSkill(),
+            ),
+        )
+    }
+
     /**
      * Root of the script sandbox. Everything a script reads or writes lives
      * under here, so the interpreter can refuse to step outside it.
@@ -70,10 +84,23 @@ class AppContainer(application: Application) {
     val toolRegistry: ToolRegistry by lazy {
         ToolRegistry(
             listOf(
+                // Built-in utility tools
                 ShellTool(sandboxRoot, SandboxLimits()),
                 WebSearchTool(searchBackend),
                 SubAgentTool(llmClient, { activeLlmConfig }),
-            ),
+                // Android Phone Tools
+                com.paw.agent.core.tool.android.TakeScreenshotTool(phoneController),
+                com.paw.agent.core.tool.android.TapTool(phoneController),
+                com.paw.agent.core.tool.android.DoubleTapTool(phoneController),
+                com.paw.agent.core.tool.android.LongPressTool(phoneController),
+                com.paw.agent.core.tool.android.SwipeTool(phoneController),
+                com.paw.agent.core.tool.android.InputTextTool(phoneController),
+                com.paw.agent.core.tool.android.KeyActionTool(phoneController),
+                com.paw.agent.core.tool.android.LaunchAppTool(phoneController),
+                com.paw.agent.core.tool.android.DeepLinkTool(phoneController),
+                com.paw.agent.core.tool.android.GetScreenStateTool(phoneController),
+                com.paw.agent.core.tool.android.WaitTool(),
+            ) + skillRegistry.toTools(phoneController),
         )
     }
 

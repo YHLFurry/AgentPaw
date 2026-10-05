@@ -7,19 +7,27 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Pets
+import androidx.compose.material.icons.outlined.Build
+import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -87,6 +95,10 @@ fun MessageBubble(
                 },
             ) {
                 Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                    if (message.images.isNotEmpty()) {
+                        MessageImages(message.images)
+                        Spacer(Modifier.height(8.dp))
+                    }
                     when (message.role) {
                         MessageRole.TOOL -> ToolMessageBody(message)
                         else -> AssistantOrUserBody(message)
@@ -129,11 +141,16 @@ private fun AssistantOrUserBody(message: Message) {
 
 @Composable
 private fun ToolMessageBody(message: Message) {
+    val (icon, tint) = when (message.status) {
+        MessageStatus.STREAMING -> Icons.Outlined.Build to MaterialTheme.colorScheme.primary
+        MessageStatus.FAILED -> Icons.Outlined.ErrorOutline to MaterialTheme.colorScheme.error
+        else -> Icons.Outlined.CheckCircle to MaterialTheme.colorScheme.tertiary
+    }
     Row(verticalAlignment = Alignment.CenterVertically) {
         Icon(
-            imageVector = Icons.Outlined.ErrorOutline,
+            imageVector = icon,
             contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            tint = tint,
             modifier = Modifier.size(16.dp),
         )
         Spacer(Modifier.size(8.dp))
@@ -142,6 +159,31 @@ private fun ToolMessageBody(message: Message) {
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+    }
+}
+
+@Composable
+private fun MessageImages(images: List<String>) {
+    images.forEach { raw ->
+        val base64Data = if (raw.contains(",")) raw.substringAfter(",") else raw
+        val bitmap = remember(raw) {
+            runCatching {
+                val bytes = android.util.Base64.decode(base64Data, android.util.Base64.DEFAULT)
+                android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+            }.getOrNull()
+        }
+        if (bitmap != null) {
+            Image(
+                bitmap = bitmap,
+                contentDescription = "Screen Image",
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 240.dp)
+                    .clip(RoundedCornerShape(8.dp)),
+                contentScale = ContentScale.Fit,
+            )
+            Spacer(Modifier.height(4.dp))
+        }
     }
 }
 

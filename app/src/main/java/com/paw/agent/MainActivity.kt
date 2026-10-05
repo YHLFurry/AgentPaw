@@ -27,6 +27,16 @@ class MainActivity : ComponentActivity() {
             val settings by container.settingsRepository.settings
                 .collectAsStateWithLifecycle(initialValue = AppSettings.Default)
 
+            val executionState by com.paw.agent.ui.floating.AgentExecutionController.state
+                .collectAsStateWithLifecycle()
+            val context = androidx.compose.ui.platform.LocalContext.current
+
+            androidx.compose.runtime.LaunchedEffect(executionState.isRunning) {
+                if (executionState.isRunning) {
+                    com.paw.agent.ui.floating.AgentFloatingService.start(context)
+                }
+            }
+
             SyncSystemBarAppearance(darkTheme = settings.darkTheme)
 
             AgentPawTheme(

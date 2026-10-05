@@ -30,6 +30,8 @@ data class LlmSettingsUiState(
     val temperature: Float = 0.7f,
     val topP: Float = 1.0f,
     val maxTokens: Int = 2048,
+    val maxToolRounds: Int = 15,
+    val visionResolutionMode: String = "AUTO",
     val stream: Boolean = true,
     val systemPrompt: String = LlmConfig.DEFAULT_SYSTEM_PROMPT,
     val showApiKey: Boolean = false,
@@ -51,6 +53,8 @@ data class LlmSettingsUiState(
         temperature = temperature,
         topP = topP,
         maxTokens = maxTokens,
+        maxToolRounds = maxToolRounds,
+        visionResolutionMode = visionResolutionMode,
         stream = stream,
         systemPrompt = systemPrompt,
     )
@@ -78,6 +82,8 @@ class LlmSettingsViewModel(
                         temperature = llm.temperature,
                         topP = llm.topP,
                         maxTokens = llm.maxTokens,
+                        maxToolRounds = llm.maxToolRounds,
+                        visionResolutionMode = llm.visionResolutionMode,
                         stream = llm.stream,
                         systemPrompt = llm.systemPrompt,
                     )
@@ -122,6 +128,14 @@ class LlmSettingsViewModel(
 
     fun onMaxTokensChange(value: Int) {
         _uiState.value = _uiState.value.copy(maxTokens = value.coerceIn(1, 32768))
+    }
+
+    fun onMaxToolRoundsChange(value: Int) {
+        _uiState.value = _uiState.value.copy(maxToolRounds = value.coerceIn(1, 50))
+    }
+
+    fun onVisionResolutionModeChange(value: String) {
+        _uiState.value = _uiState.value.copy(visionResolutionMode = value)
     }
 
     fun onStreamChange(value: Boolean) {
@@ -180,6 +194,8 @@ class LlmSettingsViewModel(
                 temperature = fresh.temperature,
                 topP = fresh.topP,
                 maxTokens = fresh.maxTokens,
+                maxToolRounds = fresh.maxToolRounds,
+                visionResolutionMode = fresh.visionResolutionMode,
                 stream = fresh.stream,
                 systemPrompt = fresh.systemPrompt,
             )

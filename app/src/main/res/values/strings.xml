@@ -72,6 +72,15 @@
     <string name="error_max_tokens_range">Max tokens must be between 1 and 32768</string>
     <string name="error_top_p_range">Top P must be between 0 and 1</string>
 
+    <!-- Accessibility & Permissions -->
+    <string name="accessibility_service_description">AgentPaw 手机 AI 助手无障碍服务，用于执行界面点击、滑动、按键模拟与屏幕内容分析。</string>
+    <string name="permission_accessibility">无障碍服务权限</string>
+    <string name="permission_shizuku">Shizuku 极速授权</string>
+    <string name="permission_overlay">应用悬浮窗权限</string>
+    <string name="permission_granted">已授权</string>
+    <string name="permission_not_granted">未开启</string>
+    <string name="permission_open_settings">去设置开启</string>
+
     <!-- Content descriptions -->
     <string name="cd_paw_logo">AgentPaw logo</string>
     <string name="cd_back">Back</string>
