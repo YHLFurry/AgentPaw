@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512"
+     role="img" aria-labelledby="agentpaw-logo-mono-title" color="#18181B">
+  <title id="agentpaw-logo-mono-title">AgentPaw</title>
+
+  <!--
+    AgentPaw App Logo, single-colour variant.
+
+    Every fill is `currentColor`, so the mark inherits its colour from the
+    host: set `color` on the svg (or on any ancestor) to tint it. The default
+    here is ink #18181B for light surfaces; use #FFFFFF on dark surfaces.
+
+    Geometry is identical to agentpaw-logo.svg — see that file for the
+    bbox / safe-margin notes. Exported PNGs:
+      agentpaw-logo-mono-black-*.png  (#000000)
+      agentpaw-logo-mono-white-*.png  (#FFFFFF)
+  -->
+  <g fill="currentColor">
+    <path d="M 104 212 A 34 48 0 1 0 172 212 A 34 48 0 1 0 104 212 Z" />
+    <path d="M 174 180 A 38 48 0 1 0 250 180 A 38 48 0 1 0 174 180 Z" />
+    <path d="M 262 180 A 38 48 0 1 0 338 180 A 38 48 0 1 0 262 180 Z" />
+    <path d="M 340 212 A 34 48 0 1 0 408 212 A 34 48 0 1 0 340 212 Z" />
+
+    <path fill-rule="evenodd" clip-rule="evenodd" d="
+      M 155 296
+      C 155 256, 357 256, 357 296
+      C 368 320, 368 350, 338 372
+      A 26 26 0 0 1 286 372
+      C 285 365, 283 365, 282 372
+      A 26 26 0 0 1 230 372
+      C 229 365, 227 365, 226 372
+      A 26 26 0 0 1 174 372
+      C 144 350, 144 320, 155 296 Z" />
+  </g>
+</svg>

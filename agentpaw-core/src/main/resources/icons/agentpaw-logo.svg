@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512"
+     role="img" aria-labelledby="agentpaw-logo-title">
+  <title id="agentpaw-logo-title">AgentPaw</title>
+
+  <!--
+    AgentPaw App Logo — "paw print".
+
+    Concept
+      A clean emoji-style paw print: four rounded toe beans set in a gentle
+      arc above a single organic pad that carries three soft lobes at its base
+      (the classic 🐾 silhouette). No literal "chip" or "sensor" geometry — the
+      agent half of the brand is carried by the tech gradient and the name.
+
+    Geometry (512 x 512 grid)
+      artwork bbox .... x 104..408  y 132..398
+      safe margin ..... 104px min (20.3%) left/right — generous, the mark stays
+                        crisp even when a launcher crops the canvas
+      toe beans ....... outer pair rx34/ry48 @ (138,212) (374,212)
+                        inner pair rx38/ry48 @ (212,180) (300,180)
+      pad ............. organic dome + three bottom lobes (r26), centred 256
+      gap toe row ↔ pad is ~28px so the two clusters never fuse at small sizes
+
+    Colour
+      gradient indigo #4F46E5 -> violet #7C3AED -> purple #9333EA (135deg)
+      For single-colour use see agentpaw-logo-mono.svg.
+  -->
+  <defs>
+    <linearGradient id="agentpaw-brand-gradient" x1="64" y1="64" x2="448" y2="448"
+                    gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#4F46E5" />
+      <stop offset="0.52" stop-color="#7C3AED" />
+      <stop offset="1" stop-color="#9333EA" />
+    </linearGradient>
+  </defs>
+
+  <g fill="url(#agentpaw-brand-gradient)">
+    <!-- toe beans: outer pair smaller + lower, forming a soft splayed arc -->
+    <path d="M 104 212 A 34 48 0 1 0 172 212 A 34 48 0 1 0 104 212 Z" />
+    <path d="M 174 180 A 38 48 0 1 0 250 180 A 38 48 0 1 0 174 180 Z" />
+    <path d="M 262 180 A 38 48 0 1 0 338 180 A 38 48 0 1 0 262 180 Z" />
+    <path d="M 340 212 A 34 48 0 1 0 408 212 A 34 48 0 1 0 340 212 Z" />
+
+    <!-- main pad: rounded dome on top, three soft lobes at the base -->
+    <path fill-rule="evenodd" clip-rule="evenodd" d="
+      M 155 296
+      C 155 256, 357 256, 357 296
+      C 368 320, 368 350, 338 372
+      A 26 26 0 0 1 286 372
+      C 285 365, 283 365, 282 372
+      A 26 26 0 0 1 230 372
+      C 229 365, 227 365, 226 372
+      A 26 26 0 0 1 174 372
+      C 144 350, 144 320, 155 296 Z" />
+  </g>
+</svg>

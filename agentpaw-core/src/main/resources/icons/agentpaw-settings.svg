@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512"
+     role="img" aria-labelledby="agentpaw-settings-title">
+  <title id="agentpaw-settings-title">AgentPaw settings</title>
+
+  <!--
+    AgentPaw Settings Logo — "gear + paw print".
+
+    Concept
+      A five-tooth gear carries a shrunken AgentPaw print in its centre: the
+      gear says configuration, the print keeps it unmistakably AgentPaw. The
+      teeth are filled shapes rotated by 72 degrees, not a dashed stroke — at
+      16px a stroked ring loses its teeth and reads as a blurry circle.
+
+    Construction (512 x 512 grid)
+      disc ............. r=194 (the gear body)
+      teeth ............ 5 x 110x70 r=22, centred at r=231, every 72 degrees
+      window ........... r=126 punched out with fill-rule evenodd, so the
+                         background shows through and the mark sits happily
+                         on both light and dark surfaces
+      inner print ...... the same emoji-style paw as agentpaw-logo.svg, scaled
+                         to 0.62 and centred at (256,256) to fit the window
+      artwork bbox ..... 34 .. 478 (tooth tips), safe margin 34px = 6.6%
+
+    Colour (duotone)
+      gear ..... #4F46E5 (brand indigo)
+      print .... #9333EA (brand purple)
+      For single-colour / tintable use see agentpaw-settings-mono.svg.
+  -->
+  <g fill="#4F46E5">
+    <!-- five teeth -->
+    <rect x="201" y="25" width="110" height="70" rx="22" />
+    <rect x="201" y="25" width="110" height="70" rx="22" transform="rotate(72 256 256)" />
+    <rect x="201" y="25" width="110" height="70" rx="22" transform="rotate(144 256 256)" />
+    <rect x="201" y="25" width="110" height="70" rx="22" transform="rotate(216 256 256)" />
+    <rect x="201" y="25" width="110" height="70" rx="22" transform="rotate(288 256 256)" />
+
+    <!-- gear disc with the centre window punched through -->
+    <path fill-rule="evenodd" clip-rule="evenodd"
+          d="M256 62A194 194 0 1 0 256 450A194 194 0 1 0 256 62Z
+             M256 130A126 126 0 1 0 256 382A126 126 0 1 0 256 130Z" />
+  </g>
+
+  <g fill="#9333EA">
+    <!-- centre paw print, emoji-style, scaled to sit inside the window -->
+    <path d="M 161.76 223.14 A 21.08 29.76 0 1 0 203.92 223.14 A 21.08 29.76 0 1 0 161.76 223.14 Z" />
+    <path d="M 205.16 203.3 A 23.56 29.76 0 1 0 252.28 203.3 A 23.56 29.76 0 1 0 205.16 203.3 Z" />
+    <path d="M 259.72 203.3 A 23.56 29.76 0 1 0 306.84 203.3 A 23.56 29.76 0 1 0 259.72 203.3 Z" />
+    <path d="M 308.08 223.14 A 21.08 29.76 0 1 0 350.24 223.14 A 21.08 29.76 0 1 0 308.08 223.14 Z" />
+
+    <path fill-rule="evenodd" clip-rule="evenodd" d="
+      M 193.38 275.22
+      C 193.38 250.42, 318.62 250.42, 318.62 275.22
+      C 325.44 290.1, 325.44 308.7, 306.84 322.34
+      A 16.12 16.12 0 0 1 274.6 322.34
+      C 273.98 318, 272.74 318, 272.12 322.34
+      A 16.12 16.12 0 0 1 239.88 322.34
+      C 239.26 318, 238.02 318, 237.4 322.34
+      A 16.12 16.12 0 0 1 205.16 322.34
+      C 186.56 308.7, 186.56 290.1, 193.38 275.22 Z" />
+  </g>
+</svg>
