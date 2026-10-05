@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512"
+     role="img" aria-labelledby="agentpaw-settings-mono-title" color="#18181B">
+  <title id="agentpaw-settings-mono-title">AgentPaw settings</title>
+
+  <!--
+    AgentPaw Settings Logo, single-colour variant.
+
+    Gear and paw print are one flat colour driven by `currentColor`, which is
+    what you want inside menus / toolbars / config panels: the icon simply
+    follows the content colour of its slot and themes for free.
+
+    Geometry is identical to agentpaw-settings.svg. Exported PNGs:
+      agentpaw-settings-mono-black-*.png  (#000000)
+      agentpaw-settings-mono-white-*.png  (#FFFFFF)
+  -->
+  <g fill="currentColor">
+    <rect x="201" y="25" width="110" height="70" rx="22" />
+    <rect x="201" y="25" width="110" height="70" rx="22" transform="rotate(72 256 256)" />
+    <rect x="201" y="25" width="110" height="70" rx="22" transform="rotate(144 256 256)" />
+    <rect x="201" y="25" width="110" height="70" rx="22" transform="rotate(216 256 256)" />
+    <rect x="201" y="25" width="110" height="70" rx="22" transform="rotate(288 256 256)" />
+
+    <path fill-rule="evenodd" clip-rule="evenodd"
+          d="M256 62A194 194 0 1 0 256 450A194 194 0 1 0 256 62Z
+             M256 130A126 126 0 1 0 256 382A126 126 0 1 0 256 130Z" />
+
+    <path d="M 161.76 223.14 A 21.08 29.76 0 1 0 203.92 223.14 A 21.08 29.76 0 1 0 161.76 223.14 Z" />
+    <path d="M 205.16 203.3 A 23.56 29.76 0 1 0 252.28 203.3 A 23.56 29.76 0 1 0 205.16 203.3 Z" />
+    <path d="M 259.72 203.3 A 23.56 29.76 0 1 0 306.84 203.3 A 23.56 29.76 0 1 0 259.72 203.3 Z" />
+    <path d="M 308.08 223.14 A 21.08 29.76 0 1 0 350.24 223.14 A 21.08 29.76 0 1 0 308.08 223.14 Z" />
+
+    <path fill-rule="evenodd" clip-rule="evenodd" d="
+      M 193.38 275.22
+      C 193.38 250.42, 318.62 250.42, 318.62 275.22
+      C 325.44 290.1, 325.44 308.7, 306.84 322.34
+      A 16.12 16.12 0 0 1 274.6 322.34
+      C 273.98 318, 272.74 318, 272.12 322.34
+      A 16.12 16.12 0 0 1 239.88 322.34
+      C 239.26 318, 238.02 318, 237.4 322.34
+      A 16.12 16.12 0 0 1 205.16 322.34
+      C 186.56 308.7, 186.56 290.1, 193.38 275.22 Z" />
+  </g>
+</svg>

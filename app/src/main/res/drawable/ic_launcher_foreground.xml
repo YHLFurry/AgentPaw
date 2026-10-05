@@ -1,13 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  AgentPaw app icon — a beast paw print.
+  AgentPaw app icon — the brand paw print (matches agentpaw-logo.svg).
 
-  Drawn on the 108x108 adaptive-icon canvas. The inner 72x72dp region
-  (18..90 on both axes) is the safe zone, so every shape below stays inside it.
+  Drawn on the 108x108 adaptive-icon canvas; the guaranteed-safe mask area is
+  the inner 66dp circle (radius 33 around 54,54). The brand geometry lives on
+  a 512x512 grid (see agentpaw-logo.svg), embedded here via a 0.2 scale group:
+  every point (x,y) maps to (0.2x + 2.8, 0.2y + 1), which centres the artwork
+  bbox x 104..408 / y 132..398 at (54,54) and keeps all ink inside the circle.
 
   All fills are #FFFFFF on purpose:
-    - the launcher can tint the foreground for themed icons
-    - the foreground composites cleanly over the gradient background layer
+    - the foreground composites over the gradient background layer
+    - the same drawable is the <monochrome> layer, which the launcher tints
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
@@ -15,29 +18,36 @@
     android:viewportWidth="108"
     android:viewportHeight="108">
 
-    <!-- Heel pad: the large pad at the bottom of the print. -->
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M54,64m-17.5,0a17.5,12.5 0,1 1,35 0a17.5,12.5 0,1 1,-35 0" />
+    <group
+        android:scaleX="0.2"
+        android:scaleY="0.2"
+        android:pivotX="0"
+        android:pivotY="0"
+        android:translateX="2.8"
+        android:translateY="1">
 
-    <!--
-      Four toe pads in an arc. The inner pair sits slightly higher and larger
-      than the outer pair, which reads as a paw rather than a row of dots.
-    -->
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M36.8,44.5m-5.4,0a5.4,6.6 0,1 1,10.8 0a5.4,6.6 0,1 1,-10.8 0" />
+        <!-- Toe beans: outer pair smaller + lower, forming a splayed arc. -->
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M104,212 A34,48 0 1 0 172,212 A34,48 0 1 0 104,212 Z" />
 
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M48,38.5m-5.8,0a5.8,7 0,1 1,11.6 0a5.8,7 0,1 1,-11.6 0" />
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M174,180 A38,48 0 1 0 250,180 A38,48 0 1 0 174,180 Z" />
 
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M60,38.5m-5.8,0a5.8,7 0,1 1,11.6 0a5.8,7 0,1 1,-11.6 0" />
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M262,180 A38,48 0 1 0 338,180 A38,48 0 1 0 262,180 Z" />
 
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M71.2,44.5m-5.4,0a5.4,6.6 0,1 1,10.8 0a5.4,6.6 0,1 1,-10.8 0" />
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M340,212 A34,48 0 1 0 408,212 A34,48 0 1 0 340,212 Z" />
+
+        <!-- Main pad: rounded dome on top, three soft lobes at the base. -->
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M155,296 C155,256 357,256 357,296 C368,320 368,350 338,372 A26,26 0 0 1 286,372 C285,365 283,365 282,372 A26,26 0 0 1 230,372 C229,365 227,365 226,372 A26,26 0 0 1 174,372 C144,350 144,320 155,296 Z" />
+
+    </group>
 
 </vector>
