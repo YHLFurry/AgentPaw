@@ -6,7 +6,10 @@
       the window a sensible background before the first frame is drawn.
     -->
     <style name="Theme.AgentPaw" parent="android:Theme.Material.Light.NoActionBar">
-        <item name="android:windowBackground">@color/seed_secondary</item>
+        <!-- 窗口底色使用系统标准背景色。禁止使用品牌色（如 seed_secondary）：
+             首帧前的窗口底色会被整屏渲染，亮紫色既突兀，也会在部分设备
+             （Adreno + Android 15/16 dVRR）上放大首帧渲染卡顿。 -->
+        <item name="android:windowBackground">?android:attr/colorBackground</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
         <item name="android:windowLightStatusBar">true</item>

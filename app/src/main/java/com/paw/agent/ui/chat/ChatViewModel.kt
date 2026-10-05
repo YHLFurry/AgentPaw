@@ -45,6 +45,12 @@ class ChatViewModel(
     private var stepCount = 0
     private var maxSteps = 15
 
+    /**
+     * 防重入标识：stop() 与 AgentExecutionController.stopCallback 互相回调时，
+     * 保证同一时刻只有最外层的 stop() 执行真正的停止逻辑，避免无限递归。
+     */
+    private var isStopping = false
+
     init {
         AgentExecutionController.registerStopCallback {
             stop()
@@ -196,13 +202,25 @@ class ChatViewModel(
     }
 
     fun stop() {
-        cancelled = true
-        runJob?.cancel()
-        runJob = null
-        // 同步停止无障碍操作：中止进行中/后续手势，确保"停止"立即生效
-        com.paw.agent.device.accessibility.AgentAccessibilityService.instance?.requestUserStop()
-        AgentExecutionController.requestStop()
-        _uiState.value = _uiState.value.copy(isGenerating = false)
+        // stop() 内部会调用 AgentExecutionController.requestStop()，后者又会触发
+        // init 中注册的 stopCallback 反向回调 stop()。若无保护，两个方法会无限
+        // 互调直至 StackOverflowError（点击"新会话/清空会话/停止"即崩溃）。
+        // 这里用 isStopping 保证重入的 stop() 直接返回，递归链最多走一层。
+        if (isStopping) return
+        isStopping = true
+        try {
+            cancelled = true
+            runJob?.cancel()
+            runJob = null
+            // 同步停止无障碍操作：中止进行中/后续手势，确保"停止"立即生效
+            com.paw.agent.device.accessibility.AgentAccessibilityService.instance?.requestUserStop()
+            // 回调链：requestStop() -> stopCallback -> stop()，重入调用会被
+            // 上面的 isStopping 拦下，不再继续反向递归
+            AgentExecutionController.requestStop()
+            _uiState.value = _uiState.value.copy(isGenerating = false)
+        } finally {
+            isStopping = false
+        }
     }
 
     fun newConversation() {

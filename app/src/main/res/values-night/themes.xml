@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <style name="Theme.AgentPaw" parent="android:Theme.Material.NoActionBar">
-        <item name="android:windowBackground">@color/seed_secondary</item>
+        <!-- 同 values/themes.xml：窗口底色使用系统标准背景色（暗色） -->
+        <item name="android:windowBackground">?android:attr/colorBackground</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
         <item name="android:windowLightStatusBar">false</item>
