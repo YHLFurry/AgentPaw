@@ -65,6 +65,8 @@ fun LlmSettingsScreen(
     onTemperatureChange: (Float) -> Unit,
     onTopPChange: (Float) -> Unit,
     onMaxTokensChange: (Int) -> Unit,
+    onMaxToolRoundsChange: (Int) -> Unit = {},
+    onVisionResolutionModeChange: (String) -> Unit = {},
     onStreamChange: (Boolean) -> Unit,
     onSystemPromptChange: (String) -> Unit,
     onToggleApiKeyVisibility: () -> Unit,
@@ -244,6 +246,129 @@ fun LlmSettingsScreen(
                     minLines = 3,
                     maxLines = 8,
                     modifier = Modifier.fillMaxWidth(),
+                )
+            }
+
+            // ---- agent execution & vision ----
+            SettingsSection(title = "Agent 手机控制与视觉策略") {
+                SliderRow(
+                    label = "最大执行步数 (Max Rounds)",
+                    value = state.maxToolRounds.toFloat(),
+                    valueRange = 5f..50f,
+                    steps = 44,
+                    display = "${state.maxToolRounds} 步",
+                    onValueChange = { onMaxToolRoundsChange(it.roundToInt()) },
+                )
+
+                Spacer(Modifier.height(12.dp))
+
+                Text(
+                    text = "截图分辨率智能策略 (Adaptive Resolution)",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = "自动按任务复杂度自适应缩放以节省 Token 并加速响应，必要时切至高清",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.outline,
+                )
+                Spacer(Modifier.height(8.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    val modes = listOf("AUTO" to "智能自适应", "FAST" to "极速省流", "HIGH" to "高精细节")
+                    modes.forEach { (modeKey, modeTitle) ->
+                        val isSelected = state.visionResolutionMode == modeKey
+                        Card(
+                            onClick = { onVisionResolutionModeChange(modeKey) },
+                            modifier = Modifier.weight(1f),
+                            shape = MaterialTheme.shapes.medium,
+                            colors = CardDefaults.cardColors(
+                                containerColor = if (isSelected) {
+                                    MaterialTheme.colorScheme.secondaryContainer
+                                } else {
+                                    MaterialTheme.colorScheme.surfaceContainerHigh
+                                },
+                            ),
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 10.dp, horizontal = 4.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                            ) {
+                                Text(
+                                    text = modeTitle,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = if (isSelected) {
+                                        MaterialTheme.colorScheme.onSecondaryContainer
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    },
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ---- device & system permissions ----
+            val context = androidx.compose.ui.platform.LocalContext.current
+            val permRefreshTick = remember { androidx.compose.runtime.mutableIntStateOf(0) }
+            androidx.lifecycle.compose.LifecycleEventEffect(androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                permRefreshTick.intValue++
+            }
+
+            val isAccessibilityEnabled = remember(permRefreshTick.intValue) {
+                com.paw.agent.device.DevicePermissionManager.isAccessibilityServiceEnabled(context)
+            }
+            val isShizukuRunning = remember(permRefreshTick.intValue) {
+                com.paw.agent.device.DevicePermissionManager.isShizukuRunning()
+            }
+            val hasShizukuPermission = remember(permRefreshTick.intValue) {
+                com.paw.agent.device.DevicePermissionManager.hasShizukuPermission()
+            }
+            val hasOverlayPermission = remember(permRefreshTick.intValue) {
+                com.paw.agent.device.DevicePermissionManager.canDrawOverlays(context)
+            }
+
+            SettingsSection(title = "手机控制与系统权限") {
+                PermissionItem(
+                    title = "无障碍服务 (Accessibility)",
+                    subtitle = "核心控制底座，用于执行界面点击、滑动、按键及截屏",
+                    isGranted = isAccessibilityEnabled,
+                    statusText = if (isAccessibilityEnabled) "已启用" else "未开启",
+                    actionText = "去开启",
+                    onAction = { com.paw.agent.device.DevicePermissionManager.openAccessibilitySettings(context) },
+                )
+
+                Spacer(Modifier.height(10.dp))
+
+                PermissionItem(
+                    title = "Shizuku 极速提权通道",
+                    subtitle = if (!isShizukuRunning) "Shizuku 服务未运行 (可选，未开启时自动使用无障碍)" else "免 Root 极速截屏、无感静默输入与前台感知",
+                    isGranted = hasShizukuPermission,
+                    statusText = when {
+                        hasShizukuPermission -> "已授权"
+                        isShizukuRunning -> "待授权"
+                        else -> "未运行"
+                    },
+                    actionText = if (isShizukuRunning && !hasShizukuPermission) "申请授权" else null,
+                    onAction = { com.paw.agent.device.DevicePermissionManager.requestShizukuPermission() },
+                )
+
+                Spacer(Modifier.height(10.dp))
+
+                PermissionItem(
+                    title = "前台控制悬浮胶囊 (Overlay)",
+                    subtitle = "操作其他 App 时展示实时状态胶囊与随时一键停止打断",
+                    isGranted = hasOverlayPermission,
+                    statusText = if (hasOverlayPermission) "已开启" else "未开启",
+                    actionText = "去授权",
+                    onAction = { com.paw.agent.device.DevicePermissionManager.openOverlaySettings(context) },
                 )
             }
 
@@ -478,3 +603,78 @@ private fun errorText(key: String): String = when (key) {
 
 private fun formatTwoDecimals(value: Float): String =
     ((value * 100).roundToInt() / 100f).toString()
+
+@Composable
+private fun PermissionItem(
+    title: String,
+    subtitle: String,
+    isGranted: Boolean,
+    statusText: String,
+    actionText: String?,
+    onAction: () -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.medium,
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        ),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Card(
+                        shape = MaterialTheme.shapes.small,
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (isGranted) {
+                                MaterialTheme.colorScheme.primaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.surfaceVariant
+                            },
+                        ),
+                    ) {
+                        Text(
+                            text = statusText,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (isGranted) {
+                                MaterialTheme.colorScheme.onPrimaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                        )
+                    }
+                }
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            if (!isGranted && actionText != null) {
+                Spacer(Modifier.width(8.dp))
+                OutlinedButton(
+                    onClick = onAction,
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                ) {
+                    Text(text = actionText, style = MaterialTheme.typography.labelSmall)
+                }
+            }
+        }
+    }
+}
+

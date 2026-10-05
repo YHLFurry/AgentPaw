@@ -56,6 +56,7 @@ data class Message(
     val error: String? = null,
     val toolCalls: List<ToolCall> = emptyList(),
     val toolCallId: String? = null,
+    val images: List<String> = emptyList(),
     val createdAt: Long = 0L,
 ) {
     val isUser: Boolean get() = role == MessageRole.USER

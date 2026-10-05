@@ -81,7 +81,7 @@ class OpenAiCompatibleClient(
                 val message = parsed.choices.firstOrNull()?.message
                     ?: throw LlmException.EmptyResponse()
 
-                message.content?.takeIf { it.isNotEmpty() }?.let { emit(LlmChunk.Delta(it)) }
+                message.content?.asString()?.takeIf { it.isNotEmpty() }?.let { emit(LlmChunk.Delta(it)) }
 
                 message.toolCalls?.takeIf { it.isNotEmpty() }?.let { calls ->
                     emit(

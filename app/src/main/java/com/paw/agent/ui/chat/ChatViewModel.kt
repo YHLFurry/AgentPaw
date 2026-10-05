@@ -20,6 +20,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import java.util.UUID
 
+import com.paw.agent.ui.floating.AgentExecutionController
+
 /** Transient UI state that is not part of the conversation itself. */
 data class ChatUiState(
     val draft: String = "",
@@ -40,13 +42,23 @@ class ChatViewModel(
 
     private var runJob: Job? = null
     private var cancelled = false
+    private var stepCount = 0
+    private var maxSteps = 15
 
     init {
+        AgentExecutionController.registerStopCallback {
+            stop()
+        }
         viewModelScope.launch {
             settingsRepository.settings.collect { settings ->
                 _uiState.value = _uiState.value.copy(configReady = settings.llm.isUsable)
             }
         }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        AgentExecutionController.unregisterStopCallback()
     }
 
     fun onDraftChange(value: String) {
@@ -86,6 +98,10 @@ class ChatViewModel(
         )
 
         cancelled = false
+        stepCount = 0
+        maxSteps = config.maxToolRounds
+        AgentExecutionController.markStarted(maxSteps)
+
         runJob = viewModelScope.launch {
             try {
                 agent.run(
@@ -98,6 +114,7 @@ class ChatViewModel(
                 conversationRepository.updateMessage(assistantId) {
                     it.copy(status = MessageStatus.CANCELLED)
                 }
+                AgentExecutionController.requestStop()
                 throw e
             } finally {
                 _uiState.value = _uiState.value.copy(isGenerating = false)
@@ -112,25 +129,65 @@ class ChatViewModel(
                 text = event.message.content,
             )
 
-            is AgentEvent.Completed -> conversationRepository.updateMessage(assistantId) {
-                it.copy(content = event.message.content, status = MessageStatus.COMPLETE)
+            is AgentEvent.Completed -> {
+                conversationRepository.updateMessage(assistantId) {
+                    it.copy(content = event.message.content, status = MessageStatus.COMPLETE)
+                }
+                AgentExecutionController.markCompleted()
             }
 
-            is AgentEvent.Failed -> conversationRepository.updateMessage(assistantId) {
-                it.copy(
-                    content = event.message.content.ifBlank { it.content },
-                    status = MessageStatus.FAILED,
-                    error = event.message.error,
+            is AgentEvent.Failed -> {
+                conversationRepository.updateMessage(assistantId) {
+                    it.copy(
+                        content = event.message.content.ifBlank { it.content },
+                        status = MessageStatus.FAILED,
+                        error = event.message.error,
+                    )
+                }
+                AgentExecutionController.markFailed(event.message.error ?: "执行失败")
+            }
+
+            is AgentEvent.Cancelled -> {
+                conversationRepository.updateMessage(assistantId) {
+                    it.copy(status = MessageStatus.CANCELLED)
+                }
+                AgentExecutionController.requestStop()
+            }
+
+            is AgentEvent.ToolStarted -> {
+                stepCount++
+                val actionDesc = "${event.call.name} ${event.call.arguments.take(40)}"
+                AgentExecutionController.updateProgress(stepCount, maxSteps, actionDesc)
+
+                conversationRepository.addMessage(
+                    Message(
+                        id = event.call.id,
+                        role = MessageRole.TOOL,
+                        content = "⚙ 正在执行: ${event.call.name} ${event.call.arguments.take(100)}",
+                        toolCallId = event.call.id,
+                        status = MessageStatus.STREAMING,
+                        createdAt = System.currentTimeMillis(),
+                    ),
                 )
             }
 
-            is AgentEvent.Cancelled -> conversationRepository.updateMessage(assistantId) {
-                it.copy(status = MessageStatus.CANCELLED)
+            is AgentEvent.ToolFinished -> {
+                val briefContent = if (event.result.content.length > 200) {
+                    event.result.content.take(200) + "…"
+                } else {
+                    event.result.content
+                }
+                conversationRepository.updateMessage(event.result.toolCallId) {
+                    it.copy(
+                        content = if (event.result.isError) {
+                            "❌ ${event.result.name} 失败: $briefContent"
+                        } else {
+                            "✔ ${event.result.name}: $briefContent"
+                        },
+                        status = if (event.result.isError) MessageStatus.FAILED else MessageStatus.COMPLETE,
+                    )
+                }
             }
-
-            // Tool activity is recorded on the assistant turn; the framework
-            // itself stays free of UI concerns.
-            is AgentEvent.ToolStarted, is AgentEvent.ToolFinished -> Unit
         }
 
         _uiState.value = _uiState.value.copy(isGenerating = true)
@@ -140,6 +197,7 @@ class ChatViewModel(
         cancelled = true
         runJob?.cancel()
         runJob = null
+        AgentExecutionController.requestStop()
         _uiState.value = _uiState.value.copy(isGenerating = false)
     }
 

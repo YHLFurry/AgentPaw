@@ -1,6 +1,7 @@
 # Gradle files
 .gradle/
 build/
+**/build/
 .kotlin/
 
 # Local configuration file (sdk path, etc)
@@ -21,9 +22,10 @@ captures/
 *.apk
 output-metadata.json
 
-# IntelliJ
+# IntelliJ / Android Studio / IDE
 *.iml
 .idea/
+.vscode/
 misc.xml
 deploymentTargetDropDown.xml
 render.experimental.xml
@@ -34,9 +36,11 @@ google-services.json
 # Android Profiling
 *.hprof
 
-# OS
+# OS files
 .DS_Store
 Thumbs.db
 
-# Local agent state
+# Local agent & workspace caches
 .workbuddy/
+.gemini/
+.agents/

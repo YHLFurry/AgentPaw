@@ -1,6 +1,5 @@
 package com.paw.agent.core.llm
 
-import androidx.compose.runtime.Immutable
 import kotlinx.serialization.Serializable
 
 /**
@@ -22,6 +21,13 @@ enum class LlmProvider(
         displayName = "OpenAI",
         defaultBaseUrl = "https://api.openai.com/v1",
         defaultModel = "gpt-4o-mini",
+        requiresApiKey = true,
+    ),
+
+    QWEN(
+        displayName = "Qwen / DashScope",
+        defaultBaseUrl = "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        defaultModel = "qwen-vl-max",
         requiresApiKey = true,
     ),
 
@@ -73,7 +79,6 @@ enum class LlmProvider(
  * Everything needed to talk to a model. Assembled from the user's settings screen
  * and passed to the client on every call.
  */
-@Immutable
 data class LlmConfig(
     val provider: LlmProvider = LlmProvider.CUSTOM,
     val baseUrl: String = "",
@@ -82,6 +87,8 @@ data class LlmConfig(
     val temperature: Float = 0.7f,
     val topP: Float = 1.0f,
     val maxTokens: Int = 2048,
+    val maxToolRounds: Int = 15,
+    val visionResolutionMode: String = "AUTO",
     val stream: Boolean = true,
     val systemPrompt: String = DEFAULT_SYSTEM_PROMPT,
     val tools: List<com.paw.agent.core.model.ToolDefinition> = emptyList(),
@@ -93,7 +100,17 @@ data class LlmConfig(
 
     companion object {
         const val DEFAULT_SYSTEM_PROMPT =
-            "You are AgentPaw, a helpful assistant running on an Android phone. " +
-                "Be concise, accurate, and honest about what you do not know."
+            "You are AgentPaw, an autonomous AI assistant operating an Android mobile device.\n" +
+            "You can interact with apps, read screen content, and perform multi-step workflows using available Tools and Skills.\n\n" +
+            "Core Guidelines:\n" +
+            "1. Coordinate System: All screen coordinates (x, y) are normalized integers in [0, 1000]. (0, 0) is top-left, (1000, 1000) is bottom-right.\n" +
+            "2. Vision & Screen State: Call `take_screenshot` (mode='AUTO' for balanced tokens, 'FAST' for high-speed triage, or 'HIGH'/crop_roi for fine details) or `get_screen_state` to observe the interface before acting.\n" +
+            "3. Skills First for Efficiency:\n" +
+            "   - Use `skill_scroll_and_find` to locate items in long lists without repeated screenshots.\n" +
+            "   - Use `skill_open_and_search` for direct app search workflows.\n" +
+            "   - Use `skill_return_home` when resetting or switching contexts.\n" +
+            "4. Interaction Tools: Use `tap`, `double_tap`, `long_press`, `swipe`, `input_text`, and `key_action` ('BACK', 'HOME', 'RECENTS', 'ENTER'). Use `wait_seconds` if an app is loading.\n" +
+            "5. Safety Red Line: NEVER type payment passwords, PINs, or confirm payments. Pause and ask the user to complete sensitive credentials.\n" +
+            "6. Concise Feedback: Briefly explain what you are doing on each step and provide a clear confirmation upon task completion."
     }
 }

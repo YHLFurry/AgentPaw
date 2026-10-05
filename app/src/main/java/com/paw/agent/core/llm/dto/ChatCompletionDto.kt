@@ -1,8 +1,18 @@
 package com.paw.agent.core.llm.dto
 
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.descriptors.buildClassSerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonDecoder
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonEncoder
+import kotlinx.serialization.json.JsonPrimitive
 
 /*
  * Wire format for the OpenAI chat-completions API. Every provider preset in
@@ -24,10 +34,94 @@ data class ChatCompletionRequest(
 @Serializable
 data class ChatMessage(
     val role: String,
-    val content: String? = null,
+    val content: ChatMessageContent? = null,
     @SerialName("tool_calls") val toolCalls: List<ToolCallDto>? = null,
     @SerialName("tool_call_id") val toolCallId: String? = null,
+) {
+    constructor(
+        role: String,
+        content: String?,
+        toolCalls: List<ToolCallDto>? = null,
+        toolCallId: String? = null,
+    ) : this(
+        role = role,
+        content = content?.let { ChatMessageContent.Text(it) },
+        toolCalls = toolCalls,
+        toolCallId = toolCallId,
+    )
+
+    val textContent: String? get() = content?.asString()
+}
+
+@Serializable(with = ChatMessageContentSerializer::class)
+sealed interface ChatMessageContent {
+    fun asString(): String
+
+    data class Text(val value: String) : ChatMessageContent {
+        override fun asString(): String = value
+    }
+
+    data class Parts(val parts: List<ContentPart>) : ChatMessageContent {
+        override fun asString(): String =
+            parts.filterIsInstance<ContentPart.TextPart>().joinToString("\n") { it.text }
+    }
+}
+
+@Serializable
+sealed interface ContentPart {
+    @Serializable
+    @SerialName("text")
+    data class TextPart(val text: String) : ContentPart
+
+    @Serializable
+    @SerialName("image_url")
+    data class ImagePart(
+        @SerialName("image_url") val imageUrl: ImageUrl,
+    ) : ContentPart
+}
+
+@Serializable
+data class ImageUrl(
+    val url: String,
+    val detail: String? = "auto",
 )
+
+object ChatMessageContentSerializer : KSerializer<ChatMessageContent> {
+    override val descriptor: SerialDescriptor =
+        buildClassSerialDescriptor("ChatMessageContent")
+
+    override fun serialize(encoder: Encoder, value: ChatMessageContent) {
+        val jsonEncoder = encoder as? JsonEncoder
+            ?: throw IllegalStateException("This serializer can only be used with Json")
+        when (value) {
+            is ChatMessageContent.Text -> jsonEncoder.encodeJsonElement(JsonPrimitive(value.value))
+            is ChatMessageContent.Parts -> {
+                val element = jsonEncoder.json.encodeToJsonElement(
+                    ListSerializer(ContentPart.serializer()),
+                    value.parts,
+                )
+                jsonEncoder.encodeJsonElement(element)
+            }
+        }
+    }
+
+    override fun deserialize(decoder: Decoder): ChatMessageContent {
+        val jsonDecoder = decoder as? JsonDecoder
+            ?: throw IllegalStateException("This serializer can only be used with Json")
+        val element = jsonDecoder.decodeJsonElement()
+        return when (element) {
+            is JsonPrimitive -> ChatMessageContent.Text(element.content)
+            is JsonArray -> {
+                val parts = jsonDecoder.json.decodeFromJsonElement(
+                    ListSerializer(ContentPart.serializer()),
+                    element,
+                )
+                ChatMessageContent.Parts(parts)
+            }
+            else -> ChatMessageContent.Text(element.toString())
+        }
+    }
+}
 
 @Serializable
 data class ToolCallDto(

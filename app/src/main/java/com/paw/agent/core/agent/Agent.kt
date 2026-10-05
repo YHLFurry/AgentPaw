@@ -18,6 +18,9 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * Events emitted by [Agent.run] while it works through a turn.
@@ -74,6 +77,11 @@ class Agent(
         var assistantId: String? = null
         var buffer = StringBuilder()
 
+        val effectiveMaxRounds = if (this@Agent.maxToolRounds != DEFAULT_MAX_TOOL_ROUNDS) {
+            this@Agent.maxToolRounds
+        } else {
+            config.maxToolRounds.takeIf { it > 0 } ?: DEFAULT_MAX_TOOL_ROUNDS
+        }
         var round = 0
         while (true) {
             currentCoroutineContext().ensureActive()
@@ -83,12 +91,12 @@ class Agent(
                 return@flow
             }
 
-            if (round > maxToolRounds) {
+            if (round > effectiveMaxRounds) {
                 val msg = currentAssistant(
                     buffer,
                     assistantId,
                     MessageStatus.FAILED,
-                    "Stopped after $maxToolRounds tool rounds",
+                    "Stopped after $effectiveMaxRounds tool rounds",
                 )
                 emit(AgentEvent.Failed(msg))
                 return@flow
@@ -164,7 +172,7 @@ class Agent(
                 emit(AgentEvent.ToolStarted(call))
                 val result = executeTool(call, context)
                 emit(AgentEvent.ToolFinished(result))
-                workingHistory = workingHistory + result.toMessage()
+                workingHistory = workingHistory + result.toMessages()
             }
 
             round++
@@ -208,9 +216,35 @@ class Agent(
                             WireMessage(role = "system", content = message.content),
                         )
 
-                        MessageRole.USER -> add(
-                            WireMessage(role = "user", content = message.content),
-                        )
+                        MessageRole.USER -> {
+                            if (message.images.isEmpty()) {
+                                add(WireMessage(role = "user", content = message.content))
+                            } else {
+                                val parts = buildList {
+                                    if (message.content.isNotBlank()) {
+                                        add(com.paw.agent.core.llm.dto.ContentPart.TextPart(message.content))
+                                    }
+                                    message.images.forEach { img ->
+                                        val url = if (img.startsWith("data:") || img.startsWith("http://") || img.startsWith("https://")) {
+                                            img
+                                        } else {
+                                            "data:image/jpeg;base64,$img"
+                                        }
+                                        add(
+                                            com.paw.agent.core.llm.dto.ContentPart.ImagePart(
+                                                imageUrl = com.paw.agent.core.llm.dto.ImageUrl(url = url),
+                                            ),
+                                        )
+                                    }
+                                }
+                                add(
+                                    WireMessage(
+                                        role = "user",
+                                        content = com.paw.agent.core.llm.dto.ChatMessageContent.Parts(parts),
+                                    ),
+                                )
+                            }
+                        }
 
                         MessageRole.ASSISTANT -> {
                             val calls = message.toolCalls
@@ -271,13 +305,43 @@ class Agent(
         error = error,
     )
 
-    private fun ToolResult.toMessage(): Message = Message(
-        id = "${toolCallId}_result",
-        role = MessageRole.TOOL,
-        content = content,
-        toolCallId = toolCallId,
-        status = if (isError) MessageStatus.FAILED else MessageStatus.COMPLETE,
-    )
+    private fun ToolResult.toMessages(): List<Message> {
+        if (content.contains("image_base64")) {
+            val element = runCatching { json.parseToJsonElement(content).jsonObject }.getOrNull()
+            val imageBase64 = element?.get("image_base64")?.jsonPrimitive?.contentOrNull
+            if (!imageBase64.isNullOrBlank()) {
+                val cleanedSummary = buildString {
+                    append("Screenshot taken successfully")
+                    element["width"]?.let { append(" (${it}x${element["height"]}") }
+                    element["mode"]?.let { append(", mode: $it)") } ?: append(")")
+                }
+                val toolMsg = Message(
+                    id = "${toolCallId}_result",
+                    role = MessageRole.TOOL,
+                    content = cleanedSummary,
+                    toolCallId = toolCallId,
+                    status = if (isError) MessageStatus.FAILED else MessageStatus.COMPLETE,
+                )
+                val observationMsg = Message(
+                    id = "${toolCallId}_obs",
+                    role = MessageRole.USER,
+                    content = "[Current Screen Observation]",
+                    images = listOf(imageBase64),
+                    status = MessageStatus.COMPLETE,
+                )
+                return listOf(toolMsg, observationMsg)
+            }
+        }
+        return listOf(
+            Message(
+                id = "${toolCallId}_result",
+                role = MessageRole.TOOL,
+                content = content,
+                toolCallId = toolCallId,
+                status = if (isError) MessageStatus.FAILED else MessageStatus.COMPLETE,
+            ),
+        )
+    }
 
     companion object {
         const val DEFAULT_MAX_TOOL_ROUNDS = 8

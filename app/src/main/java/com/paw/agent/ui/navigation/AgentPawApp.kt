@@ -87,6 +87,8 @@ fun AgentPawApp(
                 onTemperatureChange = settingsViewModel::onTemperatureChange,
                 onTopPChange = settingsViewModel::onTopPChange,
                 onMaxTokensChange = settingsViewModel::onMaxTokensChange,
+                onMaxToolRoundsChange = settingsViewModel::onMaxToolRoundsChange,
+                onVisionResolutionModeChange = settingsViewModel::onVisionResolutionModeChange,
                 onStreamChange = settingsViewModel::onStreamChange,
                 onSystemPromptChange = settingsViewModel::onSystemPromptChange,
                 onToggleApiKeyVisibility = settingsViewModel::toggleApiKeyVisibility,
