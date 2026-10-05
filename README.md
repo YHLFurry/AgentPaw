@@ -185,6 +185,60 @@ user's wallpaper on Android 12+ (toggleable in settings). Below Android 12 it
 falls back to the bundled indigo/violet brand seed that matches the launcher  
 icon. Light and dark themes are both supported, and the app is edge-to-edge.
 
+## `agentpaw-core` library
+
+Everything that makes AgentPaw an agent — the conversation engine and the
+signature capabilities — lives in a reusable Android Library module,
+`agentpaw-core` (`:agentpaw-core`). The `app` module is just the Compose UI
+shell on top of it.
+
+| Package | What you get |
+| ------- | ------------ |
+| `com.paw.agent.core.agent` | the agent loop, tool registry, cancellation, events |
+| `com.paw.agent.core.llm` | OpenAI-compatible client, streaming, multimodal (images) |
+| `com.paw.agent.core.model` | message / conversation model |
+| `com.paw.agent.core.shell` | the sandboxed shell interpreter (`run_script`) |
+| `com.paw.agent.core.tool` | built-in tools: `run_script`, `web_search`, `delegate_task`, Android phone tools |
+| `com.paw.agent.core.skill` | agent skills |
+| `com.paw.agent.core.search` | keyless DuckDuckGo search backend |
+| `com.paw.agent.device` | on-device control: Accessibility, Shizuku, adaptive screenshots |
+
+### Publishing
+
+`agentpaw-core` is published to GitHub Packages
+([packages](https://github.com/YHLFurry/AgentPaw/packages)). The
+*Publish agentpaw-core* workflow runs on every `v*` tag — pushing `v0.1.0`
+publishes version `0.1.0` — and can also be triggered manually from the
+Actions tab.
+
+### Consuming
+
+Add GitHub Packages as a repository (a GitHub token with `read:packages` is
+required to fetch):
+
+```kotlin
+// settings.gradle.kts
+dependencyResolutionManagement {
+    repositories {
+        maven {
+            url = uri("https://maven.pkg.github.com/YHLFurry/AgentPaw")
+            credentials {
+                username = findProperty("gpr.user") as String? // your GitHub username
+                password = findProperty("gpr.key") as String?  // a PAT with read:packages
+            }
+        }
+    }
+}
+```
+
+Then add the dependency:
+
+```kotlin
+dependencies {
+    implementation("com.paw.agent:agentpaw-core:0.1.0")
+}
+```
+
 ## Building
 
 Requires JDK 17+ and the Android SDK (compileSdk 36, minSdk 26).
@@ -193,22 +247,26 @@ Requires JDK 17+ and the Android SDK (compileSdk 36, minSdk 26).
 git clone https://github.com/YHLFurry/AgentPaw.git
 cd AgentPaw
 ./gradlew :app:assembleDebug      # debug APK
-./gradlew :app:testDebugUnitTest  # 56 unit tests
+./gradlew testDebugUnitTest       # all modules, 75 unit tests
 ```
 
 The debug APK lands at `app/build/outputs/apk/debug/app-debug.apk`.
 
 ## Tests
 
-`./gradlew :app:testDebugUnitTest` runs 56 JVM tests, no device needed:
+`./gradlew testDebugUnitTest` runs all 75 JVM tests across both modules, no
+device needed. 74 of them live in `agentpaw-core`:
 
 | Suite                   | Covers                                                        |
 | ----------------------- | ------------------------------------------------------------- |
 | `AgentTest`             | tool dispatch, multi-round loop, cancellation, failure paths  |
 | `InterpreterTest`       | the shell: pipelines, control flow, redirection, and escapes  |
+| `AndroidPhoneToolsTest` | phone tool schemas and controller delegation                  |
+| `BuiltInToolsTest`      | the tools, including sub-agent depth limiting                 |
 | `DuckDuckGoSearchBackendTest` | response parsing against recorded payloads            |
 | `DuckDuckGoSearchBackendLiveTest` | one live call, auto-skipped when offline        |
-| `BuiltInToolsTest`      | the three tools, including sub-agent depth limiting           |
+| `MultimodalDtoTest` / `AdaptiveScreenshotProcessorTest` | image payloads, screenshot downscaling |
+| `AgentExecutionControllerTest` (app) | floating-window execution lifecycle       |
 
 The sandbox tests use a real temp directory rather than mocks, so the path
 guards are genuinely exercised — including attempts to read `/etc/passwd` and
