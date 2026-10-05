@@ -115,5 +115,7 @@ class AgentPawApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         container = AppContainer(this)
+        // 初始化 Shizuku 监听（binder 到达 / 授权结果回调），保证设置页与 Agent 运行期状态实时可用
+        com.paw.agent.device.shizuku.ShizukuInitializer.initialize()
     }
 }

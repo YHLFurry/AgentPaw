@@ -49,6 +49,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.paw.agent.R
 import com.paw.agent.core.llm.LlmProvider
 import kotlin.math.roundToInt
@@ -325,12 +326,11 @@ fun LlmSettingsScreen(
             val isAccessibilityEnabled = remember(permRefreshTick.intValue) {
                 com.paw.agent.device.DevicePermissionManager.isAccessibilityServiceEnabled(context)
             }
-            val isShizukuRunning = remember(permRefreshTick.intValue) {
-                com.paw.agent.device.DevicePermissionManager.isShizukuRunning()
-            }
-            val hasShizukuPermission = remember(permRefreshTick.intValue) {
-                com.paw.agent.device.DevicePermissionManager.hasShizukuPermission()
-            }
+            // Shizuku 状态改为响应式订阅：binder 到达、授权对话框返回后实时刷新
+            val shizukuStatus by com.paw.agent.device.DevicePermissionManager.observeShizukuState()
+                .collectAsStateWithLifecycle()
+            val isShizukuRunning = shizukuStatus != com.paw.agent.device.shizuku.ShizukuStatus.NOT_RUNNING
+            val hasShizukuPermission = shizukuStatus == com.paw.agent.device.shizuku.ShizukuStatus.GRANTED
             val hasOverlayPermission = remember(permRefreshTick.intValue) {
                 com.paw.agent.device.DevicePermissionManager.canDrawOverlays(context)
             }
@@ -349,15 +349,28 @@ fun LlmSettingsScreen(
 
                 PermissionItem(
                     title = "Shizuku 极速提权通道",
-                    subtitle = if (!isShizukuRunning) "Shizuku 服务未运行 (可选，未开启时自动使用无障碍)" else "免 Root 极速截屏、无感静默输入与前台感知",
+                    subtitle = when (shizukuStatus) {
+                        com.paw.agent.device.shizuku.ShizukuStatus.GRANTED ->
+                            "已授权：免 Root 极速截屏、无感静默输入与前台感知"
+                        com.paw.agent.device.shizuku.ShizukuStatus.RUNNING_NO_PERMISSION ->
+                            "Shizuku 已运行，等待授权"
+                        com.paw.agent.device.shizuku.ShizukuStatus.NOT_RUNNING ->
+                            "Shizuku 服务未运行 (可选，未开启时自动使用无障碍)，点击按钮打开 Shizuku 应用"
+                    },
                     isGranted = hasShizukuPermission,
                     statusText = when {
                         hasShizukuPermission -> "已授权"
                         isShizukuRunning -> "待授权"
                         else -> "未运行"
                     },
-                    actionText = if (isShizukuRunning && !hasShizukuPermission) "申请授权" else null,
-                    onAction = { com.paw.agent.device.DevicePermissionManager.requestShizukuPermission() },
+                    // 只要未授权就提供按钮：运行中直接拉起授权对话框；未运行则引导打开 Shizuku 应用
+                    actionText = if (!hasShizukuPermission) "申请授权" else null,
+                    onAction = {
+                        val dispatched = com.paw.agent.device.DevicePermissionManager.requestShizukuPermission()
+                        if (!dispatched) {
+                            com.paw.agent.device.DevicePermissionManager.openShizukuApp(context)
+                        }
+                    },
                 )
 
                 Spacer(Modifier.height(10.dp))

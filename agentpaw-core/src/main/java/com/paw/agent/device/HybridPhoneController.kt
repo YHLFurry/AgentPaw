@@ -28,7 +28,14 @@ class HybridPhoneController(
     private val screenHeight: Int
         get() = context.resources.displayMetrics.heightPixels
 
+    /**
+     * 用户是否已通过停止悬浮窗按钮请求停止。
+     * 置位后所有无障碍/Shizuku 交互操作快速失败，保证"停止"立即生效。
+     */
+    private fun userStopRequested(): Boolean = AgentAccessibilityService.isStopRequested
+
     override suspend fun tap(xNormalized: Int, yNormalized: Int): Boolean {
+        if (userStopRequested()) return false
         val x = AdaptiveScreenshotProcessor.toPhysicalX(xNormalized, screenWidth)
         val y = AdaptiveScreenshotProcessor.toPhysicalY(yNormalized, screenHeight)
 
@@ -45,6 +52,7 @@ class HybridPhoneController(
     }
 
     override suspend fun doubleTap(xNormalized: Int, yNormalized: Int): Boolean {
+        if (userStopRequested()) return false
         val x = AdaptiveScreenshotProcessor.toPhysicalX(xNormalized, screenWidth)
         val y = AdaptiveScreenshotProcessor.toPhysicalY(yNormalized, screenHeight)
 
@@ -63,6 +71,7 @@ class HybridPhoneController(
     }
 
     override suspend fun longPress(xNormalized: Int, yNormalized: Int, durationMs: Long): Boolean {
+        if (userStopRequested()) return false
         val x = AdaptiveScreenshotProcessor.toPhysicalX(xNormalized, screenWidth)
         val y = AdaptiveScreenshotProcessor.toPhysicalY(yNormalized, screenHeight)
 
@@ -85,6 +94,7 @@ class HybridPhoneController(
         endYNormalized: Int,
         durationMs: Long,
     ): Boolean {
+        if (userStopRequested()) return false
         val x1 = AdaptiveScreenshotProcessor.toPhysicalX(startXNormalized, screenWidth)
         val y1 = AdaptiveScreenshotProcessor.toPhysicalY(startYNormalized, screenHeight)
         val x2 = AdaptiveScreenshotProcessor.toPhysicalX(endXNormalized, screenWidth)
@@ -103,6 +113,7 @@ class HybridPhoneController(
     }
 
     override suspend fun inputText(text: String, clearBeforeInput: Boolean): Boolean {
+        if (userStopRequested()) return false
         val service = AgentAccessibilityService.instance
         if (service != null) {
             val ok = service.inputText(text, clearBeforeInput)
@@ -116,6 +127,7 @@ class HybridPhoneController(
     }
 
     override suspend fun pressBack(): Boolean {
+        if (userStopRequested()) return false
         val service = AgentAccessibilityService.instance
         if (service != null && service.actionBack()) return true
         if (shizukuController.isAvailable) return shizukuController.keyEvent(4)
@@ -123,6 +135,7 @@ class HybridPhoneController(
     }
 
     override suspend fun pressHome(): Boolean {
+        if (userStopRequested()) return false
         val service = AgentAccessibilityService.instance
         if (service != null && service.actionHome()) return true
         if (shizukuController.isAvailable) return shizukuController.keyEvent(3)
@@ -130,6 +143,7 @@ class HybridPhoneController(
     }
 
     override suspend fun pressRecents(): Boolean {
+        if (userStopRequested()) return false
         val service = AgentAccessibilityService.instance
         if (service != null && service.actionRecents()) return true
         if (shizukuController.isAvailable) return shizukuController.keyEvent(187)
@@ -137,6 +151,7 @@ class HybridPhoneController(
     }
 
     override suspend fun pressEnter(): Boolean {
+        if (userStopRequested()) return false
         if (shizukuController.isAvailable) return shizukuController.keyEvent(66)
         val service = AgentAccessibilityService.instance
         if (service != null) {

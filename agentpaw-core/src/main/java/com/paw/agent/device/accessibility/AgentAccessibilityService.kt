@@ -25,6 +25,27 @@ class AgentAccessibilityService : AccessibilityService() {
     private val currentPackage = AtomicReference<String>("")
     private val currentActivity = AtomicReference<String>("")
 
+    /**
+     * 用户主动停止标志：由停止悬浮窗按钮（AgentStopFloatingButton）触发。
+     * 置位后所有未完成/后续的无障碍手势立即中止。
+     */
+    @Volatile
+    var isStopRequested: Boolean = false
+        private set
+
+    /**
+     * 请求停止所有无障碍操作（停止悬浮窗按钮点击时调用）。
+     * 注意：已派发给系统的手势无法撤销，但结果会被忽略且后续操作全部中止。
+     */
+    fun requestUserStop() {
+        isStopRequested = true
+    }
+
+    /** 清除停止标志，供新一轮任务开始前调用 */
+    fun clearUserStop() {
+        isStopRequested = false
+    }
+
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
@@ -91,6 +112,7 @@ class AgentAccessibilityService : AccessibilityService() {
     }
 
     suspend fun inputText(text: String, clearBeforeInput: Boolean = false): Boolean = withContext(Dispatchers.Main) {
+        if (isStopRequested) return@withContext false
         val root = rootInActiveWindow ?: return@withContext false
         val focused = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: findEditableNode(root)
         if (focused == null) return@withContext false
@@ -203,6 +225,8 @@ class AgentAccessibilityService : AccessibilityService() {
     }
 
     private suspend fun dispatchGestureSuspend(gesture: GestureDescription): Boolean {
+        // 用户已请求停止：不再派发任何新手势
+        if (isStopRequested) return false
         val deferred = CompletableDeferred<Boolean>()
         val dispatched = dispatchGesture(
             gesture,
@@ -217,7 +241,10 @@ class AgentAccessibilityService : AccessibilityService() {
             },
             null,
         )
-        return if (!dispatched) false else deferred.await()
+        if (!dispatched) return false
+        val result = deferred.await()
+        // 手势执行期间用户点了停止：本次结果按失败处理
+        return result && !isStopRequested
     }
 
     companion object {
@@ -226,5 +253,9 @@ class AgentAccessibilityService : AccessibilityService() {
             private set
 
         val isRunning: Boolean get() = instance != null
+
+        /** 类级别读取用户停止标志（无服务实例时视为未停止） */
+        val isStopRequested: Boolean
+            get() = instance?.isStopRequested ?: false
     }
 }

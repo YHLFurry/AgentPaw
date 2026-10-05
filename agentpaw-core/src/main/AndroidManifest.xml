@@ -4,8 +4,26 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+    <!-- Shizuku 授权通道：缺少该权限时 Shizuku Manager 会直接拒绝授权请求 -->
+    <uses-permission android:name="moe.shizuku.manager.permission.API_V23" />
+    <!-- Agent 停止悬浮窗按钮（无障碍操作期间的一键停止） -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
     <application>
+        <!--
+            Shizuku binder 通道：Shizuku API 通过宿主进程中该 ContentProvider 与
+            Shizuku Manager 建立 binder 连接。未声明时 Shizuku.pingBinder() 恒为 false、
+            requestPermission() 直接抛 IllegalStateException，导致永远无法获取授权。
+            authority 必须为 ${applicationId}.shizuku（合并后取宿主 applicationId，含 debug 后缀）。
+        -->
+        <provider
+            android:name="rikka.shizuku.ShizukuProvider"
+            android:authorities="${applicationId}.shizuku"
+            android:multiprocess="false"
+            android:enabled="true"
+            android:exported="true"
+            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
+
         <service
             android:name="com.paw.agent.device.accessibility.AgentAccessibilityService"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
