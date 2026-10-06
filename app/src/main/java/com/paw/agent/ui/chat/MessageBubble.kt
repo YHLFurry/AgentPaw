@@ -51,6 +51,7 @@ import android.widget.Toast
  * One message row. User turns are right-aligned in a filled container; agent
  * turns are left-aligned with a paw avatar, matching the app's identity.
  */
+@Suppress("DEPRECATION")
 @Composable
 fun MessageBubble(
     message: Message,

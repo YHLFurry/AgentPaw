@@ -9,13 +9,17 @@ import kotlinx.coroutines.flow.asStateFlow
  */
 object AgentExecutionController {
 
+    const val UNLIMITED_STEPS = 0
+
     data class ExecutionState(
         val isRunning: Boolean = false,
         val currentStep: Int = 0,
         val maxSteps: Int = 15,
         val currentAction: String = "",
         val isPaused: Boolean = false,
-    )
+    ) {
+        val isUnlimited: Boolean get() = maxSteps <= UNLIMITED_STEPS
+    }
 
     private val _state = MutableStateFlow(ExecutionState())
     val state: StateFlow<ExecutionState> = _state.asStateFlow()

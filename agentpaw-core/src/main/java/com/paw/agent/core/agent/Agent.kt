@@ -77,10 +77,10 @@ class Agent(
         var assistantId: String? = null
         var buffer = StringBuilder()
 
-        val effectiveMaxRounds = if (this@Agent.maxToolRounds != DEFAULT_MAX_TOOL_ROUNDS) {
-            if (this@Agent.maxToolRounds <= 0) Int.MAX_VALUE else this@Agent.maxToolRounds
+        val effectiveMaxRounds: Int? = if (this@Agent.maxToolRounds != DEFAULT_MAX_TOOL_ROUNDS) {
+            if (this@Agent.maxToolRounds <= 0) null else this@Agent.maxToolRounds
         } else {
-            if (config.maxToolRounds <= 0) Int.MAX_VALUE else config.maxToolRounds
+            if (config.maxToolRounds <= 0) null else config.maxToolRounds
         }
         var round = 0
         while (true) {
@@ -91,7 +91,7 @@ class Agent(
                 return@flow
             }
 
-            if (round > effectiveMaxRounds) {
+            if (effectiveMaxRounds != null && round > effectiveMaxRounds) {
                 val msg = currentAssistant(
                     buffer,
                     assistantId,

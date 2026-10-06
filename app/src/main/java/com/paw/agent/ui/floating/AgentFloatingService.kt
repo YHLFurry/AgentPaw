@@ -289,7 +289,7 @@ class AgentFloatingService : Service() {
                 // 计数规则：每 5 步记为 1 格
                 val currentGrid = if (state.currentStep > 0) (state.currentStep + 4) / 5 else 0
                 val stepPrefix = if (state.isRunning) {
-                    if (state.maxSteps <= 0 || state.maxSteps == Int.MAX_VALUE) {
+                    if (state.isUnlimited) {
                         "[第${state.currentStep}步·第${currentGrid}格/无上限] "
                     } else {
                         val totalGrids = if (state.maxSteps % 5 == 0) {

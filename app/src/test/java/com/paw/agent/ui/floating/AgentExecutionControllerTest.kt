@@ -40,15 +40,17 @@ class AgentExecutionControllerTest {
 
     @Test
     fun `unlimited steps (maxSteps = 0) sets state correctly`() {
-        AgentExecutionController.markStarted(maxSteps = 0)
+        AgentExecutionController.markStarted(maxSteps = AgentExecutionController.UNLIMITED_STEPS)
         var state = AgentExecutionController.state.value
         assertTrue(state.isRunning)
         assertEquals(0, state.maxSteps)
+        assertTrue(state.isUnlimited)
 
-        AgentExecutionController.updateProgress(step = 6, maxSteps = 0, action = "swipe 500 800")
+        AgentExecutionController.updateProgress(step = 6, maxSteps = AgentExecutionController.UNLIMITED_STEPS, action = "swipe 500 800")
         state = AgentExecutionController.state.value
         assertEquals(6, state.currentStep)
         assertEquals(0, state.maxSteps)
+        assertTrue(state.isUnlimited)
         assertEquals("swipe 500 800", state.currentAction)
 
         AgentExecutionController.markCompleted()
