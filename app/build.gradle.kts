@@ -7,7 +7,9 @@ plugins {
 
 android {
     namespace = "com.paw.agent"
-    compileSdk = 36
+    // Miuix（miuix-core/shader 等 AAR）声明 minCompileSdk=37，故整体提升到 37；
+    // SDK 37 平台已安装，AGP 8.13.2 仅会给出"推荐 36"的提示，不影响构建。
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.paw.agent"
@@ -77,6 +79,10 @@ dependencies {
     implementation(libs.androidx.navigation.compose)
     implementation(libs.androidx.datastore.preferences)
 
+    // 可选 UI 主题：Miuix（HyperOS 风格）。Material 主题不依赖它，两套主题共存。
+    implementation(libs.miuix.ui)
+    implementation(libs.miuix.preference)
+
     debugImplementation(libs.androidx.ui.tooling)
     debugImplementation(libs.androidx.ui.test.manifest)
 
@@ -87,4 +93,13 @@ dependencies {
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.ui.test.junit4)
+}
+
+// Miuix 的传递依赖会把 kotlin-stdlib 抬到 2.3.x，与本项目的 Kotlin 插件版本不一致；
+// 强制对齐到编译期版本，避免 "compiled with an incompatible version of Kotlin"。
+configurations.all {
+    resolutionStrategy {
+        force("org.jetbrains.kotlin:kotlin-stdlib:2.2.21")
+        force("org.jetbrains.kotlin:kotlin-stdlib-common:2.2.21")
+    }
 }

@@ -4,13 +4,13 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
@@ -19,82 +19,96 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.paw.agent.R
 import com.paw.agent.core.llm.LlmProvider
+import com.paw.agent.data.settings.UiThemeMode
+import com.paw.agent.ui.components.adaptive.AppCard
+import com.paw.agent.ui.components.adaptive.AppCircularProgressIndicator
+import com.paw.agent.ui.components.adaptive.AppDivider
+import com.paw.agent.ui.components.adaptive.AppIcon
+import com.paw.agent.ui.components.adaptive.AppIconButton
+import com.paw.agent.ui.components.adaptive.AppOutlinedButton
+import com.paw.agent.ui.components.adaptive.AppScaffold
+import com.paw.agent.ui.components.adaptive.AppSectionTitle
+import com.paw.agent.ui.components.adaptive.AppSlider
+import com.paw.agent.ui.components.adaptive.AppSnackbarHost
+import com.paw.agent.ui.components.adaptive.AppSnackbarHostState
+import com.paw.agent.ui.components.adaptive.AppSurface
+import com.paw.agent.ui.components.adaptive.AppSwitch
+import com.paw.agent.ui.components.adaptive.AppTabRow
+import com.paw.agent.ui.components.adaptive.AppText
+import com.paw.agent.ui.components.adaptive.AppTextButton
+import com.paw.agent.ui.components.adaptive.AppTextField
+import com.paw.agent.ui.components.adaptive.AppTopAppBar
+import com.paw.agent.ui.components.adaptive.AppButton
+import com.paw.agent.ui.components.adaptive.rememberAppSnackbarHostState
+import com.paw.agent.ui.theme.AppTheme
 import kotlin.math.roundToInt
 
-@OptIn(ExperimentalMaterial3Api::class)
+/** Everything the LLM section can do, grouped so the host screen stays readable. */
+data class LlmSettingsActions(
+    val onProviderChange: (LlmProvider) -> Unit,
+    val onBaseUrlChange: (String) -> Unit,
+    val onApiKeyChange: (String) -> Unit,
+    val onModelChange: (String) -> Unit,
+    val onTemperatureChange: (Float) -> Unit,
+    val onTopPChange: (Float) -> Unit,
+    val onMaxTokensChange: (Int) -> Unit,
+    val onMaxToolRoundsChange: (Int) -> Unit,
+    val onVisionResolutionModeChange: (String) -> Unit,
+    val onStreamChange: (Boolean) -> Unit,
+    val onSystemPromptChange: (String) -> Unit,
+    val onToggleApiKeyVisibility: () -> Unit,
+    val onSave: () -> Unit,
+    val onTestConnection: () -> Unit,
+    val onReset: () -> Unit,
+)
+
+/**
+ * The settings screen: two independent sections behind a tab row.
+ *
+ * The LLM section and the appearance section own separate ViewModels and never
+ * write to each other's state, so editing a model cannot disturb the theme and
+ * switching the theme cannot disturb an in-progress LLM draft.
+ */
 @Composable
-fun LlmSettingsScreen(
-    state: LlmSettingsUiState,
+fun SettingsScreen(
+    llmState: LlmSettingsUiState,
+    llmActions: LlmSettingsActions,
+    appearanceState: AppearanceUiState,
+    appearanceActions: AppearanceActions,
     onBack: () -> Unit,
-    onProviderChange: (LlmProvider) -> Unit,
-    onBaseUrlChange: (String) -> Unit,
-    onApiKeyChange: (String) -> Unit,
-    onModelChange: (String) -> Unit,
-    onTemperatureChange: (Float) -> Unit,
-    onTopPChange: (Float) -> Unit,
-    onMaxTokensChange: (Int) -> Unit,
-    onMaxToolRoundsChange: (Int) -> Unit = {},
-    onVisionResolutionModeChange: (String) -> Unit = {},
-    onStreamChange: (Boolean) -> Unit,
-    onSystemPromptChange: (String) -> Unit,
-    onToggleApiKeyVisibility: () -> Unit,
-    onSave: () -> Unit,
-    onTestConnection: () -> Unit,
-    onReset: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val snackbarHostState = remember { SnackbarHostState() }
-    val savedMessage = stringResource(R.string.settings_saved)
+    var selectedTab by remember { mutableIntStateOf(0) }
+    val snackbarHostState = rememberAppSnackbarHostState()
 
-    LaunchedEffect(state.savedAt) {
-        if (state.savedAt != null) snackbarHostState.showSnackbar(savedMessage)
-    }
-
-    Scaffold(
+    AppScaffold(
         modifier = modifier.fillMaxSize(),
         topBar = {
-            TopAppBar(
-                title = { Text(stringResource(R.string.settings_title)) },
+            AppTopAppBar(
+                title = stringResource(R.string.settings_title),
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(
+                    AppIconButton(onClick = onBack) {
+                        AppIcon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = stringResource(R.string.cd_back),
                         )
@@ -102,353 +116,387 @@ fun LlmSettingsScreen(
                 },
             )
         },
-        snackbarHost = { SnackbarHost(snackbarHostState) },
+        snackbarHost = { AppSnackbarHost(snackbarHostState) },
     ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-        ) {
-            // ---- provider ----
-            SettingsSection(title = stringResource(R.string.settings_section_provider)) {
-                Text(
-                    text = stringResource(R.string.settings_provider),
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(Modifier.height(8.dp))
-                ProviderChips(
-                    selected = state.provider,
-                    onSelect = onProviderChange,
-                )
-            }
-
-            // ---- connection ----
-            SettingsSection(title = stringResource(R.string.settings_section_connection)) {
-                OutlinedTextField(
-                    value = state.baseUrl,
-                    onValueChange = onBaseUrlChange,
-                    label = { Text(stringResource(R.string.settings_base_url)) },
-                    singleLine = true,
-                    isError = state.baseUrlError != null,
-                    supportingText = state.baseUrlError?.let { { Text(errorText(it)) } },
-                    keyboardOptions = KeyboardOptions(
-                        keyboardType = KeyboardType.Uri,
-                        imeAction = ImeAction.Next,
-                    ),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-
-                Spacer(Modifier.height(12.dp))
-
-                OutlinedTextField(
-                    value = state.apiKey,
-                    onValueChange = onApiKeyChange,
-                    label = { Text(stringResource(R.string.settings_api_key)) },
-                    singleLine = true,
-                    isError = state.apiKeyError != null,
-                    supportingText = {
-                        Text(
-                            text = state.apiKeyError?.let { errorText(it) }
-                                ?: stringResource(R.string.settings_api_key_stored),
-                        )
-                    },
-                    visualTransformation = if (state.showApiKey) {
-                        VisualTransformation.None
-                    } else {
-                        PasswordVisualTransformation()
-                    },
-                    trailingIcon = {
-                        IconButton(onClick = onToggleApiKeyVisibility) {
-                            Icon(
-                                imageVector = if (state.showApiKey) {
-                                    Icons.Filled.VisibilityOff
-                                } else {
-                                    Icons.Filled.Visibility
-                                },
-                                contentDescription = stringResource(
-                                    if (state.showApiKey) {
-                                        R.string.settings_hide_api_key
-                                    } else {
-                                        R.string.settings_show_api_key
-                                    },
-                                ),
-                            )
-                        }
-                    },
-                    keyboardOptions = KeyboardOptions(
-                        keyboardType = KeyboardType.Password,
-                        imeAction = ImeAction.Next,
-                    ),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-
-            // ---- model ----
-            SettingsSection(title = stringResource(R.string.settings_section_model)) {
-                OutlinedTextField(
-                    value = state.model,
-                    onValueChange = onModelChange,
-                    label = { Text(stringResource(R.string.settings_model)) },
-                    singleLine = true,
-                    isError = state.modelError != null,
-                    supportingText = state.modelError?.let { { Text(errorText(it)) } },
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-
-                Spacer(Modifier.height(8.dp))
-
-                SwitchRow(
-                    title = stringResource(R.string.settings_stream),
-                    subtitle = stringResource(R.string.settings_stream_summary),
-                    checked = state.stream,
-                    onCheckedChange = onStreamChange,
-                )
-            }
-
-            // ---- sampling ----
-            SettingsSection(title = stringResource(R.string.settings_section_sampling)) {
-                SliderRow(
-                    label = stringResource(R.string.settings_temperature),
-                    value = state.temperature,
-                    valueRange = 0f..2f,
-                    steps = 19,
-                    display = formatTwoDecimals(state.temperature),
-                    onValueChange = onTemperatureChange,
-                )
-
-                SliderRow(
-                    label = stringResource(R.string.settings_top_p),
-                    value = state.topP,
-                    valueRange = 0f..1f,
-                    steps = 19,
-                    display = formatTwoDecimals(state.topP),
-                    onValueChange = onTopPChange,
-                )
-
-                Spacer(Modifier.height(8.dp))
-
-                OutlinedTextField(
-                    value = state.maxTokens.toString(),
-                    onValueChange = { onMaxTokensChange(it.filter(Char::isDigit).toIntOrNull() ?: 0) },
-                    label = { Text(stringResource(R.string.settings_max_tokens)) },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-
-            // ---- system prompt ----
-            SettingsSection(title = stringResource(R.string.settings_section_system_prompt)) {
-                OutlinedTextField(
-                    value = state.systemPrompt,
-                    onValueChange = onSystemPromptChange,
-                    label = { Text(stringResource(R.string.settings_system_prompt)) },
-                    supportingText = { Text(stringResource(R.string.settings_system_prompt_hint)) },
-                    minLines = 3,
-                    maxLines = 8,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-
-            // ---- agent execution & vision ----
-            SettingsSection(title = "Agent 手机控制与视觉策略") {
-                StepSettingsControl(
-                    maxToolRounds = state.maxToolRounds,
-                    onMaxToolRoundsChange = onMaxToolRoundsChange,
-                )
-
-                Spacer(Modifier.height(12.dp))
-
-                Text(
-                    text = "截图分辨率智能策略 (Adaptive Resolution)",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    text = "自动按任务复杂度自适应缩放以节省 Token 并加速响应，必要时切至高清",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.outline,
-                )
-                Spacer(Modifier.height(8.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    val modes = listOf("AUTO" to "智能自适应", "FAST" to "极速省流", "HIGH" to "高精细节")
-                    modes.forEach { (modeKey, modeTitle) ->
-                        val isSelected = state.visionResolutionMode == modeKey
-                        Card(
-                            onClick = { onVisionResolutionModeChange(modeKey) },
-                            modifier = Modifier.weight(1f),
-                            shape = MaterialTheme.shapes.medium,
-                            colors = CardDefaults.cardColors(
-                                containerColor = if (isSelected) {
-                                    MaterialTheme.colorScheme.secondaryContainer
-                                } else {
-                                    MaterialTheme.colorScheme.surfaceContainerHigh
-                                },
-                            ),
-                        ) {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 10.dp, horizontal = 4.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                            ) {
-                                Text(
-                                    text = modeTitle,
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = if (isSelected) {
-                                        MaterialTheme.colorScheme.onSecondaryContainer
-                                    } else {
-                                        MaterialTheme.colorScheme.onSurfaceVariant
-                                    },
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-            // ---- device & system permissions ----
-            val context = androidx.compose.ui.platform.LocalContext.current
-            val permRefreshTick = remember { androidx.compose.runtime.mutableIntStateOf(0) }
-            androidx.lifecycle.compose.LifecycleEventEffect(androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
-                permRefreshTick.intValue++
-            }
-
-            val isAccessibilityEnabled = remember(permRefreshTick.intValue) {
-                com.paw.agent.device.DevicePermissionManager.isAccessibilityServiceEnabled(context)
-            }
-            // Shizuku 状态改为响应式订阅：binder 到达、授权对话框返回后实时刷新
-            val shizukuStatus by com.paw.agent.device.DevicePermissionManager.observeShizukuState()
-                .collectAsStateWithLifecycle()
-            val isShizukuRunning = shizukuStatus != com.paw.agent.device.shizuku.ShizukuStatus.NOT_RUNNING
-            val hasShizukuPermission = shizukuStatus == com.paw.agent.device.shizuku.ShizukuStatus.GRANTED
-            val hasOverlayPermission = remember(permRefreshTick.intValue) {
-                com.paw.agent.device.DevicePermissionManager.canDrawOverlays(context)
-            }
-
-            SettingsSection(title = "手机控制与系统权限") {
-                PermissionItem(
-                    title = "无障碍服务 (Accessibility)",
-                    subtitle = "核心控制底座，用于执行界面点击、滑动、按键及截屏",
-                    isGranted = isAccessibilityEnabled,
-                    statusText = if (isAccessibilityEnabled) "已启用" else "未开启",
-                    actionText = "去开启",
-                    onAction = { com.paw.agent.device.DevicePermissionManager.openAccessibilitySettings(context) },
-                )
-
-                Spacer(Modifier.height(10.dp))
-
-                PermissionItem(
-                    title = "Shizuku 极速提权通道",
-                    subtitle = when (shizukuStatus) {
-                        com.paw.agent.device.shizuku.ShizukuStatus.GRANTED ->
-                            "已授权：免 Root 极速截屏、无感静默输入与前台感知"
-                        com.paw.agent.device.shizuku.ShizukuStatus.RUNNING_NO_PERMISSION ->
-                            "Shizuku 已运行，等待授权"
-                        com.paw.agent.device.shizuku.ShizukuStatus.NOT_RUNNING ->
-                            "Shizuku 服务未运行 (可选，未开启时自动使用无障碍)，点击按钮打开 Shizuku 应用"
-                    },
-                    isGranted = hasShizukuPermission,
-                    statusText = when {
-                        hasShizukuPermission -> "已授权"
-                        isShizukuRunning -> "待授权"
-                        else -> "未运行"
-                    },
-                    // 只要未授权就提供按钮：运行中直接拉起授权对话框；未运行则引导打开 Shizuku 应用
-                    actionText = if (!hasShizukuPermission) "申请授权" else null,
-                    onAction = {
-                        val dispatched = com.paw.agent.device.DevicePermissionManager.requestShizukuPermission()
-                        if (!dispatched) {
-                            com.paw.agent.device.DevicePermissionManager.openShizukuApp(context)
-                        }
-                    },
-                )
-
-                Spacer(Modifier.height(10.dp))
-
-                PermissionItem(
-                    title = "前台控制悬浮胶囊 (Overlay)",
-                    subtitle = "操作其他 App 时展示实时状态胶囊与随时一键停止打断",
-                    isGranted = hasOverlayPermission,
-                    statusText = if (hasOverlayPermission) "已开启" else "未开启",
-                    actionText = "去授权",
-                    onAction = { com.paw.agent.device.DevicePermissionManager.openOverlaySettings(context) },
-                )
-            }
-
-            // ---- actions ----
-            Spacer(Modifier.height(8.dp))
-            Row(
+        Column(modifier = Modifier.fillMaxSize().padding(padding)) {
+            AppTabRow(
+                tabs = listOf(
+                    stringResource(R.string.settings_tab_llm),
+                    stringResource(R.string.settings_tab_appearance),
+                ),
+                selectedIndex = selectedTab,
+                onTabSelected = { selectedTab = it },
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Button(
-                    onClick = onSave,
+            )
+
+            when (selectedTab) {
+                0 -> LlmSettingsPane(
+                    state = llmState,
+                    actions = llmActions,
+                    snackbarHostState = snackbarHostState,
                     modifier = Modifier.weight(1f),
-                ) {
-                    Text(stringResource(R.string.settings_save))
-                }
+                )
 
-                OutlinedButton(
-                    onClick = onTestConnection,
-                    enabled = state.testState !is TestState.Running,
+                else -> AppearancePane(
+                    state = appearanceState,
+                    actions = appearanceActions,
                     modifier = Modifier.weight(1f),
-                ) {
-                    if (state.testState is TestState.Running) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(16.dp),
-                            strokeWidth = 2.dp,
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text(stringResource(R.string.settings_testing))
-                    } else {
-                        Text(stringResource(R.string.settings_test_connection))
-                    }
-                }
-            }
-
-            Spacer(Modifier.height(8.dp))
-            TestResultBanner(state.testState)
-
-            TextButton(
-                onClick = onReset,
-                modifier = Modifier.align(Alignment.CenterHorizontally),
-            ) {
-                Text(
-                    text = stringResource(R.string.settings_reset),
-                    color = MaterialTheme.colorScheme.error,
                 )
             }
-
-            Spacer(Modifier.height(32.dp))
         }
     }
 }
 
+/**
+ * The LLM section. Unchanged in behaviour: it still edits a draft copy of
+ * [LlmSettingsUiState], validates on save, and only then writes to DataStore.
+ */
 @Composable
-private fun SettingsSection(
+fun LlmSettingsPane(
+    state: LlmSettingsUiState,
+    actions: LlmSettingsActions,
+    snackbarHostState: AppSnackbarHostState,
+    modifier: Modifier = Modifier,
+) {
+    val savedMessage = stringResource(R.string.settings_saved)
+
+    LaunchedEffect(state.savedAt) {
+        if (state.savedAt != null) snackbarHostState.showSnackbar(savedMessage)
+    }
+
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+    ) {
+        // ---- provider ----
+        SettingsSection(title = stringResource(R.string.settings_section_provider)) {
+            AppText(
+                text = stringResource(R.string.settings_provider),
+                style = AppTheme.typography.labelLarge,
+                color = AppTheme.colors.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(8.dp))
+            ProviderChips(
+                selected = state.provider,
+                onSelect = actions.onProviderChange,
+            )
+        }
+
+        // ---- connection ----
+        SettingsSection(title = stringResource(R.string.settings_section_connection)) {
+            AppTextField(
+                value = state.baseUrl,
+                onValueChange = actions.onBaseUrlChange,
+                label = stringResource(R.string.settings_base_url),
+                singleLine = true,
+                isError = state.baseUrlError != null,
+                supportingText = state.baseUrlError?.let { errorText(it) },
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.Uri,
+                    imeAction = ImeAction.Next,
+                ),
+                modifier = Modifier.fillMaxWidth(),
+            )
+
+            Spacer(Modifier.height(12.dp))
+
+            AppTextField(
+                value = state.apiKey,
+                onValueChange = actions.onApiKeyChange,
+                label = stringResource(R.string.settings_api_key),
+                singleLine = true,
+                isError = state.apiKeyError != null,
+                supportingText = state.apiKeyError?.let { errorText(it) }
+                    ?: stringResource(R.string.settings_api_key_stored),
+                visualTransformation = if (state.showApiKey) {
+                    VisualTransformation.None
+                } else {
+                    PasswordVisualTransformation()
+                },
+                trailingIcon = {
+                    AppIconButton(onClick = actions.onToggleApiKeyVisibility) {
+                        AppIcon(
+                            imageVector = if (state.showApiKey) {
+                                Icons.Filled.VisibilityOff
+                            } else {
+                                Icons.Filled.Visibility
+                            },
+                            contentDescription = stringResource(
+                                if (state.showApiKey) {
+                                    R.string.settings_hide_api_key
+                                } else {
+                                    R.string.settings_show_api_key
+                                },
+                            ),
+                        )
+                    }
+                },
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.Password,
+                    imeAction = ImeAction.Next,
+                ),
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+
+        // ---- model ----
+        SettingsSection(title = stringResource(R.string.settings_section_model)) {
+            AppTextField(
+                value = state.model,
+                onValueChange = actions.onModelChange,
+                label = stringResource(R.string.settings_model),
+                singleLine = true,
+                isError = state.modelError != null,
+                supportingText = state.modelError?.let { errorText(it) },
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                modifier = Modifier.fillMaxWidth(),
+            )
+
+            Spacer(Modifier.height(8.dp))
+
+            SwitchRow(
+                title = stringResource(R.string.settings_stream),
+                subtitle = stringResource(R.string.settings_stream_summary),
+                checked = state.stream,
+                onCheckedChange = actions.onStreamChange,
+            )
+        }
+
+        // ---- sampling ----
+        SettingsSection(title = stringResource(R.string.settings_section_sampling)) {
+            SliderRow(
+                label = stringResource(R.string.settings_temperature),
+                value = state.temperature,
+                valueRange = 0f..2f,
+                steps = 19,
+                display = formatTwoDecimals(state.temperature),
+                onValueChange = actions.onTemperatureChange,
+            )
+
+            SliderRow(
+                label = stringResource(R.string.settings_top_p),
+                value = state.topP,
+                valueRange = 0f..1f,
+                steps = 19,
+                display = formatTwoDecimals(state.topP),
+                onValueChange = actions.onTopPChange,
+            )
+
+            Spacer(Modifier.height(8.dp))
+
+            AppTextField(
+                value = state.maxTokens.toString(),
+                onValueChange = {
+                    actions.onMaxTokensChange(it.filter(Char::isDigit).toIntOrNull() ?: 0)
+                },
+                label = stringResource(R.string.settings_max_tokens),
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+
+        // ---- system prompt ----
+        SettingsSection(title = stringResource(R.string.settings_section_system_prompt)) {
+            AppTextField(
+                value = state.systemPrompt,
+                onValueChange = actions.onSystemPromptChange,
+                label = stringResource(R.string.settings_system_prompt),
+                supportingText = stringResource(R.string.settings_system_prompt_hint),
+                minLines = 3,
+                maxLines = 8,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+
+        // ---- agent execution & vision ----
+        SettingsSection(title = stringResource(R.string.settings_section_agent_vision)) {
+            StepSettingsControl(
+                maxToolRounds = state.maxToolRounds,
+                onMaxToolRoundsChange = actions.onMaxToolRoundsChange,
+            )
+
+            Spacer(Modifier.height(12.dp))
+
+            AppText(
+                text = stringResource(R.string.settings_vision_resolution),
+                style = AppTheme.typography.labelLarge,
+                color = AppTheme.colors.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(4.dp))
+            AppText(
+                text = stringResource(R.string.settings_vision_resolution_summary),
+                style = AppTheme.typography.bodySmall,
+                color = AppTheme.colors.outline,
+            )
+            Spacer(Modifier.height(8.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                val modes = listOf(
+                    "AUTO" to R.string.settings_vision_auto,
+                    "FAST" to R.string.settings_vision_fast,
+                    "HIGH" to R.string.settings_vision_high,
+                )
+                modes.forEach { (modeKey, modeTitle) ->
+                    val isSelected = state.visionResolutionMode == modeKey
+                    AppCard(
+                        onClick = { actions.onVisionResolutionModeChange(modeKey) },
+                        modifier = Modifier.weight(1f),
+                        cornerRadius = 12.dp,
+                        containerColor = if (isSelected) {
+                            AppTheme.colors.secondaryContainer
+                        } else {
+                            AppTheme.colors.surfaceContainerHigh
+                        },
+                        contentColor = if (isSelected) {
+                            AppTheme.colors.onSecondaryContainer
+                        } else {
+                            AppTheme.colors.onSurfaceVariant
+                        },
+                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 10.dp),
+                    ) {
+                        AppText(
+                            text = stringResource(modeTitle),
+                            style = AppTheme.typography.labelMedium,
+                            modifier = Modifier.fillMaxWidth(),
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        )
+                    }
+                }
+            }
+        }
+
+        // ---- device & system permissions ----
+        val context = androidx.compose.ui.platform.LocalContext.current
+        val permRefreshTick = remember { mutableIntStateOf(0) }
+        LifecycleEventEffect(androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+            permRefreshTick.intValue++
+        }
+
+        val isAccessibilityEnabled = remember(permRefreshTick.intValue) {
+            com.paw.agent.device.DevicePermissionManager.isAccessibilityServiceEnabled(context)
+        }
+        // Shizuku 状态改为响应式订阅：binder 到达、授权对话框返回后实时刷新
+        val shizukuStatus by com.paw.agent.device.DevicePermissionManager.observeShizukuState()
+            .collectAsStateWithLifecycle()
+        val isShizukuRunning = shizukuStatus != com.paw.agent.device.shizuku.ShizukuStatus.NOT_RUNNING
+        val hasShizukuPermission = shizukuStatus == com.paw.agent.device.shizuku.ShizukuStatus.GRANTED
+        val hasOverlayPermission = remember(permRefreshTick.intValue) {
+            com.paw.agent.device.DevicePermissionManager.canDrawOverlays(context)
+        }
+
+        SettingsSection(title = stringResource(R.string.settings_section_permissions)) {
+            PermissionItem(
+                title = stringResource(R.string.permission_accessibility),
+                subtitle = stringResource(R.string.permission_accessibility_summary),
+                isGranted = isAccessibilityEnabled,
+                statusText = stringResource(R.string.permission_granted),
+                actionText = stringResource(R.string.permission_open_settings),
+                onAction = { com.paw.agent.device.DevicePermissionManager.openAccessibilitySettings(context) },
+            )
+
+            Spacer(Modifier.height(10.dp))
+
+            PermissionItem(
+                title = stringResource(R.string.permission_shizuku),
+                subtitle = when (shizukuStatus) {
+                    com.paw.agent.device.shizuku.ShizukuStatus.GRANTED ->
+                        stringResource(R.string.permission_shizuku_granted)
+                    com.paw.agent.device.shizuku.ShizukuStatus.RUNNING_NO_PERMISSION ->
+                        stringResource(R.string.permission_shizuku_waiting)
+                    com.paw.agent.device.shizuku.ShizukuStatus.NOT_RUNNING ->
+                        stringResource(R.string.permission_shizuku_not_running)
+                },
+                isGranted = hasShizukuPermission,
+                statusText = when {
+                    hasShizukuPermission -> stringResource(R.string.permission_granted)
+                    isShizukuRunning -> stringResource(R.string.permission_shizuku_pending)
+                    else -> stringResource(R.string.permission_not_granted)
+                },
+                // 只要未授权就提供按钮：运行中直接拉起授权对话框；未运行则引导打开 Shizuku 应用
+                actionText = if (!hasShizukuPermission) {
+                    stringResource(R.string.permission_shizuku_request)
+                } else {
+                    null
+                },
+                onAction = {
+                    val dispatched = com.paw.agent.device.DevicePermissionManager.requestShizukuPermission()
+                    if (!dispatched) {
+                        com.paw.agent.device.DevicePermissionManager.openShizukuApp(context)
+                    }
+                },
+            )
+
+            Spacer(Modifier.height(10.dp))
+
+            PermissionItem(
+                title = stringResource(R.string.permission_overlay),
+                subtitle = stringResource(R.string.permission_overlay_summary),
+                isGranted = hasOverlayPermission,
+                statusText = stringResource(R.string.permission_granted),
+                actionText = stringResource(R.string.permission_open_settings),
+                onAction = { com.paw.agent.device.DevicePermissionManager.openOverlaySettings(context) },
+            )
+        }
+
+        // ---- actions ----
+        Spacer(Modifier.height(8.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            AppButton(
+                onClick = actions.onSave,
+                modifier = Modifier.weight(1f),
+            ) {
+                AppText(stringResource(R.string.settings_save))
+            }
+
+            AppOutlinedButton(
+                onClick = actions.onTestConnection,
+                enabled = state.testState !is TestState.Running,
+                modifier = Modifier.weight(1f),
+            ) {
+                if (state.testState is TestState.Running) {
+                    AppCircularProgressIndicator()
+                    Spacer(Modifier.width(8.dp))
+                    AppText(stringResource(R.string.settings_testing))
+                } else {
+                    AppText(stringResource(R.string.settings_test_connection))
+                }
+            }
+        }
+
+        Spacer(Modifier.height(8.dp))
+        TestResultBanner(state.testState)
+
+        AppTextButton(
+            text = stringResource(R.string.settings_reset),
+            onClick = actions.onReset,
+            color = AppTheme.colors.error,
+            modifier = Modifier.align(Alignment.CenterHorizontally),
+        )
+
+        Spacer(Modifier.height(32.dp))
+    }
+}
+
+@Composable
+internal fun SettingsSection(
     title: String,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     Column(Modifier.fillMaxWidth()) {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.titleSmall,
-            color = MaterialTheme.colorScheme.primary,
-        )
+        AppSectionTitle(text = title)
         Spacer(Modifier.height(12.dp))
         Column(content = content)
         Spacer(Modifier.height(8.dp))
-        HorizontalDivider()
+        AppDivider()
         Spacer(Modifier.height(16.dp))
     }
 }
@@ -483,28 +531,23 @@ private fun ProviderChip(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Card(
+    AppCard(
         onClick = onClick,
         modifier = modifier,
-        shape = MaterialTheme.shapes.medium,
-        colors = CardDefaults.cardColors(
-            containerColor = if (isSelected) {
-                MaterialTheme.colorScheme.secondaryContainer
-            } else {
-                MaterialTheme.colorScheme.surfaceContainerHigh
-            },
-        ),
+        cornerRadius = 12.dp,
+        containerColor = if (isSelected) {
+            AppTheme.colors.secondaryContainer
+        } else {
+            AppTheme.colors.surfaceContainerHigh
+        },
+        contentColor = if (isSelected) {
+            AppTheme.colors.onSecondaryContainer
+        } else {
+            AppTheme.colors.onSurfaceVariant
+        },
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 14.dp),
     ) {
-        Text(
-            text = provider.displayName,
-            style = MaterialTheme.typography.labelLarge,
-            color = if (isSelected) {
-                MaterialTheme.colorScheme.onSecondaryContainer
-            } else {
-                MaterialTheme.colorScheme.onSurfaceVariant
-            },
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 14.dp),
-        )
+        AppText(text = provider.displayName, style = AppTheme.typography.labelLarge)
     }
 }
 
@@ -522,18 +565,18 @@ private fun SliderRow(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            Text(
+            AppText(
                 text = label,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurface,
+                style = AppTheme.typography.bodyMedium,
+                color = AppTheme.colors.onSurface,
             )
-            Text(
+            AppText(
                 text = display,
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.primary,
+                style = AppTheme.typography.labelLarge,
+                color = AppTheme.colors.primary,
             )
         }
-        Slider(
+        AppSlider(
             value = value,
             onValueChange = onValueChange,
             valueRange = valueRange,
@@ -543,29 +586,39 @@ private fun SliderRow(
 }
 
 @Composable
-private fun SwitchRow(
+internal fun SwitchRow(
     title: String,
     subtitle: String,
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
+    enabled: Boolean = true,
+    modifier: Modifier = Modifier,
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
-            Text(
+            AppText(
                 text = title,
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurface,
+                style = AppTheme.typography.bodyLarge,
+                color = if (enabled) {
+                    AppTheme.colors.onSurface
+                } else {
+                    AppTheme.colors.onSurfaceVariant
+                },
             )
-            Text(
+            AppText(
                 text = subtitle,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = AppTheme.typography.bodySmall,
+                color = AppTheme.colors.onSurfaceVariant,
             )
         }
-        Switch(checked = checked, onCheckedChange = onCheckedChange)
+        AppSwitch(
+            checked = checked,
+            onCheckedChange = if (enabled) onCheckedChange else null,
+            enabled = enabled,
+        )
     }
 }
 
@@ -577,27 +630,22 @@ private fun TestResultBanner(testState: TestState) {
         TestState.Idle, TestState.Running -> return
     }
 
-    Card(
-        colors = CardDefaults.cardColors(
-            containerColor = if (isError) {
-                MaterialTheme.colorScheme.errorContainer
-            } else {
-                MaterialTheme.colorScheme.tertiaryContainer
-            },
-        ),
-        shape = MaterialTheme.shapes.medium,
+    AppCard(
+        containerColor = if (isError) {
+            AppTheme.colors.errorContainer
+        } else {
+            AppTheme.colors.tertiaryContainer
+        },
+        contentColor = if (isError) {
+            AppTheme.colors.onErrorContainer
+        } else {
+            AppTheme.colors.onTertiaryContainer
+        },
+        cornerRadius = 12.dp,
+        contentPadding = PaddingValues(12.dp),
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Text(
-            text = message,
-            style = MaterialTheme.typography.bodySmall,
-            color = if (isError) {
-                MaterialTheme.colorScheme.onErrorContainer
-            } else {
-                MaterialTheme.colorScheme.onTertiaryContainer
-            },
-            modifier = Modifier.padding(12.dp),
-        )
+        AppText(text = message, style = AppTheme.typography.bodySmall)
     }
 }
 
@@ -626,65 +674,60 @@ private fun PermissionItem(
     actionText: String?,
     onAction: () -> Unit,
 ) {
-    Card(
+    AppCard(
         modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.medium,
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainer,
-        ),
+        cornerRadius = 12.dp,
+        containerColor = AppTheme.colors.surfaceContainer,
+        contentPadding = PaddingValues(12.dp),
     ) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(12.dp),
+            modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
+                    AppText(
                         text = title,
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
-                        color = MaterialTheme.colorScheme.onSurface,
+                        style = AppTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium,
+                        color = AppTheme.colors.onSurface,
                     )
                     Spacer(Modifier.width(8.dp))
-                    Card(
-                        shape = MaterialTheme.shapes.small,
-                        colors = CardDefaults.cardColors(
-                            containerColor = if (isGranted) {
-                                MaterialTheme.colorScheme.primaryContainer
-                            } else {
-                                MaterialTheme.colorScheme.surfaceVariant
-                            },
-                        ),
+                    AppSurface(
+                        shape = AppTheme.shapes.small,
+                        color = if (isGranted) {
+                            AppTheme.colors.primaryContainer
+                        } else {
+                            AppTheme.colors.surfaceVariant
+                        },
+                        contentColor = if (isGranted) {
+                            AppTheme.colors.onPrimaryContainer
+                        } else {
+                            AppTheme.colors.onSurfaceVariant
+                        },
                     ) {
-                        Text(
+                        AppText(
                             text = statusText,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = if (isGranted) {
-                                MaterialTheme.colorScheme.onPrimaryContainer
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            },
+                            style = AppTheme.typography.labelSmall,
                             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
                         )
                     }
                 }
                 Spacer(Modifier.height(4.dp))
-                Text(
+                AppText(
                     text = subtitle,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = AppTheme.typography.bodySmall,
+                    color = AppTheme.colors.onSurfaceVariant,
                 )
             }
 
             if (!isGranted && actionText != null) {
                 Spacer(Modifier.width(8.dp))
-                OutlinedButton(
+                AppOutlinedButton(
                     onClick = onAction,
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                    modifier = Modifier.padding(start = 4.dp),
                 ) {
-                    Text(text = actionText, style = MaterialTheme.typography.labelSmall)
+                    AppText(text = actionText, style = AppTheme.typography.labelSmall)
                 }
             }
         }
@@ -697,8 +740,14 @@ private fun StepSettingsControl(
     onMaxToolRoundsChange: (Int) -> Unit,
 ) {
     // 计数规则：每 5 步记为 1 格
-    val currentGrids = if (maxToolRounds <= 0) "无上限" else {
-        if (maxToolRounds % 5 == 0) "${maxToolRounds / 5} 格" else String.format(java.util.Locale.US, "%.1f 格", maxToolRounds / 5.0)
+    val currentGrids = if (maxToolRounds <= 0) {
+        stringResource(R.string.settings_max_rounds_unlimited_short)
+    } else {
+        if (maxToolRounds % 5 == 0) {
+            stringResource(R.string.settings_max_rounds_grids, maxToolRounds / 5)
+        } else {
+            String.format(java.util.Locale.US, "%.1f 格", maxToolRounds / 5.0)
+        }
     }
 
     var inputText by remember(maxToolRounds) {
@@ -711,35 +760,47 @@ private fun StepSettingsControl(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(
-                text = "最大执行步数 (Max Rounds)",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurface,
+            AppText(
+                text = stringResource(R.string.settings_max_rounds),
+                style = AppTheme.typography.bodyMedium,
+                color = AppTheme.colors.onSurface,
             )
-            Surface(
-                shape = MaterialTheme.shapes.small,
-                color = if (maxToolRounds <= 0) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.primaryContainer,
+            AppSurface(
+                shape = AppTheme.shapes.small,
+                color = if (maxToolRounds <= 0) {
+                    AppTheme.colors.tertiaryContainer
+                } else {
+                    AppTheme.colors.primaryContainer
+                },
+                contentColor = if (maxToolRounds <= 0) {
+                    AppTheme.colors.onTertiaryContainer
+                } else {
+                    AppTheme.colors.onPrimaryContainer
+                },
             ) {
-                Text(
-                    text = if (maxToolRounds <= 0) "不限制（无上限）" else "$maxToolRounds 步 ($currentGrids)",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = if (maxToolRounds <= 0) MaterialTheme.colorScheme.onTertiaryContainer else MaterialTheme.colorScheme.onPrimaryContainer,
+                AppText(
+                    text = if (maxToolRounds <= 0) {
+                        stringResource(R.string.settings_max_rounds_unlimited)
+                    } else {
+                        stringResource(R.string.settings_max_rounds_value, maxToolRounds, currentGrids)
+                    },
+                    style = AppTheme.typography.labelMedium,
                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                 )
             }
         }
 
         Spacer(Modifier.height(4.dp))
-        Text(
-            text = "计数规则：每 5 步记为 1 格。支持输入数值自定义步数（无上限），输入 0 设为不限制。",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.outline,
+        AppText(
+            text = stringResource(R.string.settings_max_rounds_hint),
+            style = AppTheme.typography.bodySmall,
+            color = AppTheme.colors.outline,
         )
 
         Spacer(Modifier.height(10.dp))
 
         // 自定义步数输入框
-        OutlinedTextField(
+        AppTextField(
             value = inputText,
             onValueChange = { newStr ->
                 val filtered = newStr.filter { it.isDigit() }
@@ -749,17 +810,20 @@ private fun StepSettingsControl(
                     onMaxToolRoundsChange(parsed)
                 }
             },
-            label = { Text("自定义步数数值") },
-            placeholder = { Text("输入数值，如 25，或 0 为无上限") },
-            supportingText = {
+            label = stringResource(R.string.settings_max_rounds_custom),
+            placeholder = stringResource(R.string.settings_max_rounds_custom_hint),
+            supportingText = run {
                 val num = inputText.toIntOrNull() ?: 0
-                val converted = if (num <= 0) {
-                    "换算结果：不限制步数（无上限）"
+                if (num <= 0) {
+                    stringResource(R.string.settings_max_rounds_convert_unlimited)
                 } else {
-                    val g = if (num % 5 == 0) "${num / 5} 格" else String.format(java.util.Locale.US, "%.1f 格", num / 5.0)
-                    "换算结果：每 5 步记为 1 格，${num} 步 = $g"
+                    val g = if (num % 5 == 0) {
+                        stringResource(R.string.settings_max_rounds_grids, num / 5)
+                    } else {
+                        String.format(java.util.Locale.US, "%.1f 格", num / 5.0)
+                    }
+                    stringResource(R.string.settings_max_rounds_convert, num, g)
                 }
-                Text(converted, color = MaterialTheme.colorScheme.primary)
             },
             keyboardOptions = KeyboardOptions(
                 keyboardType = KeyboardType.Number,
@@ -772,10 +836,10 @@ private fun StepSettingsControl(
         Spacer(Modifier.height(8.dp))
 
         // 快速预设按钮
-        Text(
-            text = "快速预设：",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        AppText(
+            text = stringResource(R.string.settings_max_rounds_presets),
+            style = AppTheme.typography.labelSmall,
+            color = AppTheme.colors.onSurfaceVariant,
         )
         Spacer(Modifier.height(4.dp))
         Row(
@@ -783,35 +847,41 @@ private fun StepSettingsControl(
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             val presets = listOf(
-                0 to "无上限",
-                10 to "10步(2格)",
-                20 to "20步(4格)",
-                30 to "30步(6格)",
-                50 to "50步(10格)",
+                0 to R.string.settings_max_rounds_preset_unlimited,
+                10 to R.string.settings_max_rounds_preset_10,
+                20 to R.string.settings_max_rounds_preset_20,
+                30 to R.string.settings_max_rounds_preset_30,
+                50 to R.string.settings_max_rounds_preset_50,
             )
-            presets.forEach { (stepVal, label) ->
-                val isSelected = (stepVal == 0 && maxToolRounds <= 0) || (stepVal > 0 && maxToolRounds == stepVal)
-                Card(
+            presets.forEach { (stepVal, labelRes) ->
+                val isSelected = (stepVal == 0 && maxToolRounds <= 0) ||
+                    (stepVal > 0 && maxToolRounds == stepVal)
+                AppCard(
                     onClick = {
                         inputText = stepVal.toString()
                         onMaxToolRoundsChange(stepVal)
                     },
                     modifier = Modifier.weight(1f),
-                    shape = MaterialTheme.shapes.small,
-                    colors = CardDefaults.cardColors(
-                        containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
-                    ),
+                    cornerRadius = 8.dp,
+                    containerColor = if (isSelected) {
+                        AppTheme.colors.primaryContainer
+                    } else {
+                        AppTheme.colors.surfaceContainerHigh
+                    },
+                    contentColor = if (isSelected) {
+                        AppTheme.colors.onPrimaryContainer
+                    } else {
+                        AppTheme.colors.onSurfaceVariant
+                    },
+                    contentPadding = PaddingValues(vertical = 6.dp),
                 ) {
                     Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 6.dp),
+                        modifier = Modifier.fillMaxWidth(),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Text(
-                            text = label,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                        AppText(
+                            text = stringResource(labelRes),
+                            style = AppTheme.typography.labelSmall,
                             maxLines = 1,
                         )
                     }
@@ -820,5 +890,3 @@ private fun StepSettingsControl(
         }
     }
 }
-
-

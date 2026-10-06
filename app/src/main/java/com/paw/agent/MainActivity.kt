@@ -14,7 +14,7 @@ import androidx.core.view.WindowCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.paw.agent.data.settings.AppSettings
 import com.paw.agent.ui.AgentPawApp
-import com.paw.agent.ui.theme.AgentPawTheme
+import com.paw.agent.ui.theme.AgentPawAppTheme
 
 class MainActivity : ComponentActivity() {
 
@@ -41,7 +41,10 @@ class MainActivity : ComponentActivity() {
 
             SyncSystemBarAppearance(darkTheme = settings.darkTheme)
 
-            AgentPawTheme(
+            // Switching settings.uiTheme re-composes this call, so the whole UI
+            // (including the settings screen itself) swaps design system live.
+            AgentPawAppTheme(
+                uiTheme = settings.uiTheme,
                 darkTheme = settings.darkTheme,
                 dynamicColor = settings.dynamicColor,
             ) {

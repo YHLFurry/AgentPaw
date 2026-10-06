@@ -16,22 +16,13 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.outlined.EditNote
 import androidx.compose.material.icons.outlined.Settings
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -44,8 +35,18 @@ import com.paw.agent.R
 import com.paw.agent.core.llm.LlmConfig
 import com.paw.agent.ui.components.EmptyChatState
 import com.paw.agent.ui.components.PawMark
+import com.paw.agent.ui.components.adaptive.AppButton
+import com.paw.agent.ui.components.adaptive.AppCard
+import com.paw.agent.ui.components.adaptive.AppIcon
+import com.paw.agent.ui.components.adaptive.AppIconButton
+import com.paw.agent.ui.components.adaptive.AppOutlinedButton
+import com.paw.agent.ui.components.adaptive.AppScaffold
+import com.paw.agent.ui.components.adaptive.AppSurface
+import com.paw.agent.ui.components.adaptive.AppText
+import com.paw.agent.ui.components.adaptive.AppTextField
+import com.paw.agent.ui.components.adaptive.AppTopAppBar
+import com.paw.agent.ui.theme.AppTheme
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatScreen(
     messages: List<com.paw.agent.core.model.Message>,
@@ -73,26 +74,39 @@ fun ChatScreen(
         }
     }
 
-    Scaffold(
+    AppScaffold(
         modifier = modifier.fillMaxSize(),
         topBar = {
-            TopAppBar(
-                title = {
+            AppTopAppBar(
+                title = stringResource(R.string.chat_title),
+                subtitle = modelLabel,
+                // Miuix renders a fixed title/subtitle pair, so the paw mark goes
+                // into its leading slot instead of inside the title content.
+                navigationIcon = {
+                    if (AppTheme.isMiuix) {
+                        PawMark(
+                            size = 26.dp,
+                            color = AppTheme.colors.onPrimary,
+                            modifier = Modifier.padding(start = 16.dp, end = 4.dp),
+                        )
+                    }
+                },
+                titleContent = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        PawMark(size = 26.dp, color = MaterialTheme.colorScheme.onPrimary)
+                        PawMark(size = 26.dp, color = AppTheme.colors.onPrimary)
                         Spacer(Modifier.size(10.dp))
                         Column {
-                            Text(
+                            AppText(
                                 text = stringResource(R.string.chat_title),
-                                style = MaterialTheme.typography.titleMedium,
+                                style = AppTheme.typography.titleMedium,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
                             if (modelLabel.isNotBlank()) {
-                                Text(
+                                AppText(
                                     text = modelLabel,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    style = AppTheme.typography.labelSmall,
+                                    color = AppTheme.colors.onSurfaceVariant,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                 )
@@ -101,22 +115,20 @@ fun ChatScreen(
                     }
                 },
                 actions = {
-                    IconButton(onClick = onNewConversation) {
-                        Icon(
+                    AppIconButton(onClick = onNewConversation) {
+                        AppIcon(
                             imageVector = Icons.Outlined.EditNote,
                             contentDescription = stringResource(R.string.chat_new_conversation),
                         )
                     }
-                    IconButton(onClick = onOpenSettings) {
-                        Icon(
+                    AppIconButton(onClick = onOpenSettings) {
+                        AppIcon(
                             imageVector = Icons.Outlined.Settings,
                             contentDescription = stringResource(R.string.chat_open_settings),
                         )
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainer,
-                ),
+                color = AppTheme.colors.surfaceContainer,
             )
         },
         bottomBar = {
@@ -130,11 +142,15 @@ fun ChatScreen(
                 onOpenSettings = onOpenSettings,
             )
         },
-        containerColor = MaterialTheme.colorScheme.background,
+        containerColor = AppTheme.colors.background,
     ) { padding ->
         val context = androidx.compose.ui.platform.LocalContext.current
-        val permTick = androidx.compose.runtime.remember { androidx.compose.runtime.mutableIntStateOf(0) }
-        androidx.lifecycle.compose.LifecycleEventEffect(androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+        val permTick = androidx.compose.runtime.remember {
+            androidx.compose.runtime.mutableIntStateOf(0)
+        }
+        androidx.lifecycle.compose.LifecycleEventEffect(
+            androidx.lifecycle.Lifecycle.Event.ON_RESUME,
+        ) {
             permTick.intValue++
         }
         val isAccessibilityEnabled = androidx.compose.runtime.remember(permTick.intValue) {
@@ -147,32 +163,34 @@ fun ChatScreen(
                 .padding(padding),
         ) {
             if (!isAccessibilityEnabled) {
-                androidx.compose.material3.Card(
-                    onClick = { com.paw.agent.device.DevicePermissionManager.openAccessibilitySettings(context) },
+                AppCard(
+                    onClick = {
+                        com.paw.agent.device.DevicePermissionManager.openAccessibilitySettings(context)
+                    },
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 12.dp, vertical = 6.dp),
-                    shape = MaterialTheme.shapes.medium,
-                    colors = androidx.compose.material3.CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.tertiaryContainer,
-                    ),
+                    cornerRadius = 12.dp,
+                    containerColor = AppTheme.colors.tertiaryContainer,
+                    contentColor = AppTheme.colors.onTertiaryContainer,
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
                 ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            text = "💡 手机控制服务尚未开启，点击开启无障碍服务以自主操作手机",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onTertiaryContainer,
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        AppText(
+                            text = stringResource(R.string.chat_accessibility_banner),
+                            style = AppTheme.typography.bodySmall,
                             modifier = Modifier.weight(1f),
                         )
                         Spacer(Modifier.width(8.dp))
-                        androidx.compose.material3.OutlinedButton(
-                            onClick = { com.paw.agent.device.DevicePermissionManager.openAccessibilitySettings(context) },
-                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                        AppOutlinedButton(
+                            onClick = {
+                                com.paw.agent.device.DevicePermissionManager.openAccessibilitySettings(context)
+                            },
                         ) {
-                            Text("开启", style = MaterialTheme.typography.labelSmall)
+                            AppText(
+                                text = stringResource(R.string.chat_accessibility_enable),
+                                style = AppTheme.typography.labelSmall,
+                            )
                         }
                     }
                 }
@@ -224,8 +242,10 @@ private fun Composer(
     onSendOrStop: () -> Unit,
     onOpenSettings: () -> Unit,
 ) {
-    Surface(
-        color = MaterialTheme.colorScheme.surfaceContainer,
+    AppSurface(
+        color = AppTheme.colors.surfaceContainer,
+        contentColor = AppTheme.colors.onSurface,
+        shape = RectangleShape,
         tonalElevation = 3.dp,
     ) {
         Column(
@@ -239,16 +259,16 @@ private fun Composer(
                 verticalAlignment = Alignment.Bottom,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                OutlinedTextField(
+                AppTextField(
                     value = draft,
                     onValueChange = onDraftChange,
                     modifier = Modifier.weight(1f),
-                    placeholder = { Text(stringResource(R.string.chat_input_hint)) },
-                    shape = RoundedCornerShape(24.dp),
+                    placeholder = stringResource(R.string.chat_input_hint),
+                    cornerRadius = 24.dp,
                     maxLines = 5,
                 )
 
-                Surface(
+                AppSurface(
                     onClick = {
                         if (!configReady && !isGenerating) {
                             onOpenSettings()
@@ -257,23 +277,23 @@ private fun Composer(
                         }
                     },
                     enabled = enabled || !configReady,
-                    shape = RoundedCornerShape(percent = 50),
+                    shape = CircleShape,
                     color = if (isGenerating) {
-                        MaterialTheme.colorScheme.errorContainer
+                        AppTheme.colors.errorContainer
                     } else {
-                        MaterialTheme.colorScheme.primary
+                        AppTheme.colors.primary
                     },
                     contentColor = if (isGenerating) {
-                        MaterialTheme.colorScheme.onErrorContainer
+                        AppTheme.colors.onErrorContainer
                     } else {
-                        MaterialTheme.colorScheme.onPrimary
+                        AppTheme.colors.onPrimary
                     },
                 ) {
                     Box(
                         Modifier.size(52.dp),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Icon(
+                        AppIcon(
                             imageVector = if (isGenerating) {
                                 Icons.Filled.Stop
                             } else {
@@ -289,3 +309,5 @@ private fun Composer(
         }
     }
 }
+
+private val RectangleShape = RoundedCornerShape(0.dp)

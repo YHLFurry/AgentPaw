@@ -25,6 +25,25 @@ The app id is `com.paw.agent`; the launcher icon is a beast paw print.
 | Conversation persistence                       | ⬜ in-memory only                          |
 | Release build / signing                        | ⬜ not configured                          |
 
+## Theming
+
+The app ships with **two coexisting UI themes** selectable from
+**Settings → Appearance**:
+
+- **Material** (default) — the original Material 3 / Material You look. Existing
+  installs stay on this theme, so upgrading never changes the visual style.
+- **Miuix** — a HyperOS-style component set (Miuix) for a different look & feel.
+
+Both themes read the same `AppSettings` and drive the same ViewModels; switching
+themes never touches LLM configuration. The choice is persisted in DataStore and
+applied **live** the moment you tap it — no app restart — and is restored on next
+launch. The LLM settings section is fully independent and keeps its own draft/save
+flow.
+
+Implementation lives behind a single `AgentPawAppTheme` root and a theme-agnostic
+`AppTheme` token layer (`com.paw.agent.ui.theme`); screens are written once against
+`App*` adaptive components (`com.paw.agent.ui.components.adaptive`).
+
 ## Architecture
 
 ```

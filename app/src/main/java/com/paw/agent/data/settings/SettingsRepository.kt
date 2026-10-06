@@ -10,6 +10,8 @@ data class AppSettings(
     val llm: LlmConfig = LlmConfig(),
     val dynamicColor: Boolean = true,
     val darkTheme: Boolean = false,
+    /** Which design system renders the UI; see [UiThemeMode]. */
+    val uiTheme: UiThemeMode = UiThemeMode.Default,
 ) {
     companion object {
         val Default = AppSettings()
@@ -22,5 +24,7 @@ interface SettingsRepository {
     suspend fun updateLlm(transform: (LlmConfig) -> LlmConfig)
     suspend fun setDynamicColor(enabled: Boolean)
     suspend fun setDarkTheme(enabled: Boolean)
-    suspend fun reset()
+    suspend fun setUiTheme(mode: UiThemeMode)
+    /** Clears the LLM section only, so appearance choices survive an LLM reset. */
+    suspend fun resetLlm()
 }

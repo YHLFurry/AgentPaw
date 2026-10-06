@@ -12,6 +12,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.paw.agent.core.llm.LlmConfig
 import com.paw.agent.core.llm.LlmProvider
+import com.paw.agent.data.settings.UiThemeMode
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
@@ -43,6 +44,7 @@ class DataStoreSettingsRepository(
         val SYSTEM_PROMPT = stringPreferencesKey("llm_system_prompt")
         val DYNAMIC_COLOR = booleanPreferencesKey("ui_dynamic_color")
         val DARK_THEME = booleanPreferencesKey("ui_dark_theme")
+        val UI_THEME = stringPreferencesKey("ui_theme_mode")
     }
 
     override val settings: Flow<AppSettings> = context.dataStore.data
@@ -77,8 +79,25 @@ class DataStoreSettingsRepository(
         context.dataStore.edit { it[Keys.DARK_THEME] = enabled }
     }
 
-    override suspend fun reset() {
-        context.dataStore.edit { it.clear() }
+    override suspend fun setUiTheme(mode: UiThemeMode) {
+        context.dataStore.edit { it[Keys.UI_THEME] = mode.storageKey }
+    }
+
+    /** Clears only the LLM keys; appearance choices (theme, dark, dynamic) stay. */
+    override suspend fun resetLlm() {
+        context.dataStore.edit { prefs ->
+            prefs.remove(Keys.PROVIDER)
+            prefs.remove(Keys.BASE_URL)
+            prefs.remove(Keys.API_KEY)
+            prefs.remove(Keys.MODEL)
+            prefs.remove(Keys.TEMPERATURE)
+            prefs.remove(Keys.TOP_P)
+            prefs.remove(Keys.MAX_TOKENS)
+            prefs.remove(Keys.MAX_TOOL_ROUNDS)
+            prefs.remove(Keys.VISION_RESOLUTION_MODE)
+            prefs.remove(Keys.STREAM)
+            prefs.remove(Keys.SYSTEM_PROMPT)
+        }
     }
 
     private fun Preferences.toLlmConfig(): LlmConfig {
@@ -102,5 +121,6 @@ class DataStoreSettingsRepository(
         llm = toLlmConfig(),
         dynamicColor = this[Keys.DYNAMIC_COLOR] ?: true,
         darkTheme = this[Keys.DARK_THEME] ?: false,
+        uiTheme = UiThemeMode.fromName(this[Keys.UI_THEME]),
     )
 }
