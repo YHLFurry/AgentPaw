@@ -63,7 +63,11 @@ class AgentAccessibilityService : AccessibilityService() {
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null) return
-        event.packageName?.let { currentPackage.set(it.toString()) }
+        event.packageName?.let {
+            currentPackage.set(it.toString())
+            // 供 AgentAppForegroundMonitor 判定宿主 APP 前后台（无 Activity 场景的兜底信号）
+            com.paw.agent.device.floating.AgentAppForegroundMonitor.notifyAccessibilityForegroundPackage(it.toString())
+        }
         event.className?.let { currentActivity.set(it.toString()) }
     }
 

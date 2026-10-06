@@ -117,5 +117,8 @@ class AgentPawApplication : Application() {
         container = AppContainer(this)
         // 初始化 Shizuku 监听（binder 到达 / 授权结果回调），保证设置页与 Agent 运行期状态实时可用
         com.paw.agent.device.shizuku.ShizukuInitializer.initialize()
+        // 尽早注册宿主 APP 前后台监听（必须早于首个 Activity 的 onResume），
+        // 供 Maven 包的停止悬浮窗判断"用户是否已离开本体 APP"
+        com.paw.agent.device.floating.AgentAppForegroundMonitor.install(this)
     }
 }
