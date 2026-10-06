@@ -19,6 +19,8 @@
     <string name="chat_thinking">Thinking…</string>
     <string name="chat_retry">Retry</string>
     <string name="chat_stopped">Stopped</string>
+    <string name="chat_accessibility_banner">Enable the Accessibility service so AgentPaw can control this device.</string>
+    <string name="chat_accessibility_enable">Enable</string>
 
     <!-- Roles -->
     <string name="role_user">You</string>
@@ -26,15 +28,32 @@
     <string name="role_system">System</string>
     <string name="role_tool">Tool</string>
 
+    <!-- Settings shell -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_tab_llm">LLM</string>
+    <string name="settings_tab_appearance">Appearance</string>
+
     <!-- LLM settings -->
-    <string name="settings_title">LLM Settings</string>
     <string name="settings_section_provider">Provider</string>
     <string name="settings_section_connection">Connection</string>
     <string name="settings_section_model">Model</string>
     <string name="settings_section_sampling">Sampling</string>
     <string name="settings_section_system_prompt">System prompt</string>
+    <string name="settings_section_agent_vision">Agent execution &amp; vision</string>
+    <string name="settings_section_permissions">Phone control &amp; permissions</string>
     <string name="settings_section_appearance">Appearance</string>
     <string name="settings_section_about">About</string>
+
+    <!-- Appearance settings -->
+    <string name="settings_section_theme">Theme</string>
+    <string name="settings_section_palette">Palette</string>
+    <string name="settings_theme_material">Material</string>
+    <string name="settings_theme_material_summary">Material 3, Material You dynamic color</string>
+    <string name="settings_theme_miuix">Miuix</string>
+    <string name="settings_theme_miuix_summary">HyperOS style controls and motion</string>
+    <string name="settings_theme_switch_hint">Your choice is applied immediately and remembered across restarts.</string>
+    <string name="settings_dark_theme_summary">Use the dark palette</string>
+    <string name="settings_dynamic_color_material_only">Material theme only — Miuix uses its own palette</string>
 
     <string name="settings_provider">Provider</string>
     <string name="settings_base_url">Base URL</string>
@@ -50,6 +69,31 @@
     <string name="settings_dynamic_color">Material You dynamic color</string>
     <string name="settings_dynamic_color_summary">Tint the app with your wallpaper palette</string>
     <string name="settings_dark_theme">Dark theme</string>
+
+    <!-- Agent execution & vision -->
+    <string name="settings_vision_resolution">Adaptive screenshot resolution</string>
+    <string name="settings_vision_resolution_summary">Scales screenshots to task complexity to save tokens; switches to high detail when needed</string>
+    <string name="settings_vision_auto">Auto</string>
+    <string name="settings_vision_fast">Fastest</string>
+    <string name="settings_vision_high">High detail</string>
+
+    <!-- Max tool rounds -->
+    <string name="settings_max_rounds">Max execution rounds</string>
+    <string name="settings_max_rounds_unlimited">Unlimited</string>
+    <string name="settings_max_rounds_unlimited_short">Unlimited</string>
+    <string name="settings_max_rounds_value">%1$d rounds (%2$s)</string>
+    <string name="settings_max_rounds_grids">%1$d cells</string>
+    <string name="settings_max_rounds_hint">Counting rule: every 5 rounds is 1 cell. Enter a custom value, or 0 for unlimited.</string>
+    <string name="settings_max_rounds_custom">Custom round count</string>
+    <string name="settings_max_rounds_custom_hint">A number such as 25, or 0 for unlimited</string>
+    <string name="settings_max_rounds_convert_unlimited">Result: unlimited rounds</string>
+    <string name="settings_max_rounds_convert">Result: %1$d rounds = %2$s (5 rounds per cell)</string>
+    <string name="settings_max_rounds_presets">Presets:</string>
+    <string name="settings_max_rounds_preset_unlimited">Unlimited</string>
+    <string name="settings_max_rounds_preset_10">10 (2)</string>
+    <string name="settings_max_rounds_preset_20">20 (4)</string>
+    <string name="settings_max_rounds_preset_30">30 (6)</string>
+    <string name="settings_max_rounds_preset_50">50 (10)</string>
 
     <string name="settings_save">Save</string>
     <string name="settings_saved">Settings saved</string>
@@ -74,12 +118,20 @@
 
     <!-- Accessibility & Permissions -->
     <string name="accessibility_service_description">AgentPaw 手机 AI 助手无障碍服务，用于执行界面点击、滑动、按键模拟与屏幕内容分析。</string>
-    <string name="permission_accessibility">无障碍服务权限</string>
-    <string name="permission_shizuku">Shizuku 极速授权</string>
-    <string name="permission_overlay">应用悬浮窗权限</string>
-    <string name="permission_granted">已授权</string>
-    <string name="permission_not_granted">未开启</string>
-    <string name="permission_open_settings">去设置开启</string>
+    <string name="permission_accessibility">Accessibility service</string>
+    <string name="permission_accessibility_summary">The core control layer: tapping, swiping, key events and screen reading</string>
+    <string name="permission_shizuku_granted">Granted: fast screenshots, silent input and foreground awareness without root</string>
+    <string name="permission_shizuku_waiting">Shizuku is running, waiting for authorization</string>
+    <string name="permission_shizuku_not_running">Shizuku is not running (optional; accessibility is used instead). Tap to open Shizuku.</string>
+    <string name="permission_shizuku_pending">Pending</string>
+    <string name="permission_shizuku_request">Request</string>
+    <string name="permission_overlay_summary">Shows the live status pill and a one-tap stop while other apps are being driven</string>
+
+    <string name="permission_shizuku">Shizuku fast lane</string>
+    <string name="permission_overlay">Overlay permission</string>
+    <string name="permission_granted">Granted</string>
+    <string name="permission_not_granted">Not enabled</string>
+    <string name="permission_open_settings">Open settings</string>
 
     <!-- Content descriptions -->
     <string name="cd_paw_logo">AgentPaw logo</string>

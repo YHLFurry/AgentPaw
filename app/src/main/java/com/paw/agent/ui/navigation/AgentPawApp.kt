@@ -13,8 +13,11 @@ import androidx.navigation.compose.rememberNavController
 import com.paw.agent.AppContainer
 import com.paw.agent.ui.chat.ChatScreen
 import com.paw.agent.ui.chat.ChatViewModel
-import com.paw.agent.ui.settings.LlmSettingsScreen
+import com.paw.agent.ui.settings.AppearanceActions
+import com.paw.agent.ui.settings.AppearanceSettingsViewModel
+import com.paw.agent.ui.settings.LlmSettingsActions
 import com.paw.agent.ui.settings.LlmSettingsViewModel
+import com.paw.agent.ui.settings.SettingsScreen
 
 object Routes {
     const val CHAT = "chat"
@@ -75,26 +78,40 @@ fun AgentPawApp(
                     llmClient = container.llmClient,
                 ),
             )
+            val appearanceViewModel: AppearanceSettingsViewModel = viewModel(
+                factory = AppearanceSettingsViewModel.Factory(
+                    settingsRepository = container.settingsRepository,
+                ),
+            )
             val state by settingsViewModel.uiState.collectAsStateWithLifecycle()
+            val appearanceState by appearanceViewModel.uiState.collectAsStateWithLifecycle()
 
-            LlmSettingsScreen(
-                state = state,
+            SettingsScreen(
+                llmState = state,
+                llmActions = LlmSettingsActions(
+                    onProviderChange = settingsViewModel::onProviderChange,
+                    onBaseUrlChange = settingsViewModel::onBaseUrlChange,
+                    onApiKeyChange = settingsViewModel::onApiKeyChange,
+                    onModelChange = settingsViewModel::onModelChange,
+                    onTemperatureChange = settingsViewModel::onTemperatureChange,
+                    onTopPChange = settingsViewModel::onTopPChange,
+                    onMaxTokensChange = settingsViewModel::onMaxTokensChange,
+                    onMaxToolRoundsChange = settingsViewModel::onMaxToolRoundsChange,
+                    onVisionResolutionModeChange = settingsViewModel::onVisionResolutionModeChange,
+                    onStreamChange = settingsViewModel::onStreamChange,
+                    onSystemPromptChange = settingsViewModel::onSystemPromptChange,
+                    onToggleApiKeyVisibility = settingsViewModel::toggleApiKeyVisibility,
+                    onSave = settingsViewModel::save,
+                    onTestConnection = settingsViewModel::testConnection,
+                    onReset = settingsViewModel::resetToDefaults,
+                ),
+                appearanceState = appearanceState,
+                appearanceActions = AppearanceActions(
+                    onUiThemeChange = appearanceViewModel::onUiThemeChange,
+                    onDarkThemeChange = appearanceViewModel::onDarkThemeChange,
+                    onDynamicColorChange = appearanceViewModel::onDynamicColorChange,
+                ),
                 onBack = { navController.popBackStack() },
-                onProviderChange = settingsViewModel::onProviderChange,
-                onBaseUrlChange = settingsViewModel::onBaseUrlChange,
-                onApiKeyChange = settingsViewModel::onApiKeyChange,
-                onModelChange = settingsViewModel::onModelChange,
-                onTemperatureChange = settingsViewModel::onTemperatureChange,
-                onTopPChange = settingsViewModel::onTopPChange,
-                onMaxTokensChange = settingsViewModel::onMaxTokensChange,
-                onMaxToolRoundsChange = settingsViewModel::onMaxToolRoundsChange,
-                onVisionResolutionModeChange = settingsViewModel::onVisionResolutionModeChange,
-                onStreamChange = settingsViewModel::onStreamChange,
-                onSystemPromptChange = settingsViewModel::onSystemPromptChange,
-                onToggleApiKeyVisibility = settingsViewModel::toggleApiKeyVisibility,
-                onSave = settingsViewModel::save,
-                onTestConnection = settingsViewModel::testConnection,
-                onReset = settingsViewModel::resetToDefaults,
             )
         }
     }

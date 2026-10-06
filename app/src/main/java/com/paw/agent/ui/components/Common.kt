@@ -17,10 +17,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -29,8 +25,12 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.paw.agent.R
+import com.paw.agent.ui.components.adaptive.AppSurface
+import com.paw.agent.ui.components.adaptive.AppText
+import com.paw.agent.ui.theme.AppTheme
 
 /**
  * The empty-state shown before the first message: the paw mark, a headline, and
@@ -49,28 +49,28 @@ fun EmptyChatState(
     ) {
         PawMark(size = 88.dp)
         Spacer(Modifier.height(24.dp))
-        Text(
+        AppText(
             text = stringResource(R.string.chat_empty_title),
-            style = MaterialTheme.typography.headlineSmall,
-            color = MaterialTheme.colorScheme.onSurface,
+            style = AppTheme.typography.headlineSmall,
+            color = AppTheme.colors.onSurface,
         )
         Spacer(Modifier.height(8.dp))
-        Text(
+        AppText(
             text = stringResource(R.string.chat_empty_subtitle),
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = AppTheme.typography.bodyMedium,
+            color = AppTheme.colors.onSurfaceVariant,
         )
         if (!configured) {
             Spacer(Modifier.height(24.dp))
-            Surface(
+            AppSurface(
                 onClick = onOpenSettings,
-                shape = MaterialTheme.shapes.large,
-                color = MaterialTheme.colorScheme.primaryContainer,
-                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                shape = AppTheme.shapes.large,
+                color = AppTheme.colors.primaryContainer,
+                contentColor = AppTheme.colors.onPrimaryContainer,
             ) {
-                Text(
+                AppText(
                     text = stringResource(R.string.chat_open_settings),
-                    style = MaterialTheme.typography.labelLarge,
+                    style = AppTheme.typography.labelLarge,
                     modifier = Modifier.padding(horizontal = 24.dp, vertical = 14.dp),
                 )
             }
@@ -84,10 +84,11 @@ fun EmptyChatState(
  */
 @Composable
 fun PawMark(
-    size: androidx.compose.ui.unit.Dp,
+    size: Dp,
     modifier: Modifier = Modifier,
-    color: Color = MaterialTheme.colorScheme.primary,
+    color: Color = AppTheme.colors.primary,
 ) {
+    val shape = CircleShape
     Box(
         modifier = modifier.size(size),
         contentAlignment = Alignment.Center,
@@ -99,7 +100,7 @@ fun PawMark(
                 .padding(bottom = size * 0.10f)
                 .width(size * 0.58f)
                 .height(size * 0.40f)
-                .background(color, RoundedCornerShape(percent = 50)),
+                .background(color, shape),
         )
 
         // Four toes in an arc above it; the inner pair is slightly taller,
@@ -116,7 +117,7 @@ fun PawMark(
                     Modifier
                         .width(size * 0.155f)
                         .height(size * 0.21f * heightFactor)
-                        .background(color, RoundedCornerShape(percent = 50)),
+                        .background(color, shape),
                 )
             }
         }
@@ -156,7 +157,7 @@ fun ThinkingIndicator(modifier: Modifier = Modifier) {
                 Modifier
                     .size(7.dp)
                     .alpha(dotAlpha)
-                    .background(MaterialTheme.colorScheme.onSurfaceVariant, CircleShape),
+                    .background(AppTheme.colors.onSurfaceVariant, CircleShape),
             )
         }
     }
@@ -167,18 +168,18 @@ fun ThinkingIndicator(modifier: Modifier = Modifier) {
 fun StatusPill(
     text: String,
     modifier: Modifier = Modifier,
-    container: Color = MaterialTheme.colorScheme.surfaceContainerHighest,
-    content: Color = MaterialTheme.colorScheme.onSurfaceVariant,
+    container: Color = AppTheme.colors.surfaceContainerHighest,
+    content: Color = AppTheme.colors.onSurfaceVariant,
 ) {
-    Surface(
+    AppSurface(
         modifier = modifier,
-        shape = MaterialTheme.shapes.small,
+        shape = AppTheme.shapes.small,
         color = container,
         contentColor = content,
     ) {
-        Text(
+        AppText(
             text = text,
-            style = MaterialTheme.typography.labelSmall,
+            style = AppTheme.typography.labelSmall,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),

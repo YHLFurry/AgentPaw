@@ -185,7 +185,7 @@ class LlmSettingsViewModel(
 
     fun resetToDefaults() {
         viewModelScope.launch {
-            settingsRepository.reset()
+            settingsRepository.resetLlm()
             val fresh = LlmConfig()
             _uiState.value = LlmSettingsUiState(
                 provider = fresh.provider,

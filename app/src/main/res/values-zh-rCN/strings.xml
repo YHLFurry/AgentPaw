@@ -17,20 +17,38 @@
     <string name="chat_thinking">思考中…</string>
     <string name="chat_retry">重试</string>
     <string name="chat_stopped">已停止</string>
+    <string name="chat_accessibility_banner">开启无障碍服务，让 AgentPaw 能够操控本机设备。</string>
+    <string name="chat_accessibility_enable">去开启</string>
 
     <string name="role_user">你</string>
     <string name="role_assistant">AgentPaw</string>
     <string name="role_system">系统</string>
     <string name="role_tool">工具</string>
 
-    <string name="settings_title">LLM 设置</string>
+    <string name="settings_title">设置</string>
+    <string name="settings_tab_llm">LLM 设置</string>
+    <string name="settings_tab_appearance">外观设置</string>
+
     <string name="settings_section_provider">服务商</string>
     <string name="settings_section_connection">连接</string>
     <string name="settings_section_model">模型</string>
     <string name="settings_section_sampling">采样参数</string>
     <string name="settings_section_system_prompt">系统提示词</string>
+    <string name="settings_section_agent_vision">Agent 手机控制与视觉策略</string>
+    <string name="settings_section_permissions">手机控制与系统权限</string>
     <string name="settings_section_appearance">外观</string>
     <string name="settings_section_about">关于</string>
+
+    <!-- 外观设置 -->
+    <string name="settings_section_theme">主题样式</string>
+    <string name="settings_section_palette">配色</string>
+    <string name="settings_theme_material">Material</string>
+    <string name="settings_theme_material_summary">Material 3 默认样式，支持 Material You 动态取色</string>
+    <string name="settings_theme_miuix">Miuix</string>
+    <string name="settings_theme_miuix_summary">HyperOS 风格控件与动效</string>
+    <string name="settings_theme_switch_hint">切换后立即生效，并会在下次启动时沿用。</string>
+    <string name="settings_dark_theme_summary">使用深色配色</string>
+    <string name="settings_dynamic_color_material_only">仅 Material 主题生效，Miuix 使用自有配色</string>
 
     <string name="settings_provider">服务商</string>
     <string name="settings_base_url">接口地址</string>
@@ -46,6 +64,31 @@
     <string name="settings_dynamic_color">Material You 动态取色</string>
     <string name="settings_dynamic_color_summary">跟随壁纸配色变化</string>
     <string name="settings_dark_theme">深色主题</string>
+
+    <!-- Agent 执行与视觉策略 -->
+    <string name="settings_vision_resolution">截图分辨率智能策略 (Adaptive Resolution)</string>
+    <string name="settings_vision_resolution_summary">自动按任务复杂度自适应缩放以节省 Token 并加速响应，必要时切至高清</string>
+    <string name="settings_vision_auto">智能自适应</string>
+    <string name="settings_vision_fast">极速省流</string>
+    <string name="settings_vision_high">高精细节</string>
+
+    <!-- 最大执行步数 -->
+    <string name="settings_max_rounds">最大执行步数 (Max Rounds)</string>
+    <string name="settings_max_rounds_unlimited">不限制（无上限）</string>
+    <string name="settings_max_rounds_unlimited_short">无上限</string>
+    <string name="settings_max_rounds_value">%1$d 步 (%2$s)</string>
+    <string name="settings_max_rounds_grids">%1$d 格</string>
+    <string name="settings_max_rounds_hint">计数规则：每 5 步记为 1 格。支持输入数值自定义步数（无上限），输入 0 设为不限制。</string>
+    <string name="settings_max_rounds_custom">自定义步数数值</string>
+    <string name="settings_max_rounds_custom_hint">输入数值，如 25，或 0 为无上限</string>
+    <string name="settings_max_rounds_convert_unlimited">换算结果：不限制步数（无上限）</string>
+    <string name="settings_max_rounds_convert">换算结果：每 5 步记为 1 格，%1$d 步 = %2$s</string>
+    <string name="settings_max_rounds_presets">快速预设：</string>
+    <string name="settings_max_rounds_preset_unlimited">无上限</string>
+    <string name="settings_max_rounds_preset_10">10步(2格)</string>
+    <string name="settings_max_rounds_preset_20">20步(4格)</string>
+    <string name="settings_max_rounds_preset_30">30步(6格)</string>
+    <string name="settings_max_rounds_preset_50">50步(10格)</string>
 
     <string name="settings_save">保存</string>
     <string name="settings_saved">设置已保存</string>
@@ -66,6 +109,21 @@
     <string name="error_temperature_range">温度需在 0 到 2 之间</string>
     <string name="error_max_tokens_range">最大 Token 需在 1 到 32768 之间</string>
     <string name="error_top_p_range">Top P 需在 0 到 1 之间</string>
+
+    <!-- 权限 -->
+    <string name="permission_accessibility">无障碍服务 (Accessibility)</string>
+    <string name="permission_accessibility_summary">核心控制底座，用于执行界面点击、滑动、按键及截屏</string>
+    <string name="permission_shizuku">Shizuku 极速提权通道</string>
+    <string name="permission_shizuku_granted">已授权：免 Root 极速截屏、无感静默输入与前台感知</string>
+    <string name="permission_shizuku_waiting">Shizuku 已运行，等待授权</string>
+    <string name="permission_shizuku_not_running">Shizuku 服务未运行 (可选，未开启时自动使用无障碍)，点击按钮打开 Shizuku 应用</string>
+    <string name="permission_shizuku_pending">待授权</string>
+    <string name="permission_shizuku_request">申请授权</string>
+    <string name="permission_overlay">前台控制悬浮胶囊 (Overlay)</string>
+    <string name="permission_overlay_summary">操作其他 App 时展示实时状态胶囊与随时一键停止打断</string>
+    <string name="permission_granted">已授权</string>
+    <string name="permission_not_granted">未开启</string>
+    <string name="permission_open_settings">去设置开启</string>
 
     <string name="cd_paw_logo">AgentPaw 标志</string>
     <string name="cd_back">返回</string>

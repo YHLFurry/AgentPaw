@@ -15,6 +15,7 @@ import com.paw.agent.core.model.ToolDefinition
 import com.paw.agent.data.conversation.InMemoryConversationRepository
 import com.paw.agent.data.settings.AppSettings
 import com.paw.agent.data.settings.SettingsRepository
+import com.paw.agent.data.settings.UiThemeMode
 import com.paw.agent.ui.floating.AgentExecutionController
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -274,8 +275,12 @@ class ChatViewModelTest {
             _settings.update { it.copy(darkTheme = enabled) }
         }
 
-        override suspend fun reset() {
-            _settings.value = AppSettings.Default
+        override suspend fun setUiTheme(mode: UiThemeMode) {
+            _settings.update { it.copy(uiTheme = mode) }
+        }
+
+        override suspend fun resetLlm() {
+            _settings.update { it.copy(llm = LlmConfig()) }
         }
     }
 }
