@@ -16,14 +16,27 @@ import com.paw.agent.device.accessibility.AgentAccessibilityService
 /**
  * Agent 无障碍操作停止悬浮窗按钮（Maven 包内置，供接入方直接使用）。
  *
- * Agent 执行无障碍操作期间调用 [show] 即可在屏幕上显示一枚可拖拽的红色"停止"胶囊；
- * 点击后：
+ * Agent 执行无障碍操作期间调用 [show] 登记一次「需要停止入口」的请求；
+ * 按钮的实际显示/隐藏由宿主 APP 的前后台状态驱动（默认策略 [AgentFloatingVisibilityMode.SHOW_ONLY_IN_BACKGROUND]）：
+ *
+ * | 宿主 APP 状态 | 按钮行为 |
+ * |---|---|
+ * | 前台可见（用户正在用宿主 APP） | **不显示**，避免遮挡自家界面 |
+ * | 已退到后台（用户已离开，去操作别的 APP） | **显示**悬浮停止胶囊 |
+ *
+ * 显示时机：宿主 APP 由前台转后台，或 [show] 调用时已处于后台；
+ * 隐藏时机：宿主 APP 由后台转前台，或 [hide] 被调用，或用户点击停止按钮。
+ *
+ * 点击按钮后：
  * 1. 触发 [AgentAccessibilityService.requestUserStop]，中止进行中及后续的无障碍手势/输入；
  * 2. 回调 [show] 注册的 onStopped（接入方可在此取消 Agent 循环等）；
  * 3. 自动隐藏按钮（也可随时 [hide]）。
  *
+ * 前后台判定条件与状态机见 [AgentFloatingDecider]、[AgentFloatingVisibilityStateMachine]，
+ * 采集逻辑见 [AgentAppForegroundMonitor]。
+ *
  * 需要 SYSTEM_ALERT_WINDOW 悬浮窗权限（由宿主申请），无权限时 [show] 返回 false。
- * 线程安全：全部操作切到主线程执行。
+ * 线程安全：全部窗口操作切到主线程执行。
  */
 object AgentStopFloatingButton {
 
@@ -33,11 +46,25 @@ object AgentStopFloatingButton {
     private var params: WindowManager.LayoutParams? = null
     private var windowManager: WindowManager? = null
 
+    /** 最近的显示请求上下文与回调，供状态变化后重建按钮 */
+    private var pendingContext: Context? = null
+    private var pendingStoppedCallback: (() -> Unit)? = null
+
+    private val stateMachine = AgentFloatingVisibilityStateMachine()
+
+    private val foregroundListener: (Boolean) -> Unit = { foreground ->
+        // 宿主 APP 前后台切换时同步窗口：回前台立即收起，退后台立即补上
+        runCatching { syncWindowVisibility() }
+    }
+
     /**
      * 显示停止悬浮按钮。
      *
+     * 注意：默认策略下，本方法只是「登记请求」。若宿主 APP 当前处于前台，
+     * 按钮不会立即出现，而是在宿主 APP 退到后台时才显示；[hide] 可随时撤销该请求。
+     *
      * @param onStopped 点击停止按钮后的回调（主线程），可为 null
-     * @return true 表示按钮已显示（或已在主线程外提交显示请求）；
+     * @return true 表示请求已登记（若宿主 APP 在后台则按钮已显示）；
      *         false 表示缺少悬浮窗权限或显示失败
      */
     fun show(context: Context, onStopped: (() -> Unit)? = null): Boolean {
@@ -51,19 +78,68 @@ object AgentStopFloatingButton {
         }
     }
 
-    /** 隐藏停止悬浮按钮（幂等） */
+    /** 隐藏停止悬浮按钮并撤销显示请求（幂等） */
     fun hide() {
         runOnMain {
+            pendingContext = null
+            pendingStoppedCallback = null
+            stateMachine.requestHide()
             hideInternal()
         }
     }
 
-    /** 按钮当前是否正在显示 */
+    /** 按钮当前是否真的挂在窗口上 */
     val isVisible: Boolean
         get() = synchronized(this) { floatingView != null }
 
+    /** 是否存在待显示的请求（可能因宿主 APP 在前台而暂未显示） */
+    val isShowRequested: Boolean
+        get() = synchronized(this) { stateMachine.isShowRequested }
+
+    /** 宿主 APP 当前是否处于前台可见 */
+    val isHostAppInForeground: Boolean
+        get() = AgentAppForegroundMonitor.isHostAppInForeground
+
+    /** 覆盖显示策略，默认仅在宿主 APP 退到后台时显示 */
+    fun setVisibilityMode(mode: AgentFloatingVisibilityMode) {
+        runOnMain {
+            stateMachine.updateMode(mode)
+            syncWindowVisibility()
+        }
+    }
+
     @SuppressLint("ClickableViewAccessibility")
     private fun showInternal(context: Context, onStopped: (() -> Unit)?): Boolean {
+        // 惰性兜底注册：集成方若未在 Application.onCreate 显式 install，这里补一次
+        AgentAppForegroundMonitor.install(context)
+        AgentAppForegroundMonitor.addListener(foregroundListener)
+
+        pendingContext = context
+        pendingStoppedCallback = onStopped
+        stateMachine.onHostAppForegroundChanged(AgentAppForegroundMonitor.isHostAppInForeground)
+        stateMachine.requestShow()
+
+        // 宿主 APP 在前台时按策略不显示，仅登记请求等待退到后台
+        if (!stateMachine.isVisible) {
+            hideInternal()
+            return true
+        }
+        return attachWindow(context, onStopped)
+    }
+
+    /** 按状态机当前结论挂载或摘除窗口 */
+    private fun syncWindowVisibility() {
+        val shouldShow = stateMachine.isVisible
+        val context = pendingContext
+        if (shouldShow && floatingView == null && context != null) {
+            attachWindow(context, pendingStoppedCallback)
+        } else if (!shouldShow) {
+            hideInternal()
+        }
+    }
+
+    @SuppressLint("ClickableViewAccessibility")
+    private fun attachWindow(context: Context, onStopped: (() -> Unit)?): Boolean {
         hideInternal()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(context)) {
             return false
@@ -107,7 +183,10 @@ object AgentStopFloatingButton {
                 AgentAccessibilityService.instance?.requestUserStop()
                 // 2. 通知接入方（例如取消 Agent 循环）
                 runCatching { onStopped?.invoke() }
-                // 3. 收起按钮
+                // 3. 撤销显示请求并收起按钮（避免下次退到后台时又冒出来）
+                pendingContext = null
+                pendingStoppedCallback = null
+                stateMachine.requestHide()
                 hideInternal()
             }
         }

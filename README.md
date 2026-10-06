@@ -262,7 +262,7 @@ binder arrives and when the user responds to the authorization dialog.
 ### Stop floating button (accessibility operations)
 
 While the agent drives the device through the accessibility service, host apps
-can show a floating red stop pill:
+request a floating red stop pill:
 
 ```kotlin
 AgentStopFloatingButton.show(context) {
@@ -270,11 +270,62 @@ AgentStopFloatingButton.show(context) {
 }
 ```
 
-Tapping it calls `AgentAccessibilityService.requestUserStop()` (in-flight and
-subsequent gestures/inputs abort immediately) and hides the button. It needs the
-`SYSTEM_ALERT_WINDOW` permission (also merged from the library manifest — grant
-the overlay permission before showing). Reset per turn with
+**The button never covers your own app.** `show()` only registers a request; the
+pill actually appears once the host app is no longer in front, so it can't block
+the UI you are looking at. `hide()` cancels the request.
+
+| Host app state | Pill |
+| --- | --- |
+| Foreground (user is inside the app) | hidden |
+| Background (user left to drive other apps) | shown |
+
+Show/hide triggers:
+
+- **Shown** — the host app transitions foreground → background, or `show()` is
+  called while the host app is already in the background.
+- **Hidden** — the host app transitions background → foreground, `hide()` is
+  called, the user taps the pill, or the pending request is cancelled.
+
+#### Foreground detection
+
+`AgentAppForegroundMonitor` resolves "is the host app in front" in two tiers
+(`AgentForegroundDecider`):
+
+1. **Host process has activities** (the normal case) — Activity
+   `resume`/`pause` is the single source of truth: `resumedActivityCount > 0`
+   means foreground. Resume (not start) is deliberate: in split-screen the host
+   activity can stay *started* while already out of focus, and there the user is
+   really in another app, so the pill must be visible.
+2. **Host process has no activities at all** (service-only integration) — falls
+   back to the accessibility service's reported foreground package: host package
+   == foreground package means foreground. Driving the device requires that
+   service anyway, so this signal is always available where it matters.
+
+When neither signal is available the state is treated as **background** — better
+to show a redundant pill than to leave the user without a stop entry.
+
+Register early so the first Activity's `onResume` isn't missed:
+
+```kotlin
+class MyApp : Application() {
+    override fun onCreate() {
+        super.onCreate()
+        AgentAppForegroundMonitor.install(this)
+    }
+}
+```
+
+`AgentStopFloatingButton.show()` also installs it lazily as a fallback, but a
+late registration can misjudge the very first launch and flash the pill. Needs
+the `SYSTEM_ALERT_WINDOW` permission (also merged from the library manifest —
+grant the overlay permission before showing). Reset per turn with
 `AgentAccessibilityService.instance?.clearUserStop()`.
+
+Opt out of the background-only policy if you want the pill always on screen:
+
+```kotlin
+AgentStopFloatingButton.setVisibilityMode(AgentFloatingVisibilityMode.ALWAYS)
+```
 
 ## Building
 

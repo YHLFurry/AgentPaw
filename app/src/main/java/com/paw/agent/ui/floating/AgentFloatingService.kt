@@ -32,6 +32,10 @@ import kotlinx.coroutines.launch
 /**
  * Agent 任务执行悬浮胶囊服务。
  * 在第三方 App 操作时显示当前动作，支持用户随时拖拽和一键停止。
+ *
+ * 显示时机遵循与 Maven 包一致的前后台策略：宿主 AgentPaw 在前台时不显示悬浮胶囊，
+ * 退到后台（用户已离开去操作别的 APP）时才显示。前台服务通知不受此限制，
+ * 以满足 Android 对前台服务必须有可见通知的要求。
  */
 class AgentFloatingService : Service() {
 
@@ -42,11 +46,22 @@ class AgentFloatingService : Service() {
     private val serviceScope = CoroutineScope(Dispatchers.Main + Job())
     private var stateCollectJob: Job? = null
 
+    /** 宿主 APP 是否处于前台；前台时不挂载悬浮胶囊 */
+    private var hostInForeground = true
+
+    private val foregroundListener: (Boolean) -> Unit = { foreground ->
+        hostInForeground = foreground
+        syncFloatingVisibility()
+    }
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
         super.onCreate()
         windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        com.paw.agent.device.floating.AgentAppForegroundMonitor.install(this)
+        com.paw.agent.device.floating.AgentAppForegroundMonitor.addListener(foregroundListener)
+        hostInForeground = com.paw.agent.device.floating.AgentAppForegroundMonitor.isHostAppInForeground
         startForegroundNotification()
         setupFloatingView()
         observeAgentState()
@@ -250,7 +265,10 @@ class AgentFloatingService : Service() {
                         }
                         currentParams.x = initialX + dx
                         currentParams.y = initialY + dy
-                        windowManager.updateViewLayout(floatingView, currentParams)
+                        val target = floatingView
+                        if (target != null && target.isAttachedToWindow) {
+                            runCatching { windowManager.updateViewLayout(target, currentParams) }
+                        }
                         return true
                     }
                     MotionEvent.ACTION_UP -> {
@@ -273,11 +291,28 @@ class AgentFloatingService : Service() {
             }
         })
 
-        if (com.paw.agent.device.DevicePermissionManager.canDrawOverlays(this)) {
-            floatingView = container
-            runCatching {
-                windowManager.addView(container, lp)
+        floatingView = container
+        // 挂载与否由宿主前后台状态决定，见 syncFloatingVisibility()
+        syncFloatingVisibility()
+    }
+
+    /**
+     * 按宿主 APP 前后台状态挂载/摘除悬浮胶囊。
+     * 前台可见时直接不挂载，用户看不到也点不到，避免遮挡本体 APP 界面。
+     */
+    private fun syncFloatingVisibility() {
+        val view = floatingView ?: return
+        if (hostInForeground) {
+            if (view.isAttachedToWindow) {
+                runCatching { windowManager.removeView(view) }
             }
+            return
+        }
+        if (!view.isAttachedToWindow &&
+            com.paw.agent.device.DevicePermissionManager.canDrawOverlays(this)
+        ) {
+            val lp = params ?: return
+            runCatching { windowManager.addView(view, lp) }
         }
     }
 
@@ -323,6 +358,7 @@ class AgentFloatingService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         stateCollectJob?.cancel()
+        com.paw.agent.device.floating.AgentAppForegroundMonitor.removeListener(foregroundListener)
         floatingView?.let {
             runCatching { windowManager.removeView(it) }
         }
