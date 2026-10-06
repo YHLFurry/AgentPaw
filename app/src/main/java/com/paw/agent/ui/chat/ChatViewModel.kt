@@ -93,6 +93,7 @@ class ChatViewModel(
 
         // Placeholder row so the UI has something to stream into.
         val assistantId = UUID.randomUUID().toString()
+        activeAssistantId = assistantId
         conversationRepository.addMessage(
             Message(
                 id = assistantId,
@@ -117,11 +118,14 @@ class ChatViewModel(
                     history = conversationRepository.conversation.value.messages
                         .dropLast(1), // exclude the placeholder
                     isCancelled = { cancelled },
-                ).collect { event -> handleEvent(assistantId, event) }
+                ).collect { event -> handleEvent(event) }
             } catch (e: CancellationException) {
-                conversationRepository.updateMessage(assistantId) {
-                    it.copy(status = MessageStatus.CANCELLED)
+                activeAssistantId?.let { id ->
+                    conversationRepository.updateMessage(id) {
+                        it.copy(status = MessageStatus.CANCELLED)
+                    }
                 }
+                activeAssistantId = null
                 AgentExecutionController.requestStop()
                 throw e
             } finally {
@@ -130,40 +134,96 @@ class ChatViewModel(
         }
     }
 
-    private fun handleEvent(assistantId: String, event: AgentEvent) {
+    private var activeAssistantId: String? = null
+
+    private fun handleEvent(event: AgentEvent) {
         when (event) {
-            is AgentEvent.AssistantDelta -> conversationRepository.appendToMessage(
-                id = assistantId,
-                text = event.message.content,
-            )
+            is AgentEvent.AssistantDelta -> {
+                val currentId = activeAssistantId
+                if (currentId == null) {
+                    val newId = UUID.randomUUID().toString()
+                    activeAssistantId = newId
+                    conversationRepository.addMessage(
+                        Message(
+                            id = newId,
+                            role = MessageRole.ASSISTANT,
+                            content = event.message.content,
+                            status = MessageStatus.STREAMING,
+                            createdAt = System.currentTimeMillis(),
+                        ),
+                    )
+                } else {
+                    conversationRepository.updateMessage(currentId) {
+                        it.copy(
+                            content = event.message.content,
+                            status = MessageStatus.STREAMING,
+                        )
+                    }
+                }
+            }
 
             is AgentEvent.Completed -> {
-                conversationRepository.updateMessage(assistantId) {
-                    it.copy(content = event.message.content, status = MessageStatus.COMPLETE)
+                val currentId = activeAssistantId
+                if (currentId != null) {
+                    conversationRepository.updateMessage(currentId) {
+                        it.copy(content = event.message.content, status = MessageStatus.COMPLETE)
+                    }
+                    activeAssistantId = null
+                } else if (event.message.content.isNotBlank()) {
+                    conversationRepository.addMessage(
+                        Message(
+                            id = UUID.randomUUID().toString(),
+                            role = MessageRole.ASSISTANT,
+                            content = event.message.content,
+                            status = MessageStatus.COMPLETE,
+                            createdAt = System.currentTimeMillis(),
+                        ),
+                    )
                 }
                 AgentExecutionController.markCompleted()
             }
 
             is AgentEvent.Failed -> {
-                conversationRepository.updateMessage(assistantId) {
-                    it.copy(
-                        content = event.message.content.ifBlank { it.content },
-                        status = MessageStatus.FAILED,
-                        error = event.message.error,
-                    )
+                val currentId = activeAssistantId
+                if (currentId != null) {
+                    conversationRepository.updateMessage(currentId) {
+                        it.copy(
+                            content = event.message.content.ifBlank { it.content },
+                            status = MessageStatus.FAILED,
+                            error = event.message.error,
+                        )
+                    }
+                    activeAssistantId = null
                 }
                 AgentExecutionController.markFailed(event.message.error ?: "执行失败")
             }
 
             is AgentEvent.Cancelled -> {
-                conversationRepository.updateMessage(assistantId) {
-                    it.copy(status = MessageStatus.CANCELLED)
+                val currentId = activeAssistantId
+                if (currentId != null) {
+                    conversationRepository.updateMessage(currentId) {
+                        it.copy(status = MessageStatus.CANCELLED)
+                    }
+                    activeAssistantId = null
                 }
                 AgentExecutionController.requestStop()
             }
 
             is AgentEvent.ToolStarted -> {
                 stepCount++
+                val currentId = activeAssistantId
+                if (currentId != null) {
+                    val currentMsg = conversationRepository.conversation.value.messages.find { it.id == currentId }
+                    if (currentMsg != null && currentMsg.content.isBlank()) {
+                        conversationRepository.removeMessage(currentId)
+                    } else {
+                        conversationRepository.updateMessage(currentId) {
+                            it.copy(status = MessageStatus.COMPLETE)
+                        }
+                    }
+                    activeAssistantId = null
+                }
+
                 val actionDesc = "${event.call.name} ${event.call.arguments.take(40)}"
                 AgentExecutionController.updateProgress(stepCount, maxSteps, actionDesc)
 
@@ -214,6 +274,10 @@ class ChatViewModel(
             runJob = null
             // 同步停止无障碍操作：中止进行中/后续手势，确保"停止"立即生效
             com.paw.agent.device.accessibility.AgentAccessibilityService.instance?.requestUserStop()
+            activeAssistantId?.let { id ->
+                conversationRepository.updateMessage(id) { it.copy(status = MessageStatus.CANCELLED) }
+            }
+            activeAssistantId = null
             // 回调链：requestStop() -> stopCallback -> stop()，重入调用会被
             // 上面的 isStopping 拦下，不再继续反向递归
             AgentExecutionController.requestStop()

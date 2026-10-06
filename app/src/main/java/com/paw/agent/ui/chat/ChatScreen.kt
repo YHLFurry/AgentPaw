@@ -61,10 +61,15 @@ fun ChatScreen(
 ) {
     val listState = rememberLazyListState()
 
-    // Keep the newest message in view as tokens stream in.
+    // Keep the newest message in view as tokens stream in without animation conflicts.
     LaunchedEffect(messages.size, messages.lastOrNull()?.content?.length) {
         if (messages.isNotEmpty()) {
-            listState.animateScrollToItem(messages.lastIndex)
+            val isNearBottom = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index?.let {
+                it >= messages.size - 2
+            } ?: true
+            if (isNearBottom) {
+                listState.scrollToItem(messages.lastIndex)
+            }
         }
     }
 
@@ -195,7 +200,12 @@ fun ChatScreen(
                         // "Key was already used" 崩掉整个对话界面。消息列表只追加
                         // 不重排，默认的位置 key 足够且更稳。
                         items(items = messages) { message ->
-                            MessageBubble(message = message)
+                            if (message.role != com.paw.agent.core.model.MessageRole.ASSISTANT ||
+                                message.content.isNotBlank() ||
+                                message.status == com.paw.agent.core.model.MessageStatus.STREAMING
+                            ) {
+                                MessageBubble(message = message)
+                            }
                         }
                     }
                 }

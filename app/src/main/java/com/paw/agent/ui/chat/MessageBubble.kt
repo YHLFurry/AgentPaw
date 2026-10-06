@@ -39,6 +39,14 @@ import com.paw.agent.ui.components.PawMark
 import com.paw.agent.ui.components.StatusPill
 import com.paw.agent.ui.components.ThinkingIndicator
 
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.material.icons.outlined.ContentCopy
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
+import android.widget.Toast
+
 /**
  * One message row. User turns are right-aligned in a filled container; agent
  * turns are left-aligned with a paw avatar, matching the app's identity.
@@ -49,6 +57,8 @@ fun MessageBubble(
     modifier: Modifier = Modifier,
 ) {
     val isUser = message.role == MessageRole.USER
+    val context = LocalContext.current
+    val clipboardManager = LocalClipboardManager.current
 
     Row(
         modifier = modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
@@ -99,32 +109,67 @@ fun MessageBubble(
                         MessageImages(message.images)
                         Spacer(Modifier.height(8.dp))
                     }
-                    when (message.role) {
-                        MessageRole.TOOL -> ToolMessageBody(message)
-                        else -> AssistantOrUserBody(message)
+                    SelectionContainer {
+                        when (message.role) {
+                            MessageRole.TOOL -> ToolMessageBody(message)
+                            else -> AssistantOrUserBody(message)
+                        }
                     }
                 }
             }
 
-            // Status line: errors, cancellation, streaming indicator.
-            when {
-                message.status == MessageStatus.FAILED && message.error != null -> {
-                    Spacer(Modifier.height(6.dp))
-                    StatusPill(
-                        text = message.error.orEmpty(),
-                        container = MaterialTheme.colorScheme.errorContainer,
-                        content = MaterialTheme.colorScheme.onErrorContainer,
-                    )
+            // Action line: copy button & status pills
+            Row(
+                modifier = Modifier.padding(top = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
+            ) {
+                if (message.content.isNotBlank()) {
+                    Surface(
+                        onClick = {
+                            clipboardManager.setText(AnnotatedString(message.content))
+                            Toast.makeText(context, "已复制消息内容", Toast.LENGTH_SHORT).show()
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.ContentCopy,
+                                contentDescription = "复制消息内容",
+                                modifier = Modifier.size(12.dp),
+                            )
+                            Spacer(Modifier.width(3.dp))
+                            Text(
+                                text = "复制",
+                                style = MaterialTheme.typography.labelSmall,
+                            )
+                        }
+                    }
                 }
 
-                message.status == MessageStatus.CANCELLED -> {
-                    Spacer(Modifier.height(6.dp))
-                    StatusPill(text = stringResource(R.string.chat_stopped))
-                }
+                when {
+                    message.status == MessageStatus.FAILED && message.error != null -> {
+                        if (message.content.isNotBlank()) Spacer(Modifier.width(6.dp))
+                        StatusPill(
+                            text = message.error.orEmpty(),
+                            container = MaterialTheme.colorScheme.errorContainer,
+                            content = MaterialTheme.colorScheme.onErrorContainer,
+                        )
+                    }
 
-                message.status == MessageStatus.STREAMING && message.content.isEmpty() -> {
-                    Spacer(Modifier.height(6.dp))
-                    ThinkingIndicator()
+                    message.status == MessageStatus.CANCELLED -> {
+                        if (message.content.isNotBlank()) Spacer(Modifier.width(6.dp))
+                        StatusPill(text = stringResource(R.string.chat_stopped))
+                    }
+
+                    message.status == MessageStatus.STREAMING && message.content.isEmpty() -> {
+                        ThinkingIndicator()
+                    }
                 }
             }
         }

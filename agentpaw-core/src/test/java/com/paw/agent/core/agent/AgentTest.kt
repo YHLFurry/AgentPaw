@@ -200,6 +200,22 @@ class AgentTest {
     }
 
     @Test
+    fun `setting maxToolRounds to 0 allows unlimited rounds`() = runTest {
+        val toolCall = com.paw.agent.core.model.ToolCall("id", "echo", "{}")
+        // 10 turns of tool calls followed by final answer (more than default 8)
+        val script = List(10) { listOf(LlmChunk.ToolCalls(listOf(toolCall))) } +
+            listOf(listOf(LlmChunk.Delta("final answer")))
+        val client = ScriptedClient(script)
+        val agent = Agent(client, ToolRegistry(listOf(EchoTool())), maxToolRounds = 0)
+
+        val events = agent.run(config, listOf(user("go"))).toList()
+
+        val completed = events.filterIsInstance<AgentEvent.Completed>().singleOrNull()
+        org.junit.Assert.assertNotNull(completed)
+        assertEquals("final answer", completed?.message?.content)
+    }
+
+    @Test
     fun `each tool call produces exactly one result event`() = runTest {
         val toolCall = com.paw.agent.core.model.ToolCall("c1", "echo", "{}")
         val client = ScriptedClient(
