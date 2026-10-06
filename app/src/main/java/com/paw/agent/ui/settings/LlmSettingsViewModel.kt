@@ -131,7 +131,7 @@ class LlmSettingsViewModel(
     }
 
     fun onMaxToolRoundsChange(value: Int) {
-        _uiState.value = _uiState.value.copy(maxToolRounds = value.coerceIn(1, 50))
+        _uiState.value = _uiState.value.copy(maxToolRounds = value.coerceAtLeast(0))
     }
 
     fun onVisionResolutionModeChange(value: String) {

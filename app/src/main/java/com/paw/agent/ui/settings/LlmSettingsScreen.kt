@@ -1,6 +1,7 @@
 package com.paw.agent.ui.settings
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
@@ -33,6 +34,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -40,7 +42,9 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -252,13 +256,9 @@ fun LlmSettingsScreen(
 
             // ---- agent execution & vision ----
             SettingsSection(title = "Agent 手机控制与视觉策略") {
-                SliderRow(
-                    label = "最大执行步数 (Max Rounds)",
-                    value = state.maxToolRounds.toFloat(),
-                    valueRange = 5f..50f,
-                    steps = 44,
-                    display = "${state.maxToolRounds} 步",
-                    onValueChange = { onMaxToolRoundsChange(it.roundToInt()) },
+                StepSettingsControl(
+                    maxToolRounds = state.maxToolRounds,
+                    onMaxToolRoundsChange = onMaxToolRoundsChange,
                 )
 
                 Spacer(Modifier.height(12.dp))
@@ -690,4 +690,135 @@ private fun PermissionItem(
         }
     }
 }
+
+@Composable
+private fun StepSettingsControl(
+    maxToolRounds: Int,
+    onMaxToolRoundsChange: (Int) -> Unit,
+) {
+    // 计数规则：每 5 步记为 1 格
+    val currentGrids = if (maxToolRounds <= 0) "无上限" else {
+        if (maxToolRounds % 5 == 0) "${maxToolRounds / 5} 格" else String.format(java.util.Locale.US, "%.1f 格", maxToolRounds / 5.0)
+    }
+
+    var inputText by remember(maxToolRounds) {
+        mutableStateOf(if (maxToolRounds <= 0) "0" else maxToolRounds.toString())
+    }
+
+    Column(Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "最大执行步数 (Max Rounds)",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Surface(
+                shape = MaterialTheme.shapes.small,
+                color = if (maxToolRounds <= 0) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.primaryContainer,
+            ) {
+                Text(
+                    text = if (maxToolRounds <= 0) "不限制（无上限）" else "$maxToolRounds 步 ($currentGrids)",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = if (maxToolRounds <= 0) MaterialTheme.colorScheme.onTertiaryContainer else MaterialTheme.colorScheme.onPrimaryContainer,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                )
+            }
+        }
+
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = "计数规则：每 5 步记为 1 格。支持输入数值自定义步数（无上限），输入 0 设为不限制。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.outline,
+        )
+
+        Spacer(Modifier.height(10.dp))
+
+        // 自定义步数输入框
+        OutlinedTextField(
+            value = inputText,
+            onValueChange = { newStr ->
+                val filtered = newStr.filter { it.isDigit() }
+                inputText = filtered
+                val parsed = filtered.toIntOrNull()
+                if (parsed != null && parsed >= 0) {
+                    onMaxToolRoundsChange(parsed)
+                }
+            },
+            label = { Text("自定义步数数值") },
+            placeholder = { Text("输入数值，如 25，或 0 为无上限") },
+            supportingText = {
+                val num = inputText.toIntOrNull() ?: 0
+                val converted = if (num <= 0) {
+                    "换算结果：不限制步数（无上限）"
+                } else {
+                    val g = if (num % 5 == 0) "${num / 5} 格" else String.format(java.util.Locale.US, "%.1f 格", num / 5.0)
+                    "换算结果：每 5 步记为 1 格，${num} 步 = $g"
+                }
+                Text(converted, color = MaterialTheme.colorScheme.primary)
+            },
+            keyboardOptions = KeyboardOptions(
+                keyboardType = KeyboardType.Number,
+                imeAction = ImeAction.Done,
+            ),
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+
+        Spacer(Modifier.height(8.dp))
+
+        // 快速预设按钮
+        Text(
+            text = "快速预设：",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(4.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            val presets = listOf(
+                0 to "无上限",
+                10 to "10步(2格)",
+                20 to "20步(4格)",
+                30 to "30步(6格)",
+                50 to "50步(10格)",
+            )
+            presets.forEach { (stepVal, label) ->
+                val isSelected = (stepVal == 0 && maxToolRounds <= 0) || (stepVal > 0 && maxToolRounds == stepVal)
+                Card(
+                    onClick = {
+                        inputText = stepVal.toString()
+                        onMaxToolRoundsChange(stepVal)
+                    },
+                    modifier = Modifier.weight(1f),
+                    shape = MaterialTheme.shapes.small,
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
+                    ),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 6.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            text = label,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
 

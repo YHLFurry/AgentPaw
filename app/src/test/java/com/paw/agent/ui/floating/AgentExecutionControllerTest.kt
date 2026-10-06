@@ -37,4 +37,22 @@ class AgentExecutionControllerTest {
 
         AgentExecutionController.unregisterStopCallback()
     }
+
+    @Test
+    fun `unlimited steps (maxSteps = 0) sets state correctly`() {
+        AgentExecutionController.markStarted(maxSteps = 0)
+        var state = AgentExecutionController.state.value
+        assertTrue(state.isRunning)
+        assertEquals(0, state.maxSteps)
+
+        AgentExecutionController.updateProgress(step = 6, maxSteps = 0, action = "swipe 500 800")
+        state = AgentExecutionController.state.value
+        assertEquals(6, state.currentStep)
+        assertEquals(0, state.maxSteps)
+        assertEquals("swipe 500 800", state.currentAction)
+
+        AgentExecutionController.markCompleted()
+        state = AgentExecutionController.state.value
+        assertFalse(state.isRunning)
+    }
 }

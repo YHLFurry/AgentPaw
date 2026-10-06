@@ -151,7 +151,7 @@ class AgentFloatingService : Service() {
         val container = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dpToPx(14), dpToPx(8), dpToPx(10), dpToPx(8))
+            setPadding(dpToPx(12), dpToPx(6), dpToPx(8), dpToPx(6))
             background = GradientDrawable().apply {
                 cornerRadius = dpToPx(24).toFloat()
                 setColor(Color.parseColor("#E6202124")) // 半透明深色质感
@@ -160,13 +160,26 @@ class AgentFloatingService : Service() {
             elevation = dpToPx(6).toFloat()
         }
 
+        // 展开/收起按钮
+        val toggleButton = TextView(this).apply {
+            text = "收起 ◀"
+            textSize = 10f
+            setTextColor(Color.parseColor("#E0E0E0"))
+            background = GradientDrawable().apply {
+                cornerRadius = dpToPx(12).toFloat()
+                setColor(Color.parseColor("#33FFFFFF"))
+            }
+            setPadding(dpToPx(6), dpToPx(3), dpToPx(6), dpToPx(3))
+        }
+        container.addView(toggleButton)
+
         // 状态文字
         val statusText = TextView(this).apply {
             id = STATUS_TEXT_ID
             text = "AgentPaw: 准备中..."
             setTextColor(Color.WHITE)
             textSize = 12f
-            setPadding(0, 0, dpToPx(10), 0)
+            setPadding(dpToPx(8), 0, dpToPx(10), 0)
             maxLines = 1
         }
         container.addView(statusText)
@@ -189,6 +202,26 @@ class AgentFloatingService : Service() {
             }
         }
         container.addView(stopButton)
+
+        fun applyExpandedState() {
+            if (isExpanded) {
+                statusText.visibility = View.VISIBLE
+                stopButton.visibility = View.VISIBLE
+                toggleButton.text = "收起 ◀"
+                container.setPadding(dpToPx(12), dpToPx(6), dpToPx(8), dpToPx(6))
+            } else {
+                statusText.visibility = View.GONE
+                stopButton.visibility = View.GONE
+                toggleButton.text = "🐾 展开 ▶"
+                container.setPadding(dpToPx(10), dpToPx(6), dpToPx(10), dpToPx(6))
+            }
+            params?.let { runCatching { windowManager.updateViewLayout(container, it) } }
+        }
+
+        toggleButton.setOnClickListener {
+            isExpanded = !isExpanded
+            applyExpandedState()
+        }
 
         // 手势拖动与点击唤醒主界面
         container.setOnTouchListener(object : View.OnTouchListener {
@@ -222,11 +255,16 @@ class AgentFloatingService : Service() {
                     }
                     MotionEvent.ACTION_UP -> {
                         if (!isMoved) {
-                            // 点击非按钮区域，唤起 MainActivity
-                            val appIntent = Intent(this@AgentFloatingService, MainActivity::class.java).apply {
-                                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                            if (!isExpanded) {
+                                isExpanded = true
+                                applyExpandedState()
+                            } else {
+                                // 点击非按钮区域，唤起 MainActivity
+                                val appIntent = Intent(this@AgentFloatingService, MainActivity::class.java).apply {
+                                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                                }
+                                startActivity(appIntent)
                             }
-                            startActivity(appIntent)
                         }
                         return true
                     }
@@ -243,10 +281,25 @@ class AgentFloatingService : Service() {
         }
     }
 
+    private var isExpanded = true
+
     private fun observeAgentState() {
         stateCollectJob = serviceScope.launch {
             AgentExecutionController.state.collect { state ->
-                val stepPrefix = if (state.isRunning) "[${state.currentStep}/${state.maxSteps}] " else ""
+                // 计数规则：每 5 步记为 1 格
+                val currentGrid = if (state.currentStep > 0) (state.currentStep + 4) / 5 else 0
+                val stepPrefix = if (state.isRunning) {
+                    if (state.maxSteps <= 0 || state.maxSteps == Int.MAX_VALUE) {
+                        "[第${state.currentStep}步·第${currentGrid}格/无上限] "
+                    } else {
+                        val totalGrids = if (state.maxSteps % 5 == 0) {
+                            "${state.maxSteps / 5}"
+                        } else {
+                            String.format(java.util.Locale.US, "%.1f", state.maxSteps / 5.0)
+                        }
+                        "[第${state.currentStep}步·第${currentGrid}格/共${state.maxSteps}步·${totalGrids}格] "
+                    }
+                } else ""
                 val briefAction = state.currentAction.take(24)
 
                 val tv = floatingView?.findViewById<TextView>(STATUS_TEXT_ID)

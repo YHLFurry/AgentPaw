@@ -78,9 +78,9 @@ class Agent(
         var buffer = StringBuilder()
 
         val effectiveMaxRounds = if (this@Agent.maxToolRounds != DEFAULT_MAX_TOOL_ROUNDS) {
-            this@Agent.maxToolRounds
+            if (this@Agent.maxToolRounds <= 0) Int.MAX_VALUE else this@Agent.maxToolRounds
         } else {
-            config.maxToolRounds.takeIf { it > 0 } ?: DEFAULT_MAX_TOOL_ROUNDS
+            if (config.maxToolRounds <= 0) Int.MAX_VALUE else config.maxToolRounds
         }
         var round = 0
         while (true) {

@@ -24,6 +24,7 @@ interface ConversationRepository {
     /** Replaces the message with [id] — used to grow a streaming assistant turn. */
     fun updateMessage(id: String, transform: (Message) -> Message)
     fun appendToMessage(id: String, text: String)
+    fun removeMessage(id: String)
     fun clear()
     fun observe(): Flow<Conversation> = conversation
 }
@@ -68,6 +69,15 @@ class InMemoryConversationRepository : ConversationRepository {
     override fun appendToMessage(id: String, text: String) {
         if (text.isEmpty()) return
         updateMessage(id) { it.copy(content = it.content + text) }
+    }
+
+    override fun removeMessage(id: String) {
+        _conversation.update { current ->
+            current.copy(
+                messages = current.messages.filterNot { it.id == id },
+                updatedAt = System.currentTimeMillis(),
+            )
+        }
     }
 
     override fun clear() {
