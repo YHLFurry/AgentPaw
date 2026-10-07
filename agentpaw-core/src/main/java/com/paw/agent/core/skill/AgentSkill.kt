@@ -122,10 +122,9 @@ class OpenAndSearchSkill : AgentSkill {
         }
 
         if (searchNode != null) {
-            // Click the search element
-            val xNorm = ((searchNode.bounds.centerX.toFloat() / 1080f) * 1000).toInt().coerceIn(0, 1000)
-            val yNorm = ((searchNode.bounds.centerY.toFloat() / 2400f) * 1000).toInt().coerceIn(0, 1000)
-            phoneController.tap(xNorm, yNorm)
+            // Click the search element at its exact on-screen pixel center — no
+            // hardcoded resolution, so this works on any device density/size.
+            phoneController.tapAtPixel(searchNode.bounds.centerX.toFloat(), searchNode.bounds.centerY.toFloat())
             delay(500)
         }
 
@@ -185,14 +184,14 @@ class ScrollAndFindSkill : AgentSkill {
             }
 
             if (matched != null) {
-                val xNorm = ((matched.bounds.centerX.toFloat() / 1080f) * 1000).toInt().coerceIn(0, 1000)
-                val yNorm = ((matched.bounds.centerY.toFloat() / 2400f) * 1000).toInt().coerceIn(0, 1000)
+                val cx = matched.bounds.centerX.toFloat()
+                val cy = matched.bounds.centerY.toFloat()
                 if (autoTap) {
-                    phoneController.tap(xNorm, yNorm)
+                    phoneController.tapAtPixel(cx, cy)
                     delay(500)
-                    return """{"status":"success","action":"found_and_tapped","text":"$targetText","x":$xNorm,"y":$yNorm}"""
+                    return """{"status":"success","action":"found_and_tapped","text":"$targetText","bounds":[${matched.bounds.left},${matched.bounds.top},${matched.bounds.right},${matched.bounds.bottom}]}"""
                 } else {
-                    return """{"status":"success","action":"found","text":"$targetText","x":$xNorm,"y":$yNorm}"""
+                    return """{"status":"success","action":"found","text":"$targetText","bounds":[${matched.bounds.left},${matched.bounds.top},${matched.bounds.right},${matched.bounds.bottom}]}"""
                 }
             }
 

@@ -3,8 +3,11 @@ package com.paw.agent.core.tool.android
 import com.paw.agent.core.agent.AgentContext
 import com.paw.agent.core.skill.OpenAndSearchSkill
 import com.paw.agent.core.skill.ReturnHomeAndResetSkill
+import com.paw.agent.core.skill.ScrollAndFindSkill
 import com.paw.agent.core.skill.SkillRegistry
+import com.paw.agent.core.tool.android.ClickElementTool
 import com.paw.agent.device.PhoneController
+import com.paw.agent.device.RectBounds
 import com.paw.agent.device.ScreenStateInfo
 import com.paw.agent.device.ScreenshotResult
 import com.paw.agent.device.UiElementInfo
@@ -21,19 +24,26 @@ class AndroidPhoneToolsTest {
         override val isShizukuAvailable: Boolean = true
 
         var lastTap: Pair<Int, Int>? = null
+        var lastTapCropRoi: List<Int>? = null
+        var lastTapAtPixel: Pair<Float, Float>? = null
         var lastSwipe: List<Int>? = null
         var lastInput: String? = null
         var lastKeyAction: String? = null
         var lastLaunched: String? = null
         var lastDeepLink: String? = null
 
-        override suspend fun tap(xNormalized: Int, yNormalized: Int): Boolean {
+        override suspend fun tap(xNormalized: Int, yNormalized: Int, cropRoi: List<Int>?): Boolean {
             lastTap = Pair(xNormalized, yNormalized)
+            lastTapCropRoi = cropRoi
             return true
         }
 
-        override suspend fun doubleTap(xNormalized: Int, yNormalized: Int): Boolean = true
-        override suspend fun longPress(xNormalized: Int, yNormalized: Int, durationMs: Long): Boolean = true
+        override suspend fun doubleTap(xNormalized: Int, yNormalized: Int, cropRoi: List<Int>?): Boolean = true
+        override suspend fun longPress(xNormalized: Int, yNormalized: Int, durationMs: Long, cropRoi: List<Int>?): Boolean = true
+        override suspend fun tapAtPixel(centerX: Float, centerY: Float): Boolean {
+            lastTapAtPixel = Pair(centerX, centerY)
+            return true
+        }
 
         override suspend fun swipe(
             startXNormalized: Int,
@@ -267,6 +277,97 @@ class AndroidPhoneToolsTest {
         assertEquals("tv.danmaku.bili", aliases["b站"])
         assertEquals("com.autonavi.minimap", aliases["高德地图"])
         assertEquals("com.android.settings", aliases["设置"])
+    }
+
+    /**
+     * A phone controller that returns a single known element and records the exact
+     * pixel point passed to [tapAtPixel]. Used to verify pixel-accurate clicking and
+     * to guard against the old hardcoded 1080x2400 normalization bug.
+     */
+    private class SkillFakeController(val element: UiElementInfo) : PhoneController by FakePhoneController() {
+        var lastTapAtPixel: Pair<Float, Float>? = null
+
+        override suspend fun getScreenState(): ScreenStateInfo =
+            ScreenStateInfo(foregroundPackage = "com.test.app", elements = listOf(element))
+
+        override suspend fun tapAtPixel(centerX: Float, centerY: Float): Boolean {
+            lastTapAtPixel = Pair(centerX, centerY)
+            return true
+        }
+    }
+
+    @Test
+    fun `click_element taps the exact pixel center of an element resolved by index`() = runTest {
+        val elem = UiElementInfo(text = "确认", bounds = RectBounds(10, 20, 110, 120)) // center (60, 70)
+        val ctrl = SkillFakeController(elem)
+        val tool = ClickElementTool(ctrl)
+        val res = tool.execute("""{"index": 0}""", context)
+        assertTrue(res.contains("success"))
+        assertEquals(Pair(60f, 70f), ctrl.lastTapAtPixel)
+    }
+
+    @Test
+    fun `click_element taps the exact pixel center from explicit bounds`() = runTest {
+        val ctrl = SkillFakeController(UiElementInfo(text = "x", bounds = RectBounds(10, 20, 110, 120)))
+        val tool = ClickElementTool(ctrl)
+        val res = tool.execute("""{"bounds": [10, 20, 110, 120]}""", context)
+        assertTrue(res.contains("success"))
+        assertEquals(Pair(60f, 70f), ctrl.lastTapAtPixel)
+    }
+
+    @Test
+    fun `click_element resolves and taps an element matched by text`() = runTest {
+        val elem = UiElementInfo(text = "确认订单", bounds = RectBounds(200, 800, 400, 900)) // center (300, 850)
+        val ctrl = SkillFakeController(elem)
+        val tool = ClickElementTool(ctrl)
+        val res = tool.execute("""{"text": "确认"}""", context)
+        assertTrue(res.contains("success"))
+        assertEquals(Pair(300f, 850f), ctrl.lastTapAtPixel)
+    }
+
+    @Test
+    fun `click_element pauses on sensitive payment or password screen`() = runTest {
+        val sensitiveController = object : PhoneController by controller {
+            override suspend fun getScreenState(): ScreenStateInfo = ScreenStateInfo(
+                foregroundPackage = "com.eg.android.AlipayGphone",
+                elements = listOf(UiElementInfo(text = "请输入支付密码", isEditable = true)),
+            )
+        }
+        val tool = ClickElementTool(sensitiveController)
+        val res = tool.execute("""{"text": "支付"}""", context)
+        assertTrue(res.contains("SAFETY PAUSE"))
+        assertTrue(res.contains("paused"))
+    }
+
+    @Test
+    fun `tap tool forwards crop_roi to the controller`() = runTest {
+        val tool = TapTool(controller)
+        val res = tool.execute("""{"x": 100, "y": 200, "crop_roi": [0, 0, 500, 500]}""", context)
+        assertTrue(res.contains("success"))
+        assertEquals(Pair(100, 200), controller.lastTap)
+        assertEquals(listOf(0, 0, 500, 500), controller.lastTapCropRoi)
+    }
+
+    @Test
+    fun `open_and_search skill clicks at real pixel center, not a hardcoded resolution`() = runTest {
+        // 关键回归：旧实现用写死的 1080x2400 把 bounds 转成归一化坐标，
+        // 在非 1080x2400 设备上会整体偏移。新实现直接按真实像素中心点击。
+        val elem = UiElementInfo(text = "搜索", bounds = RectBounds(100, 200, 300, 400)) // center (200, 300)
+        val ctrl = SkillFakeController(elem)
+        val skill = OpenAndSearchSkill()
+        val res = skill.execute("""{"app_name": "test", "keyword": "hello"}""", ctrl, context)
+        assertTrue(res.contains("success"))
+        assertEquals(Pair(200f, 300f), ctrl.lastTapAtPixel)
+    }
+
+    @Test
+    fun `scroll_and_find skill taps at real pixel center, not a hardcoded resolution`() = runTest {
+        val elem = UiElementInfo(text = "目标商品ABC", bounds = RectBounds(50, 60, 150, 160)) // center (100, 110)
+        val ctrl = SkillFakeController(elem)
+        val skill = ScrollAndFindSkill()
+        val res = skill.execute("""{"target_text": "目标商品ABC", "max_swipes": 3}""", ctrl, context)
+        assertTrue(res.contains("found_and_tapped"))
+        assertEquals(Pair(100f, 110f), ctrl.lastTapAtPixel)
     }
 }
 

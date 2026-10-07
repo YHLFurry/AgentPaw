@@ -99,6 +99,7 @@ class AppContainer(application: Application) {
                 com.paw.agent.core.tool.android.LaunchAppTool(phoneController),
                 com.paw.agent.core.tool.android.DeepLinkTool(phoneController),
                 com.paw.agent.core.tool.android.GetScreenStateTool(phoneController),
+                com.paw.agent.core.tool.android.ClickElementTool(phoneController),
                 com.paw.agent.core.tool.android.WaitTool(),
             ) + skillRegistry.toTools(phoneController),
         )
