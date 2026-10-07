@@ -1,239 +1,175 @@
 # AgentPaw 🐾
 
-> An agent on Android phones.
+<p align="center">
+  <img src="docs/icon-preview.png" alt="AgentPaw Logo" width="128" height="128" style="border-radius: 28px;" />
+</p>
 
-AgentPaw is a Jetpack Compose framework for building agent-style conversational  
-apps on Android. This repository currently holds the **initial base framework**:  
-the core agent loop, an LLM abstraction with streaming, a Material You chat UI,  
-and a full LLM settings screen.
+<p align="center">
+  <strong>An Intelligent, Autonomous Agent Framework on Android Phones</strong>
+</p>
 
-The app id is `com.paw.agent`; the launcher icon is a beast paw print.
+<p align="center">
+  <a href="README_CN.md">🇨🇳 简体中文</a> | <a href="README.md">🇺🇸 English</a>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/Platform-Android_8.0+_(API_26+)-3DDC84?logo=android&logoColor=white" alt="Platform" />
+  <img src="https://img.shields.io/badge/Kotlin-2.2.21-7F52FF?logo=kotlin&logoColor=white" alt="Kotlin" />
+  <img src="https://img.shields.io/badge/Jetpack_Compose-Material_3_&_Miuix-4285F4?logo=jetpackcompose&logoColor=white" alt="UI" />
+  <img src="https://img.shields.io/badge/Tests-109_Passed-brightgreen" alt="Tests" />
+  <img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License" />
+</p>
 
 ---
 
-## Status
+## 🌟 Overview
 
-| Area                                           | State                                     |
-| ---------------------------------------------- | ----------------------------------------- |
-| Agent loop (tool calling, multi-round)         | ✅ implemented, framework-level            |
-| LLM client (OpenAI-compatible, SSE streaming)  | ✅ implemented                             |
-| LLM settings (provider, key, model, sampling)  | ✅ implemented                             |
-| Chat UI (Material You, streaming, stop/cancel) | ✅ implemented                             |
-| Sub-agent delegation (depth-limited)           | ✅ implemented                             |
-| Script sandbox (built-in shell)               | ✅ implemented                             |
-| Web search (keyless)                          | ✅ implemented                             |
-| Conversation persistence                       | ⬜ in-memory only                          |
-| Release build / signing                        | ⬜ not configured                          |
+**AgentPaw** is an advanced open-source autonomous agent framework tailored for Android. Powered by large language models (LLMs) and multi-tiered on-device controllers, AgentPaw can perceive screens, understand intent, plan multi-step workflows, and autonomously drive apps via Accessibility services, Shizuku (ADB privileges), or native ROOT.
 
-## Theming
+Whether you want to automate repetitive device operations, build custom AI mobile assistants, or develop autonomous workflows, AgentPaw offers a production-grade core engine, modular tool registries, and delightful user experience.
 
-The app ships with **two coexisting UI themes** selectable from
-**Settings → Appearance**:
+---
 
-- **Material** (default) — the original Material 3 / Material You look. Existing
-  installs stay on this theme, so upgrading never changes the visual style.
-- **Miuix** — a HyperOS-style component set (Miuix) for a different look & feel.
+## ✨ Key Features
 
-Both themes read the same `AppSettings` and drive the same ViewModels; switching
-themes never touches LLM configuration. The choice is persisted in DataStore and
-applied **live** the moment you tap it — no app restart — and is restored on next
-launch. The LLM settings section is fully independent and keeps its own draft/save
-flow.
+### ⏯️ Task Breakpoint & Resume (断点续操)
+- **Automatic Execution Snapshot**: When a task is paused or stopped, AgentPaw captures a complete `TaskBreakpoint` snapshot, including completed steps, pending goals, and UI state.
+- **Natural Language Resume Intent**: Understands instructions like *"continue"*, *"go on"*, *"next step"*, or *"continue, but click the second button this time"*.
+- **Anti-Duplication Prompt Injection**: Seamlessly synthesizes prior progress into the system context to prevent repetitive actions on restart.
+- **One-Tap UI Recovery**: Dedicated resume card in the chat interface and floating capsule on the desktop for immediate continuation.
 
-Implementation lives behind a single `AgentPawAppTheme` root and a theme-agnostic
-`AppTheme` token layer (`com.paw.agent.ui.theme`); screens are written once against
-`App*` adaptive components (`com.paw.agent.ui.components.adaptive`).
+### 🤹 Custom Skills System (自定义 Skill)
+- **Visual Skill Studio**: Create, edit, test, and toggle custom skills with user-defined JSON Schema parameters and Prompt templates directly inside the app.
+- **Hot Tool Registration**: Custom skills are automatically registered into the LLM function calling catalog without app restarts.
 
-## Architecture
+### ⚡ Triple-Tier Controller Architecture
+- **Accessibility Service**: Standard zero-root perception and touch interaction via Android Accessibility APIs.
+- **Shizuku (ADB privileges)**: High-performance tap, swipe, and shell commands without requiring root.
+- **Native ROOT (`su`)**: Unrestricted root access for instantaneous shell dispatch and low-latency screencaps.
+- **Hybrid Controller**: Automatic fallback between Root, Shizuku, and Accessibility depending on available permissions.
+
+### ⌨️ Direct Text Injection with Keyboard Fallback
+- **Intelligent Input Targeting**: Automatically identifies active editable nodes, text boxes, and chat inputs.
+- **Direct Insertion**: Injects text directly via `ACTION_SET_TEXT` or clipboard bridge for maximum speed.
+- **Soft Keyboard Fallback**: Gracefully falls back to activating focus and emulating keyboard paste when direct insertion is restricted by target apps.
+
+### ⏱️ AI Adaptive Pace Engine
+- Dynamically predicts and adjusts inter-step delay based on operation complexity, page transitions, and text inputs to prevent misclicks before rendering finishes.
+
+### 📜 Task History & Comparison
+- Complete persistent task runs with step breakdowns, durations, and status tracking.
+- **Context Rollback**: Rehydrate past task context directly back into the live chat conversation.
+- **Dual-Task Quantitative Diff**: Compare execution metrics (step count, elapsed time, tool distribution) side by side.
+
+### 🎨 Dual Coexisting Themes (Material You & Miuix)
+- **Material 3 (Default)**: Modern Material You palette with Android 12+ wallpaper dynamic color adaptation.
+- **Miuix**: Sleek HyperOS-inspired component set.
+- **Hot-Switching**: Instant theme switching on the fly without restarting the app or resetting configurations.
+
+### ℹ️ About Screen & Hidden Expert Mode
+- Developer info, version status, and architecture notes.
+- **Expert Mode**: Advanced options (such as Vision & Language Separated Display) are safely hidden by default. Long-press the paw icon in the About screen to unlock with haptic feedback.
+
+### 🛡️ Pure-Kotlin Script Sandbox (`run_script`)
+- In-process safe shell interpreter (`Lexer` → `Parser` → `Interpreter`) with 30+ built-in commands (pipelines `|`, redirection, control flows, arithmetic) running inside JVM boundaries without external binary vulnerabilities.
+
+### 🔍 Keyless Web Search & Sub-Agents
+- **DuckDuckGo Instant Search**: Fast entity search requiring zero API keys or user accounts.
+- **Task Delegation (`delegate_task`)**: Isolated sub-agent execution with depth limits to resolve complex sub-tasks without polluting the main conversation history.
+
+---
+
+## 📱 User Guide
+
+### 1. Installation & Prerequisites
+- Android 8.0 (API level 26) or higher.
+- Download the latest `app-debug.apk` from GitHub Releases or build from source.
+
+### 2. Granting Permissions
+To enable AgentPaw to control your phone, grant the required permissions according to your needs:
+1. **Accessibility Service**: Go to *System Settings → Accessibility → AgentPaw* and enable the service (Required for standard on-screen control).
+2. **Display over other apps**: Enable the floating overlay permission so the stop/resume capsule can display over third-party apps.
+3. **Shizuku (Optional)**: If you have Shizuku installed, grant permission in the Shizuku Manager for ADB-level execution.
+4. **Root (Optional)**: For rooted devices, grant `su` access when prompted or in settings.
+
+### 3. Configuring LLM Provider
+AgentPaw supports any OpenAI-compatible API endpoint:
+- **Preset Providers**: OpenAI, DeepSeek, Google Gemini, Moonshot / Kimi, Ollama (local on `http://10.0.2.2:11434/v1` or LAN).
+- **Custom Endpoints**: Any vLLM, LM Studio, OneAPI, or self-hosted endpoint.
+- **Privacy First**: Your API keys are strictly stored on-device in encrypted private DataStore preferences and are never uploaded to any third-party telemetry.
+
+### 4. Running and Managing Tasks
+1. Send a natural instruction in the chat (e.g., *"Open Settings and turn on Dark Mode"*).
+2. If you need to pause or take over, tap the floating stop capsule or chat **Stop** button.
+3. To resume, tap **[▶ Continue]** on the breakpoint card or type *"continue from where we left off"*.
+
+---
+
+## 🏗️ Architecture
 
 ```
-com.paw.agent
-├── core/                     ← pure Kotlin, no Android dependencies
-│   ├── model/                Message, Conversation, ToolCall, ToolDefinition
-│   ├── llm/                  LlmClient (the seam), LlmConfig, OpenAiCompatibleClient
-│   │   └── dto/              Wire format for chat-completions
-│   ├── agent/                Agent (the loop), AgentTool, ToolRegistry
-│   ├── shell/                Script sandbox: Lexer, Parser, Interpreter, commands
-│   ├── search/               SearchBackend + DuckDuckGo implementation
-│   └── tool/                 The built-in AgentTool implementations
-├── data/
-│   ├── settings/             AppSettings + DataStore repository
-│   └── conversation/         ConversationRepository (in-memory)
-└── ui/
-    ├── theme/                Material 3 scheme, type scale, shapes
-    ├── chat/                 ChatScreen, MessageBubble, ChatViewModel
-    ├── settings/             LlmSettingsScreen, LlmSettingsViewModel
-    ├── components/           PawMark, EmptyChatState, ThinkingIndicator
-    └── navigation/           AgentPawApp (NavHost)
+AgentPaw
+├── agentpaw-core/                 ← Pure Kotlin & Reusable Android Library Module
+│   ├── src/main/java/com/paw/core/
+│   │   ├── agent/                 # Agent loop, multi-round tool dispatch, events
+│   │   ├── controller/            # Accessibility, Shizuku, Root, Hybrid controllers
+│   │   ├── executor/              # Breakpoint manager, ResumeIntentDetector, AdaptivePaceEngine
+│   │   ├── llm/                   # OpenAI-compatible SSE client, Multimodal vision
+│   │   ├── model/                 # TaskBreakpoint, Message, ToolCall, ToolDefinition
+│   │   ├── search/                # DuckDuckGo search backend
+│   │   ├── shell/                 # Sandboxed Lexer, Parser, AST Interpreter
+│   │   ├── skill/                 # Custom skill definitions and registry
+│   │   └── tool/                  # Built-in phone tools, script runner, delegation
+├── app/                           ← Jetpack Compose Application Module
+│   ├── src/main/java/com/paw/agent/
+│   │   ├── data/                  # AppSettings DataStore, TaskHistoryRepository
+│   │   ├── service/               # AgentAccessibilityService, AgentFloatingService
+│   │   └── ui/
+│   │       ├── chat/              # ChatScreen, BreakpointCard, MessageBubble
+│   │       ├── history/           # TaskHistoryScreen, TaskDetailScreen, TaskDiffScreen
+│   │       ├── skill/             # SkillListScreen, SkillEditorScreen
+│   │       ├── settings/          # LlmSettingsScreen, AppearanceSettingsScreen
+│   │       ├── about/             # AboutScreen (Long-press to unlock Expert Mode)
+│   │       └── theme/             # Material 3 & Miuix dual themes
 ```
 
-Two design rules hold the framework together:
+---
 
-1. **`core/` is pure Kotlin.** No Android imports, so the agent loop is unit  
-   testable on the JVM and could be lifted into a foreground service later.
-2. **`LlmClient` is the only seam to a model.** The UI never sees a provider  
-   type, and adding a non-OpenAI backend means writing one class.
+## 🛠️ Building & Testing
 
-## The agent loop
+### Requirements
+- JDK 17 or higher
+- Android SDK (compileSdk 36, minSdk 26)
 
-`Agent.run()` takes a config, the message history, and a cancellation check, and  
-emits `AgentEvent`s:
-
-```
-AssistantDelta → ToolStarted → ToolFinished → AssistantDelta → … → Completed
-```
-
-It calls the model, and if the model requests tools it runs them through the  
-`ToolRegistry`, appends the results, and calls again — up to `maxToolRounds`  
-(8 by default) to stop a model from looping forever.
-
-### Adding a tool
-
-```kotlin
-class CurrentTimeTool : AgentTool {
-    override val definition = ToolDefinition(
-        name = "current_time",
-        description = "Returns the current device time in ISO-8601.",
-        parametersSchema = """{"type":"object","properties":{}}""",
-    )
-
-    override suspend fun execute(arguments: String, context: AgentContext): String =
-        Instant.now().toString()
-}
-
-// register it in AppContainer
-toolRegistry = ToolRegistry(listOf(CurrentTimeTool()))
-```
-
-Register the tool and it is advertised to the provider automatically; the loop  
-handles dispatch, result plumbing, and error recovery (a failed tool returns an  
-error string to the model instead of aborting the turn).
-
-## Built-in tools
-
-Three tools ship in the box, wired in `AppContainer.toolRegistry`.
-
-### `run_script` — the script sandbox
-
-A shell-like interpreter written from scratch in pure Kotlin: `Lexer` → `Parser`
-→ `Interpreter`, plus ~30 built-in commands. It runs **in-process** — no process
-is spawned and no native binary is executed.
-
-That last point is the reason it is hand-written rather than a real shell.
-Since Android 10, `execve()` on anything in the app's data directory is a W^X
-violation (the fix is to ship binaries in `jniLibs` as `lib___.so` and run them
-from the native library dir, as Termux does). A bootstrap zip is the right answer
-for a *terminal*; for an agent that just needs arithmetic and text processing, an
-interpreter is smaller, safer, and needs no per-ABI binaries.
-
+### Build Commands
 ```bash
-seq 1 100 | grep 3 | wc -l
-expr (2 + 3) * 4
-printf 'b\na\nb\n' | sort | uniq
-i=0; while test $i -lt 3; do echo $i; i=$(expr $i + 1); done
+# Clone the repository
+git clone https://github.com/YHLFurry/AgentPaw.git
+cd AgentPaw
+
+# Compile Debug APK
+./gradlew :app:assembleDebug
+
+# Run all 109 unit tests across all modules
+./gradlew testDebugUnitTest
 ```
 
-What it supports:
+The compiled APK will be located at:
+`app/build/outputs/apk/debug/app-debug.apk`
 
-- pipelines `|`, sequencing `;` `&&` `||`, redirection `>` `>>` `<` `2>`
-- `for` / `if` / `while` blocks
-- variables (`NAME=value`, `$NAME`), command substitution (`$( … )`)
-- arithmetic via a shunting-yard evaluator with `+ - * / % ^`, parentheses, and
-  `sqrt abs floor ceil round min max pow` — no `eval`, so a generated expression
-  can never escape into host code
+### Test Coverage Highlights
+All **109** unit tests (101 core + 8 app) pass out-of-the-box on the JVM without requiring an emulator:
+- `ResumeIntentDetectorTest`: Breakpoint intent parsing, follow-up instructions, resume prompt generation.
+- `AgentTest`: Multi-round loop, cancellation, tool recovery, and event emission.
+- `InterpreterTest`: Sandboxed shell execution, security path boundaries, pipelines, and arithmetic logic.
+- `AndroidPhoneToolsTest`: Phone tool schemas, device perception, and hybrid delegation.
+- `AdaptiveScreenshotProcessorTest`: Multimodal image downscaling and compression.
 
-What it will not do, by design: no process spawning, no network, no globbing, no
-command substitution into a shell, and every path is resolved through
-`ShellEnvironment.resolvePath`, which refuses to leave the sandbox root.
+---
 
-Runaway scripts are bounded by `SandboxLimits`: wall-clock timeout, max AST steps
-(so `while true` dies instead of hanging the app), max pipeline depth, and output
-truncation.
+## 📦 Using `agentpaw-core` in Your App
 
-### `web_search` — keyless lookup
-
-`DuckDuckGoSearchBackend` uses the Instant Answer API, which needs **no API key
-and no account**, so the feature works on a fresh install.
-
-The honest trade-off: it answers entity-style questions ("rust", "kotlin") well
-and open-ended ones poorly. When it has nothing, the tool says so and tells the
-model to answer from its own knowledge and flag that it could not verify — rather
-than leaving a gap the model quietly fills. `SearchBackend` is an interface, so
-adding Tavily or Brave later means one new class, no UI change.
-
-### `delegate_task` — sub-agents
-
-Delegates a self-contained sub-task to a nested agent with its own system prompt
-and **no tools**, returning its final answer to the caller.
-
-```
-main agent ──delegate_task──▶ sub agent (own prompt, no tools, no delegation)
-         ◀── final answer ───┘
-```
-
-This keeps a long multi-step chain out of the main context and lets one prompt own
-a whole sub-task end to end. Recursion is bounded twice: by `maxDepth` (2) on
-`AgentContext`, and by the sub-agent getting an empty `ToolRegistry`, so
-delegation is always a leaf and cannot loop.
-
-
-## LLM support
-
-`OpenAiCompatibleClient` speaks the OpenAI chat-completions protocol, so these  
-work out of the box:
-
-| Preset          | Base URL                                                  | Notes                                                       |
-| --------------- | --------------------------------------------------------- | ----------------------------------------------------------- |
-| OpenAI          | `https://api.openai.com/v1`                               |                                                             |
-| DeepSeek        | `https://api.deepseek.com/v1`                             |                                                             |
-| Google Gemini   | `https://generativelanguage.googleapis.com/v1beta/openai` | OpenAI-compatible endpoint                                  |
-| Moonshot / Kimi | `https://api.moonshot.cn/v1`                              |                                                             |
-| Ollama          | `http://10.0.2.2:11434/v1`                                | local, no key (`10.0.2.2` = host from the emulator)         |
-| Custom          | —                                                         | any OpenAI-compatible endpoint (vLLM, LM Studio, OneAPI, …) |
-
-Features: streaming via SSE, tool/function calling, per-field errors, a  
-connection test button, and cancellation mid-stream.
-
-**Your API key is stored only on-device** in the app's private DataStore  
-preferences. It is sent solely as an auth header and is never logged.
-
-## Material You
-
-The app follows Material 3 and adopts the **dynamic colour** palette from the  
-user's wallpaper on Android 12+ (toggleable in settings). Below Android 12 it  
-falls back to the bundled indigo/violet brand seed that matches the launcher  
-icon. Light and dark themes are both supported, and the app is edge-to-edge.
-
-## `agentpaw-core` library
-
-Everything that makes AgentPaw an agent — the conversation engine and the
-signature capabilities — lives in a reusable Android Library module,
-`agentpaw-core` (`:agentpaw-core`). The `app` module is just the Compose UI
-shell on top of it.
-
-| Package | What you get |
-| ------- | ------------ |
-| `com.paw.agent.core.agent` | the agent loop, tool registry, cancellation, events |
-| `com.paw.agent.core.llm` | OpenAI-compatible client, streaming, multimodal (images) |
-| `com.paw.agent.core.model` | message / conversation model |
-| `com.paw.agent.core.shell` | the sandboxed shell interpreter (`run_script`) |
-| `com.paw.agent.core.tool` | built-in tools: `run_script`, `web_search`, `delegate_task`, Android phone tools |
-| `com.paw.agent.core.skill` | agent skills |
-| `com.paw.agent.core.search` | keyless DuckDuckGo search backend |
-| `com.paw.agent.device` | on-device control: Accessibility, Shizuku, adaptive screenshots |
-
-### Publishing
-
-`agentpaw-core` is published to GitHub Packages
-([packages](https://github.com/YHLFurry/AgentPaw/packages)). The
-*Publish agentpaw-core* workflow runs on every `v*` tag — pushing `v0.1.0`
-publishes version `0.1.0` — and can also be triggered manually from the
-Actions tab.
-
-### Consuming
-
-Add GitHub Packages as a repository (a GitHub token with `read:packages` is
-required to fetch):
+`agentpaw-core` is modularized and published to GitHub Packages.
 
 ```kotlin
 // settings.gradle.kts
@@ -242,168 +178,49 @@ dependencyResolutionManagement {
         maven {
             url = uri("https://maven.pkg.github.com/YHLFurry/AgentPaw")
             credentials {
-                username = findProperty("gpr.user") as String? // your GitHub username
-                password = findProperty("gpr.key") as String?  // a PAT with read:packages
+                username = findProperty("gpr.user") as String?
+                password = findProperty("gpr.key") as String?
             }
         }
     }
 }
-```
 
-Then add the dependency:
-
-```kotlin
+// build.gradle.kts
 dependencies {
     implementation("com.paw.agent:agentpaw-core:0.1.0")
 }
 ```
 
-### Shizuku integration
+---
 
-`agentpaw-core` ships everything needed for Shizuku — the
-`moe.shizuku.manager.permission.API_V23` permission and the
-`rikka.shizuku.ShizukuProvider` (`${applicationId}.shizuku`) are merged into your
-manifest automatically from the library manifest. Initialize once at startup
-(`Application.onCreate`):
+## 🗺️ Roadmap
 
-```kotlin
-ShizukuInitializer.initialize() // registers binder + permission-result listeners
+- [x] Multi-round agent execution loop with streaming SSE
+- [x] On-device multi-tier control (Accessibility, Shizuku, ROOT)
+- [x] Task Breakpoint & Natural Language Resume (断点续操)
+- [x] Custom Skills studio and runtime registration
+- [x] Persistent task history and quantitative comparison
+- [x] AI Adaptive pace engine for inter-step wait times
+- [x] Direct text injection with soft keyboard fallback
+- [x] Dual themes (Material 3 + Miuix) with instant switching
+- [x] Secret Expert Mode unlocked via About screen
+- [ ] Task execution workflow export & sharing
+- [ ] Voice input and TTS interaction
 
-// request authorization (pops the Shizuku Manager dialog when the service is running);
-// returns false when Shizuku is not running, e.g. to guide the user to open the app:
-val dispatched = DevicePermissionManager.requestShizukuPermission()
-```
+---
 
-The current state is observable via `DevicePermissionManager.observeShizukuState()`
-(`NOT_RUNNING` / `RUNNING_NO_PERMISSION` / `GRANTED`) — it updates live when the
-binder arrives and when the user responds to the authorization dialog.
+## 🤝 Contributing
 
-### Stop floating button (accessibility operations)
+Contributions, issues, and feature requests are very welcome! Feel free to check the [issues page](https://github.com/YHLFurry/AgentPaw/issues).
 
-While the agent drives the device through the accessibility service, host apps
-request a floating red stop pill:
+1. Fork the Project
+2. Create your Feature Branch (`git checkout -b feat/amazing-feature`)
+3. Commit your Changes (`git commit -m 'feat: Add amazing feature'`)
+4. Push to the Branch (`git push origin feat/amazing-feature`)
+5. Open a Pull Request
 
-```kotlin
-AgentStopFloatingButton.show(context) {
-    // optional: also cancel your agent loop here
-}
-```
+---
 
-**The button never covers your own app.** `show()` only registers a request; the
-pill actually appears once the host app is no longer in front, so it can't block
-the UI you are looking at. `hide()` cancels the request.
+## 📄 License
 
-| Host app state | Pill |
-| --- | --- |
-| Foreground (user is inside the app) | hidden |
-| Background (user left to drive other apps) | shown |
-
-Show/hide triggers:
-
-- **Shown** — the host app transitions foreground → background, or `show()` is
-  called while the host app is already in the background.
-- **Hidden** — the host app transitions background → foreground, `hide()` is
-  called, the user taps the pill, or the pending request is cancelled.
-
-#### Foreground detection
-
-`AgentAppForegroundMonitor` resolves "is the host app in front" in two tiers
-(`AgentForegroundDecider`):
-
-1. **Host process has activities** (the normal case) — Activity
-   `resume`/`pause` is the single source of truth: `resumedActivityCount > 0`
-   means foreground. Resume (not start) is deliberate: in split-screen the host
-   activity can stay *started* while already out of focus, and there the user is
-   really in another app, so the pill must be visible.
-2. **Host process has no activities at all** (service-only integration) — falls
-   back to the accessibility service's reported foreground package: host package
-   == foreground package means foreground. Driving the device requires that
-   service anyway, so this signal is always available where it matters.
-
-When neither signal is available the state is treated as **background** — better
-to show a redundant pill than to leave the user without a stop entry.
-
-Register early so the first Activity's `onResume` isn't missed:
-
-```kotlin
-class MyApp : Application() {
-    override fun onCreate() {
-        super.onCreate()
-        AgentAppForegroundMonitor.install(this)
-    }
-}
-```
-
-`AgentStopFloatingButton.show()` also installs it lazily as a fallback, but a
-late registration can misjudge the very first launch and flash the pill. Needs
-the `SYSTEM_ALERT_WINDOW` permission (also merged from the library manifest —
-grant the overlay permission before showing). Reset per turn with
-`AgentAccessibilityService.instance?.clearUserStop()`.
-
-Opt out of the background-only policy if you want the pill always on screen:
-
-```kotlin
-AgentStopFloatingButton.setVisibilityMode(AgentFloatingVisibilityMode.ALWAYS)
-```
-
-## Building
-
-Requires JDK 17+ and the Android SDK (compileSdk 36, minSdk 26).
-
-```bash
-git clone https://github.com/YHLFurry/AgentPaw.git
-cd AgentPaw
-./gradlew :app:assembleDebug      # debug APK
-./gradlew testDebugUnitTest       # all modules, 75 unit tests
-```
-
-The debug APK lands at `app/build/outputs/apk/debug/app-debug.apk`.
-
-## Tests
-
-`./gradlew testDebugUnitTest` runs all 75 JVM tests across both modules, no
-device needed. 74 of them live in `agentpaw-core`:
-
-| Suite                   | Covers                                                        |
-| ----------------------- | ------------------------------------------------------------- |
-| `AgentTest`             | tool dispatch, multi-round loop, cancellation, failure paths  |
-| `InterpreterTest`       | the shell: pipelines, control flow, redirection, and escapes  |
-| `AndroidPhoneToolsTest` | phone tool schemas and controller delegation                  |
-| `BuiltInToolsTest`      | the tools, including sub-agent depth limiting                 |
-| `DuckDuckGoSearchBackendTest` | response parsing against recorded payloads            |
-| `DuckDuckGoSearchBackendLiveTest` | one live call, auto-skipped when offline        |
-| `MultimodalDtoTest` / `AdaptiveScreenshotProcessorTest` | image payloads, screenshot downscaling |
-| `AgentExecutionControllerTest` (app) | floating-window execution lifecycle       |
-
-The sandbox tests use a real temp directory rather than mocks, so the path
-guards are genuinely exercised — including attempts to read `/etc/passwd` and
-`../../..`.
-
-## Tech stack
-
-Kotlin 2.2.21 · AGP 8.13.2 · Gradle 8.13 · Compose BOM 2026.06.01 ·  
-Material 3 · DataStore · OkHttp · kotlinx.serialization · Navigation Compose
-
-> The Compose BOM is pinned to `2026.06.01` (Compose 1.11.4). `2026.08.00` and
-> later require AGP 9.1+ and compileSdk 37; revisit once AGP 9 settles.
-
-## Roadmap
-
-- [x] Built-in tools: script sandbox, web search, sub-agent delegation
-- [ ] Conversation history persisted with Room
-- [ ] Multiple conversations with a drawer
-- [ ] A real Termux-style bootstrap (per-ABI binaries in `jniLibs`) as an
-      alternative sandbox backend, for when a full shell is actually needed
-- [ ] More sandbox commands (`sed`, `awk`, `jq`-style filters)
-- [ ] Vision / image input
-- [ ] Release build config and CI
-
-## Contributing
-
-Issues and PRs are welcome — this is a collaborative repository. Please keep  
-the `core/` layer free of Android dependencies so the framework stays portable  
-and testable.
-
-## License
-
-See [LICENSE](LICENSE).
+This project is licensed under the Apache License 2.0. See the [LICENSE](LICENSE) file for details.
