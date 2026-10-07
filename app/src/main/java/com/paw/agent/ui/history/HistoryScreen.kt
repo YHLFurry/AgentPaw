@@ -19,8 +19,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.CompareArrows
 import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.CompareArrows
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
@@ -76,6 +76,7 @@ fun HistoryScreen(
     val historyList by container.conversationRepository.historyList.collectAsStateWithLifecycle()
     val selectedForCompare = remember { mutableStateListOf<String>() }
     var isCompareMode by remember { mutableStateOf(false) }
+    var pendingDeleteConvId by remember { mutableStateOf<String?>(null) }
 
     AppScaffold(
         modifier = modifier.fillMaxSize(),
@@ -97,7 +98,7 @@ fun HistoryScreen(
                             if (!isCompareMode) selectedForCompare.clear()
                         }) {
                             AppIcon(
-                                imageVector = Icons.Default.CompareArrows,
+                                imageVector = Icons.AutoMirrored.Filled.CompareArrows,
                                 contentDescription = "多选对比",
                                 tint = if (isCompareMode) AppTheme.colors.primary else AppTheme.colors.onSurface,
                             )
@@ -190,11 +191,41 @@ fun HistoryScreen(
                                 onRestoreToChat()
                             },
                             onDelete = {
-                                container.conversationRepository.deleteConversation(conv.id)
-                                selectedForCompare.remove(conv.id)
+                                pendingDeleteConvId = conv.id
                             },
                         )
                     }
+                }
+
+                if (pendingDeleteConvId != null) {
+                    val targetId = pendingDeleteConvId!!
+                    androidx.compose.material3.AlertDialog(
+                        onDismissRequest = { pendingDeleteConvId = null },
+                        title = { AppText("确认删除历史记录？", style = AppTheme.typography.titleMedium) },
+                        text = {
+                            AppText(
+                                "此操作将永久删除该会话记录及相关的历史截图，无法撤销。",
+                                style = AppTheme.typography.bodyMedium,
+                            )
+                        },
+                        confirmButton = {
+                            AppButton(
+                                onClick = {
+                                    container.conversationRepository.deleteConversation(targetId)
+                                    selectedForCompare.remove(targetId)
+                                    pendingDeleteConvId = null
+                                    Toast.makeText(context, "已删除该任务记录", Toast.LENGTH_SHORT).show()
+                                },
+                            ) {
+                                AppText("确认删除")
+                            }
+                        },
+                        dismissButton = {
+                            AppOutlinedButton(onClick = { pendingDeleteConvId = null }) {
+                                AppText("取消")
+                            }
+                        },
+                    )
                 }
             }
         }

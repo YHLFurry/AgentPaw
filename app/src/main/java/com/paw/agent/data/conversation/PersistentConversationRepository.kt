@@ -7,6 +7,7 @@ import com.paw.agent.core.model.MessageRole
 import com.paw.agent.core.model.MessageStatus
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -19,6 +20,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.File
+import java.util.Base64
 import java.util.UUID
 
 /**
@@ -49,7 +51,9 @@ class PersistentConversationRepository(
 
     private val json = Json { prettyPrint = true; ignoreUnknownKeys = true }
     private val storageDir = (storageDirectory ?: File(context?.filesDir ?: File(System.getProperty("java.io.tmpdir"), "agentpaw-conversations"), "conversations")).apply { mkdirs() }
+    private val imagesDir = File(storageDir, "images").apply { mkdirs() }
     private val mutex = Mutex()
+    private val persistChannel = Channel<Conversation>(Channel.UNLIMITED)
 
     private val _conversation = MutableStateFlow(
         Conversation(
@@ -60,13 +64,53 @@ class PersistentConversationRepository(
     )
     override val conversation: StateFlow<Conversation> = _conversation.asStateFlow()
 
+    private val _isInitialized = MutableStateFlow(false)
+    override val isInitialized: StateFlow<Boolean> = _isInitialized.asStateFlow()
+
     private val _historyList = MutableStateFlow<List<Conversation>>(emptyList())
     val historyList: StateFlow<List<Conversation>> = _historyList.asStateFlow()
 
     init {
-        scope.launch {
-            loadAllFromDisk()
+        scope.launch(ioDispatcher) {
+            for (conv in persistChannel) {
+                mutex.withLock {
+                    saveToDiskLocked(conv)
+                    updateHistoryListLocked(conv)
+                }
+            }
         }
+        scope.launch(ioDispatcher) {
+            loadAllFromDisk()
+            _isInitialized.value = true
+        }
+    }
+
+    /**
+     * 将包含 Base64 原始图片的数据剥离并存入独立图片文件目录，
+     * 仅在会话中记录本地 file:// 协议路径，避免 JSON 膨胀与内存爆满。
+     * 使用原子写入机制防止文件写出一半损坏。
+     */
+    private fun extractImagesToDisk(message: Message, conversationId: String): Message {
+        if (message.images.isEmpty()) return message
+        val updatedImages = message.images.mapIndexed { index, img ->
+            if (img.startsWith("file://") || img.startsWith("http://") || img.startsWith("https://")) {
+                img
+            } else {
+                runCatching {
+                    val raw = if (img.contains(",")) img.substringAfter(",") else img
+                    val bytes = Base64.getDecoder().decode(raw)
+                    val imgFile = File(imagesDir, "${conversationId}_${message.id}_$index.jpg")
+                    val tempFile = File.createTempFile("tmp_img_", ".tmp", imagesDir)
+                    tempFile.writeBytes(bytes)
+                    if (!tempFile.renameTo(imgFile)) {
+                        tempFile.copyTo(imgFile, overwrite = true)
+                        tempFile.delete()
+                    }
+                    "file://${imgFile.absolutePath}"
+                }.getOrDefault(img)
+            }
+        }
+        return message.copy(images = updatedImages)
     }
 
     private suspend fun loadAllFromDisk() = mutex.withLock {
@@ -74,15 +118,29 @@ class PersistentConversationRepository(
             val files = storageDir.listFiles { _, name -> name.endsWith(".json") } ?: emptyArray()
             val loaded = files.mapNotNull { file ->
                 runCatching {
-                    json.decodeFromString<Conversation>(file.readText())
+                    val conv = json.decodeFromString<Conversation>(file.readText())
+                    var modified = false
+                    val cleanedMessages = conv.messages.map { msg ->
+                        if (msg.images.any { !it.startsWith("file://") && !it.startsWith("http") }) {
+                            modified = true
+                            extractImagesToDisk(msg, conv.id)
+                        } else msg
+                    }
+                    val cleanConv = if (modified) conv.copy(messages = cleanedMessages) else conv
+                    if (modified) {
+                        saveToDiskLocked(cleanConv)
+                    }
+                    cleanConv
                 }.getOrNull()
             }.sortedByDescending { it.updatedAt }
 
             if (loaded.isNotEmpty()) {
                 _historyList.value = loaded
-                // 默认将最新的一条作为当前会话，若该会话有消息
+                // 默认将最新的一条作为当前会话；但若用户在加载期间已发送了新消息，则予以保留绝不覆盖
                 val latest = loaded.first()
-                _conversation.value = latest
+                _conversation.update { current ->
+                    if (current.messages.isNotEmpty()) current else latest
+                }
             } else {
                 // 初次创建并落盘空会话
                 saveToDiskLocked(_conversation.value)
@@ -122,13 +180,17 @@ class PersistentConversationRepository(
     }
 
     /**
-     * 删除指定历史记录
+     * 删除指定历史记录，并同步清理该任务关联的离线截图文件
      */
     fun deleteConversation(id: String) {
         scope.launch {
             mutex.withLock {
                 val file = File(storageDir, "$id.json")
                 if (file.exists()) file.delete()
+
+                val imageFiles = imagesDir.listFiles { _, name -> name.startsWith("${id}_") } ?: emptyArray()
+                imageFiles.forEach { it.delete() }
+
                 _historyList.value = _historyList.value.filterNot { it.id == id }
                 if (_conversation.value.id == id) {
                     val fallback = _historyList.value.firstOrNull() ?: Conversation(
@@ -145,30 +207,82 @@ class PersistentConversationRepository(
     }
 
     override fun addMessage(message: Message) {
-        var nextConv: Conversation? = null
-        _conversation.update { current ->
-            val updated = current.copy(
-                messages = current.messages + message,
-                title = current.title.ifBlank { message.content.take(TITLE_MAX_CHARS) },
-                updatedAt = System.currentTimeMillis(),
-            )
-            nextConv = updated
-            updated
+        val hasRawImages = message.images.any { !it.startsWith("file://") && !it.startsWith("http") }
+        if (!hasRawImages) {
+            var nextConv: Conversation? = null
+            _conversation.update { current ->
+                val updated = current.copy(
+                    messages = current.messages + message,
+                    title = current.title.ifBlank { message.content.take(TITLE_MAX_CHARS) },
+                    updatedAt = System.currentTimeMillis(),
+                )
+                nextConv = updated
+                updated
+            }
+            nextConv?.let { persistAsync(it) }
+        } else {
+            // 先立即展示消息，避免阻塞调用方主线程
+            _conversation.update { current ->
+                current.copy(
+                    messages = current.messages + message,
+                    title = current.title.ifBlank { message.content.take(TITLE_MAX_CHARS) },
+                    updatedAt = System.currentTimeMillis(),
+                )
+            }
+            // 在 IO 调度器中异步处理图片解码与落盘
+            scope.launch(ioDispatcher) {
+                val currentConvId = _conversation.value.id
+                val normalizedMessage = extractImagesToDisk(message, currentConvId)
+                var nextConv: Conversation? = null
+                _conversation.update { current ->
+                    val updatedMessages = current.messages.map {
+                        if (it.id == message.id) normalizedMessage else it
+                    }
+                    val updated = current.copy(messages = updatedMessages, updatedAt = System.currentTimeMillis())
+                    nextConv = updated
+                    updated
+                }
+                nextConv?.let { persistAsync(it) }
+            }
         }
-        nextConv?.let { persistAsync(it) }
     }
 
     override fun updateMessage(id: String, transform: (Message) -> Message) {
-        var nextConv: Conversation? = null
+        var transformedMessage: Message? = null
         _conversation.update { current ->
             val updated = current.copy(
-                messages = current.messages.map { if (it.id == id) transform(it) else it },
+                messages = current.messages.map {
+                    if (it.id == id) {
+                        val transformed = transform(it)
+                        transformedMessage = transformed
+                        transformed
+                    } else it
+                },
                 updatedAt = System.currentTimeMillis(),
             )
-            nextConv = updated
             updated
         }
-        nextConv?.let { persistAsync(it) }
+
+        val hasRawImages = transformedMessage?.images?.any { !it.startsWith("file://") && !it.startsWith("http") } == true
+        if (!hasRawImages) {
+            persistAsync(_conversation.value)
+        } else {
+            scope.launch(ioDispatcher) {
+                val currentConvId = _conversation.value.id
+                val targetMsg = transformedMessage ?: return@launch
+                val normalized = extractImagesToDisk(targetMsg, currentConvId)
+                var nextConv: Conversation? = null
+                _conversation.update { current ->
+                    val updated = current.copy(
+                        messages = current.messages.map { if (it.id == id) normalized else it },
+                        updatedAt = System.currentTimeMillis(),
+                    )
+                    nextConv = updated
+                    updated
+                }
+                nextConv?.let { persistAsync(it) }
+            }
+        }
     }
 
     override fun appendToMessage(id: String, text: String) {
@@ -191,6 +305,11 @@ class PersistentConversationRepository(
 
     override fun clear() {
         val now = System.currentTimeMillis()
+        val currentConv = _conversation.value
+        scope.launch(ioDispatcher) {
+            val convImages = imagesDir.listFiles { _, name -> name.startsWith("${currentConv.id}_") } ?: emptyArray()
+            convImages.forEach { it.delete() }
+        }
         var nextConv: Conversation? = null
         _conversation.update { current ->
             val updated = current.copy(messages = emptyList(), title = "", updatedAt = now)
@@ -200,19 +319,29 @@ class PersistentConversationRepository(
         nextConv?.let { persistAsync(it) }
     }
 
-    private fun persistAsync(conv: Conversation) {
-        scope.launch {
-            mutex.withLock {
-                saveToDiskLocked(conv)
-                updateHistoryListLocked(conv)
-            }
+    /**
+     * 清理所有历史缓存的屏幕截图媒体文件，释放存储空间
+     */
+    fun clearAllMedia() {
+        scope.launch(ioDispatcher) {
+            val allImages = imagesDir.listFiles() ?: emptyArray()
+            allImages.forEach { it.delete() }
         }
+    }
+
+    private fun persistAsync(conv: Conversation) {
+        persistChannel.trySend(conv)
     }
 
     private fun saveToDiskLocked(conv: Conversation) {
         runCatching {
             val file = File(storageDir, "${conv.id}.json")
-            file.writeText(json.encodeToString(conv))
+            val tempFile = File.createTempFile("conv_", ".tmp", storageDir)
+            tempFile.writeText(json.encodeToString(conv))
+            if (!tempFile.renameTo(file)) {
+                tempFile.copyTo(file, overwrite = true)
+                tempFile.delete()
+            }
         }
     }
 

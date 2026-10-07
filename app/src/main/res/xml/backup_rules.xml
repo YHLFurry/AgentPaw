@@ -1,4 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <full-backup-content>
-    <include domain="sharedpref" path="." />
+    <!-- Exclude sensitive API keys, datastore and credentials from cloud backup -->
+    <exclude domain="file" path="datastore/agentpaw_settings.preferences_pb" />
+    <exclude domain="sharedpref" path="." />
+    <!-- Exclude user chat history, screenshots, and task execution states -->
+    <exclude domain="file" path="conversations" />
+    <exclude domain="file" path="active_breakpoint.json" />
+    <exclude domain="file" path="running_task.json" />
 </full-backup-content>

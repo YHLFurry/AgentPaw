@@ -1,145 +1,104 @@
-# AgentPaw 手机 Agent 架构审计与实施路线图
+# AgentPaw 手机 Agent 架构审计与技术路线图
 
-> 本文档基于对当前项目完整源码、构建环境、依赖配置以及 GitHub 开源项目「肉包（Roubao）」核心设计思想的深度审计与梳理制定。
+> 本文档基于对当前 AgentPaw 完整源码、构建环境、安全边界、多模态执行闭环及「肉包（Roubao）」核心设计思想的最新技术审计制定。
+> 最近更新：2026 年（已完成核心 P1 安全与稳定性重构，接入 Keystore 密钥加密、高风险操作中断确认、截屏脱敏与多模态控制闭环）。
 
 ---
 
-## 一、 当前项目架构全景与现状审计
-
-### 1.1 现有分层架构
+## 一、 当前项目架构全景
 
 ```mermaid
 graph TD
-    UI[ui/ 交互表现层] --> DATA[data/ 持久化与数据仓储]
-    UI --> CORE[core/ 纯 Kotlin 核心业务与 Agent]
+    UI[ui/ 交互表现层: Jetpack Compose + Miuix] --> DATA[data/ 持久化与数据仓储]
+    UI --> RUNNER[runner/ 独立任务调度器 & 前台服务]
+    RUNNER --> CORE[core/ 纯 Kotlin 核心业务与 Agent]
+    RUNNER --> DATA
     DATA --> CORE
+    DEVICE[device/ 手机混合控制层: Accessibility + Shizuku + Root] --> CORE
     APP[app/ AgentPawApplication & MainActivity] --> UI
-    APP --> DATA
-    APP --> CORE
+    APP --> RUNNER
+    APP --> DEVICE
 ```
 
-- **`core/` (纯 Kotlin 层)**:
-  - `agent/`: `Agent.kt`（核心循环驱动器）、`AgentTool.kt`（工具接口与注册表 `ToolRegistry`、上下文 `AgentContext`）。
-  - `llm/`: `LlmClient.kt`（模型通用契约）、`LlmConfig.kt`（LLM 配置模型）、`OpenAiCompatibleClient.kt`（基于 OkHttp + SSE 的通用 OpenAI 兼容客户端）、`ChatCompletionDto.kt`（序列化 DTO）。
-  - `model/`: `Message.kt`、`Conversation.kt`。
-  - `shell/`: 纯 Kotlin 实现的 AST 词法语法解析与沙箱解释器（~30 个基础命令）。
-  - `search/`: `DuckDuckGoSearchBackend.kt`。
-  - `tool/`: `ShellTool.kt`、`WebSearchTool.kt`、`SubAgentTool.kt`。
+- **`core/` (纯 Kotlin 模块，无 Android SDK 依赖)**:
+  - `agent/`: `Agent.kt`（感知-决策-行动核心循环驱动器）、`RiskActionGuard.kt`（四级高风险动作评估引擎）、`SensitiveDataMasker.kt`（API Key、Token、超长 Base64 敏感数据脱敏过滤器）、断点管理 `TaskBreakpoint.kt`。
+  - `llm/`: `LlmClient.kt`、`LlmConfig.kt`、`OpenAiCompatibleClient.kt`（OkHttp + SSE 流式协议支持，自动组装 OpenAI 标准结构化 `image_url` 多模态 payload）。
+  - `model/`: `Message.kt`（多模态图像列表、`fullLog` 完整脱敏日志）、`Conversation.kt`。
+  - `tool/`: 手机控制工具箱（Tap、DoubleTap、LongPress、Swipe、InputText、KeyAction、LaunchApp、DeepLink、TakeScreenshot、GetScreenState、Wait）、沙箱 `ShellTool.kt`、`WebSearchTool.kt`。
+  - `skill/`: 肉包式双层技能体系（`AgentSkill`、`SkillRegistry`、`ScrollAndFindSkill`、`OpenAndSearchSkill`、`ReturnHomeAndResetSkill`）。
 
-- **`data/` (数据仓储层)**:
-  - `settings/`: `DataStoreSettingsRepository.kt`（使用 AndroidX DataStore 存储提供商、BaseURL、API Key、采样参数）。
-  - `conversation/`: `ConversationRepository.kt`（内存仓储 `InMemoryConversationRepository`）。
+- **`data/` (数据与安全仓储层)**:
+  - `settings/`: `DataStoreSettingsRepository.kt` + `KeystoreSecretStorage.kt`（基于 Android Keystore AES-256-GCM 硬件加密安全存储 API Key，旧配置透明迁移；配置 `backup_rules.xml` 与 `data_extraction_rules.xml` 严格排除明文云同步与跨设备转移）。
+  - `conversation/`: `PersistentConversationRepository.kt`（异步带锁磁盘持久化、`isInitialized` 状态流避免加载覆盖刚发送任务的竞态、基于 `Dispatchers.IO` 的临时文件原子替换与清空会话自动媒体清理）。
 
-- **`ui/` (Jetpack Compose 视图层)**:
-  - `chat/`: `ChatScreen.kt`、`ChatViewModel.kt`、`MessageBubble.kt`。
-  - `settings/`: `LlmSettingsScreen.kt`、`LlmSettingsViewModel.kt`。
-  - `navigation/`: `AgentPawApp.kt`（双路由 `chat` 与 `settings`）。
+- **`device/` (三通道混合手机控制引擎)**:
+  - `AgentAccessibilityService`: 无障碍手势模拟（点击/滑动/长按）、系统动作（Back/Home/Recents）、全量 UI 节点树检索与 Android 11+ 原生截屏。
+  - `ShizukuController`: 基于 Shizuku Binder 通道执行特权 Shell 指令与免 Root 截屏，支持未就绪时平滑回退。
+  - `RootController`: 深度支持 Magisk / KernelSU / APatch 环境，具备 Su 命令执行能力与一键静默激活无障碍服务通道。
+  - `HybridPhoneController`: 融合三通道，采用高精准度加权算法（精确匹配 100 > 包名 95 > 前缀 80 > 子串匹配）启动目标 App，杜绝模糊匹配误触。
+
+- **`runner/` & `ui/` (任务调度与交互表现层)**:
+  - `AgentTaskRunner`: 独立于 Activity 生命周期的任务执行器，管理中断断点、落盘任务快照（支持进程被杀/重启后恢复），绑定 `AgentFloatingService` 跨应用胶囊。
+  - `ChatScreen.kt` / `MessageBubble.kt`: 视觉与语言分流（Split Vision-Language Mode）、工具调用实时状态与折叠代码块完整日志展示、Android 13+ 运行时通知授权、ROOT 状态检测与一键激活。
 
 ---
 
-## 二、 现有功能与未完成功能清单（Feature Matrix）
+## 二、 核心特性矩阵（Feature Matrix）
 
-| 模块 | 已经完成的功能 | 缺失 / 待完善能力 |
+| 模块 | 实现状态 | 详细能力与架构保证 |
 |---|---|---|
-| **Agent 执行闭环** | 多轮对话驱动、Tool 调用分发、子 Agent 委派深度限制 | 缺少视觉/环境感知（屏幕截屏+UI树分析）、缺少手机自主执行闭环（任务拆解→屏幕感知→决策动作→验证反馈）、缺乏操作失败重试及自动纠偏、最大步数硬编码（8 轮）不可配置 |
-| **Tool 工具系统** | 沙箱 Shell、DuckDuckGo 搜索、Sub-Agent 委派 | **无任何手机控制工具**：缺少截屏（Screenshot）、点击（Tap/Click）、长按（LongPress）、滑动/滚动（Swipe/Scroll）、输入文字（InputText）、返回键（Back）、主屏幕键（Home）、最近任务（Recents）、启动 App（LaunchApp）、DeepLink 跳转、获取界面状态（UI Node Hierarchy / Current App） |
-| **Skill 技能体系** | 仅有单级 Tool 概念 | 缺少肉包式的 Tools + Skills 双层架构。复合操作（如“发微信消息”、“导航”、“外卖点餐”、“搜索播放音乐”等）缺乏技能抽象与注册器，无法动态扩展技能库与组合复用 |
-| **多模态与模型层** | OpenAI 兼容接口、SSE 流式解析、单 Token 连通性测试 | `ChatMessage` 仅支持纯文本 `content: String?`，**无法发送 Base64 截图给多模态视觉模型 (VLM)**；缺少视觉尺寸压缩优化；缺少超时重试、Qwen/Gemini/Ollama 兼容特殊处理 |
-| **Android 控制层** | 仅标准 App 基础权限（INTERNET, NETWORK_STATE） | 缺少无障碍服务（`AccessibilityService`）实现；缺少 Shizuku 权限集成与 Shell 降级机制；缺少无感屏幕截屏能力与前台浮窗/服务保障 |
-| **UI 与交互系统** | Material 3 动效主题、基本聊天气泡、LLM 基础设置界面 | UI 完全忽略了工具调用中间态（`ToolStarted`/`ToolFinished` 被静默丢弃）；缺少权限引导管理界面（无障碍、Shizuku、悬浮窗）；缺少 Agent 步数上限配置与执行日志可视化面板；缺少跨应用悬浮控制球/悬浮胶囊 |
+| **多模态视觉感知** | ✔ 已实现 | 统一结构化 `image_url` 发送；`AdaptiveScreenshotProcessor` 自适应分辨率与 384KB 单图严格字节上限；工具回传仅保留摘要与脱敏占位，避免 Base64 塞满 LLM 文本上下文。 |
+| **高风险动作拦截** | ✔ 已实现 | `RiskActionGuard` 四级风险机制（CRITICAL / HIGH / MODERATE / LOW）。针对支付、删除、转账、敏感授权、DeepLink 敏感协议以及含确认的文本输入，触发 `requires_confirmation` 并自动转为断点暂停，必须由用户显式核准。 |
+| **密钥硬件加密** | ✔ 已实现 | `KeystoreSecretStorage` 依托 AndroidKeyStore 安全芯片 (AES-256-GCM) 硬件级加密存储 API Key；排除 Google Cloud 备份与换机迁移导出；JVM 测试环境平滑兼容降级。 |
+| **会话持久化与竞态** | ✔ 已实现 | 引入 `isInitialized` 状态流；会话初始化完成前禁用发送与追加并展示占位；采用当前状态与磁盘合并策略，即使在慢设备上也不会发生刚发出的首条任务被本地历史覆盖的问题。 |
+| **进程死亡恢复** | ✔ 已实现 | `AgentTaskRunner` 自动将进行中的任务目标与断点快照原子序列化至 `active_breakpoint.json` 与 `running_task.json`；进程被杀或重启后启动时自动加载并提醒用户“任务被中断，可查看/继续/放弃”。 |
+| **执行日志可观测性** | ✔ 已实现 | `Message.fullLog` 完整保留工具原始输出；集成 `SensitiveDataMasker` 自动对 Token、密钥与超长媒体串脱敏；UI 提供折叠气泡与 Monospace 代码块视图，支持全量展开排查错误。 |
+| **三通道控制与 ROOT** | ✔ 已实现 | 支持 Accessibility + Shizuku + Root 三引擎；设置页与聊天页提供 ROOT 授权状态监测；在已拥有 ROOT 的设备上一键静默执行 `settings put` 免跳转激活无障碍服务。 |
+| **运行时权限规范** | ✔ 已实现 | Android 13+ (API 33+) 通过 `rememberLauncherForActivityResult` 与 `POST_NOTIFICATIONS` 发起原生授权请求，拒绝后智能引导至系统通知设置。 |
+| **媒体存储生命周期** | ✔ 已实现 | 图片提取与落盘全程置于 `Dispatchers.IO` 并通过 `.tmp` 临时文件原子重命名；清空会话时同步物理删除本地截图，并提供 `clearAllMedia()` 清理冗余。 |
 
 ---
 
-## 三、 审计发现的代码缺陷与问题清单（Bug & Debt List）
+## 三、 已解决缺陷与风险核对清单（Audited & Fixed）
 
-1. **`ChatScreen.kt` 顶部按钮绑定错误**:
-   - `ChatScreen.kt` 第 97 行 TopAppBar 操作按钮图标为 `Icons.Outlined.Settings`，但 `onClick` 错误绑定到了 `onNewConversation`，导致在聊天有内容时无法直接进入设置页面。
-2. **UI 丢弃工具执行过程事件**:
-   - `ChatViewModel.kt` 第 133 行：`is AgentEvent.ToolStarted, is AgentEvent.ToolFinished -> Unit`，导致模型调用工具的过程对用户完全黑盒，手机自动操作时用户无法感知当前动作。
-3. **架构分层污染**:
-   - `LlmConfig.kt` 引入了 `@androidx.compose.runtime.Immutable` 注解，违反了 `core/` 是纯 Kotlin 不依赖 Android/Compose 的架构约束。
-4. **消息格式不支持多模态视觉 (VLM)**:
-   - `ChatCompletionDto.kt` 的 `ChatMessage` 定义中 `content` 字段仅为 `String?`，无法按照 OpenAI/VLM 规范构造包含 `image_url`（`data:image/jpeg;base64,...`）的复合多模态内容。
-5. **最大工具轮数硬编码**:
-   - `Agent.kt` 中固定为 `DEFAULT_MAX_TOOL_ROUNDS = 8`，未从 `LlmConfig` 或 `AppSettings` 注入，且设置页面无法调整。
+1. **P1: 截图以 Base64 文本塞入下一轮 LLM 上下文**
+   - **原风险**: 直接将 Base64 文本回传为 tool message 导致 context 超限、费用激增、模型速度骤降。
+   - **修复**: 使用 `AdaptiveScreenshotProcessor` 限制单图 384KB 字节上限；Agent 在将工具输出包装为对话历史时由 `SensitiveDataMasker` 自动剥离超长 Base64 文本；视觉输入通过 OpenAI 兼容的多模态 `image_url` 结构化对象单独传递。
+
+2. **P1: 历史加载与首次操作存在竞态覆盖**
+   - **原风险**: 慢设备上用户打开 App 立即发送任务，而后台磁盘反序列化完成后直接将新会话整体替换为旧会话。
+   - **修复**: `PersistentConversationRepository` 实现 `isInitialized: StateFlow<Boolean>`，合并加载策略保证新消息不被覆盖，且 UI 在加载就绪前对输入框实施状态门控。
+
+3. **P1: API Key 明文持久化存储**
+   - **原风险**: `DataStoreSettingsRepository` 直接将大模型 API Key 存放在未加密的 Preferences DataStore 中，在 Root/Shizuku 手机中极易被窃取。
+   - **修复**: 引入 `KeystoreSecretStorage` 硬件芯片级 AES-256-GCM 保护，且通过 `backup_rules.xml` 和 `data_extraction_rules.xml` 显式屏蔽云端与 ADB 数据迁移。
+
+4. **P1: 高风险动作缺乏确认机制**
+   - **原风险**: 仅靠密码页面无障碍节点阻断，大模型仍可通过输入指令、回车或点击确认触发敏感操作（支付、下单、删除文件、发送敏感信息）。
+   - **修复**: 新增 `RiskActionGuard` 规则分类引擎；高危操作即刻生成 `requires_confirmation` 响应，`AgentTaskRunner` 自动挂起为持久化断点并向用户请求显式授权。
+
+5. **体验与稳定性漏洞修复**:
+   - 通知权限接入 Activity Result API，在 Android 13+ 上原生拉起授权弹窗。
+   - `HybridPhoneController` 重构为基于精准度优先级的匹配算法（精确 100 > 包名 95 > 前缀 80 > 词包含），彻底消除如 "QQ" 误打开 "QQ音乐" 的问题。
+   - 增加 `Message.fullLog` 与展开折叠卡片，彻底解决原本工具返回结果被固定截断为 200 字符导致用户无法排查错误的问题。
+   - 图片落盘与 Base64 解码移至 `Dispatchers.IO` 并采用临时文件原子替换，清空会话时物理清理图片文件。
+   - 新增 ROOT 检测、授权验证与免跳转一键静默激活无障碍服务功能。
 
 ---
 
-## 四、 参考「肉包（Roubao）」的核心设计落地规划
-
-肉包的核心设计精髓在于：**Tools + Skills 双层架构** + **Shizuku / 无障碍双控制引擎** + **“感知-决策-行动-反馈”闭环执行器** + **安全红线机制**。我们在 AgentPaw 中将这一思想融入现有架构：
+## 四、 下一步演进路线（Roadmap）
 
 ```mermaid
-flowchart TD
-    User([用户自然语言任务]) --> Planner[AgentPlanner / Core Loop]
-    Planner --> Sense[环境感知: 屏幕截屏 + UI 树 + 当前前台包名]
-    Sense --> VLM[VLM 多模态大模型决策分析]
-    VLM --> Choice{调用 Skill 还是 Tool?}
-    Choice -- 复合高阶场景 --> SkillLayer[Skill 技能体系: 打开应用/搜索/发送等流程封装]
-    Choice -- 原子控制场景 --> ToolLayer[Tool 原子工具集]
-    SkillLayer --> ToolLayer
-    ToolLayer --> DeviceControl[Android 控制底座: Accessibility + Shizuku + Intent]
-    DeviceControl --> AndroidOS[Android 系统与第三方应用执行]
-    AndroidOS --> Delay[状态等待与刷新]
-    Delay --> Sense
-    Planner -- 判定任务完成/失败/达到步数上限 --> Result([反馈最终执行结果与日志])
+timeline
+    title AgentPaw 后续演进路线
+    里程碑 1 (已就绪) : P1 安全加固 : 多模态结构化传输 : 进程崩溃断点恢复 : ROOT 功能增强
+    里程碑 2 (规划中) : 端侧小模型路由 (SLM On-device) : 本地视觉目标检测 (YOLO/UI-DETR) : 离线脱敏
+    里程碑 3 (规划中) : 多设备控制网关 : 自定义 Skill 视觉录制器 (Visual Macro) : 自动化评测集 (AndroidArena)
 ```
 
----
-
-## 五、 分模块实施阶段规划与完成状态（已全部落地）
-
-### 阶段一：基础与模型层完善（VLM 多模态 + 核心 Bug 修复）[已完成 ✔]
-- [x] 修复 `ChatScreen.kt` 顶部设置按钮与新建会话按钮的独立绑定问题。
-- [x] 移除 `core/llm/LlmConfig.kt` 中对 Compose 的依赖，彻底恢复 `core/` 纯 Kotlin 层约束。
-- [x] 升级 `ChatMessage` 与 DTO，支持多模态内容（文本 + Base64 屏幕截图），并兼容 OpenAI、Qwen-VL、Gemini、Ollama。
-- [x] 将 `maxToolRounds`（最大步数）与 `visionResolutionMode` 纳入 `LlmConfig` 与 `AppSettings`，并在 Settings 界面提供 5~50 步调节及自适应分辨率选择。
-
-### 阶段二：Android 控制底座建设（Accessibility + Shizuku + Intent）[已完成 ✔]
-- [x] 实现 `AgentAccessibilityService`：
-  - 支持无障碍手势模拟（点击、长按、双击、滑动）。
-  - 支持系统级动作（返回、Home、任务列表、回车）。
-  - 支持 UI 树遍历（获取当前屏幕可视元素列表、文本、位置边界、可点击属性）。
-  - 支持 Android 11+ 无障碍原生截屏接口。
-- [x] 实现 `ShizukuController` 与 Shell 执行通道（支持通过 Shizuku 执行免 Root 截屏与指令，并在未授权时平滑降级至无障碍）。
-- [x] 实现 `HybridPhoneController`（智能混合双通道控制底座，Shizuku 优先，无缝自动降级）。
-
-### 阶段三：可扩展 Tool 工具箱（手机操作原子能力）[已完成 ✔]
-- [x] 实现 `TakeScreenshotTool`（结合 `AdaptiveScreenshotProcessor` 智能自适应分辨率与 ROI 裁剪，节省 80%+ Tokens）。
-- [x] 实现 `TapTool`（归一化 0..1000 坐标系统，自动适配物理分辨率）。
-- [x] 实现 `DoubleTapTool`（双击操作支持）。
-- [x] 实现 `LongPressTool`（长按指定坐标，可调节时长）。
-- [x] 实现 `SwipeTool`（支持平滑滚动与滑动）。
-- [x] 实现 `InputTextTool`（输入文本，支持自动清空与回车）。
-- [x] 实现 `KeyActionTool`（返回、Home、Recents、Enter 等系统键）。
-- [x] 实现 `LaunchAppTool` 与 `DeepLinkTool`（应用启动与协议直达）。
-- [x] 实现 `GetScreenStateTool`（结构化当前前台包名及 UI 节点）。
-- [x] 实现 `WaitTool`（明确等待页面加载与动画平息）。
-
-### 阶段四：Skill 技能体系（复合能力封装与解耦）[已完成 ✔]
-- [x] 定义 `AgentSkill` 接口、`SkillRegistry` 与 `SkillToolAdapter`。
-- [x] 实现基础与高阶通用技能：
-  - `OpenAndSearchSkill`（打开指定应用并自动定位搜索框输入搜索）。
-  - `ReturnHomeAndResetSkill`（安全回到桌面并重置状态）。
-  - `ScrollAndFindSkill`（智能在列表或页面中平滑滚动查找目标并点击，大幅减少视觉往返，极大节省 Token）。
-
-### 阶段五：Agent 执行闭环与安全容错 [已完成 ✔]
-- [x] 升级 `Agent.kt` 执行引擎：
-  - 视觉感知闭环：执行动作后回传 observation 截屏（精简 summary + Base64 image），防止上下文超限溢出。
-  - 安全红线机制（`SafetyGuard`）：检测到支付、密码输入等敏感页面时自动暂停并提示用户接管。
-  - 步数自适应保护与协程取消响应。
-
-### 阶段六：UI 与实时状态同步 [已完成 ✔]
-- [x] 完善 `ChatViewModel` 与 `MessageBubble`：
-  - 工具调用过程实时上屏（`ToolStarted` 动态展示当前执行工具与参数，`ToolFinished` 展示执行结果与状态）。
-  - 支持渲染多模态截屏缩略图。
-- [x] 完善 `LlmSettingsScreen`：
-  - “手机控制与系统权限”专区：实时检测无障碍、Shizuku、悬浮窗状态，提供一键引导开启按钮。
-  - “Agent 手机控制与视觉策略”专区：自适应分辨率模式选择、最大执行步数调节。
-- [x] 跨应用控制体验：
-  - 实现 `AgentFloatingService` 悬浮药丸胶囊与 `AgentExecutionController` 状态总线，在操作第三方 App 时实时展示步数、当前动作与一键停止按钮。
-  - 聊天界面顶部未开启无障碍时展示智能提示横幅。
-
-### 阶段七：系统验证与单元测试 [已完成 ✔]
-- [x] 全工程自动化单元测试（涵盖 DTO、工具、技能、截屏处理器、状态机控制器全部通过，`BUILD SUCCESSFUL`）。
-
+1. **端侧轻量视觉目标检测辅助 (UI Element Detector)**
+   - 结合端侧 NPU/TFLite 运行轻量 UI 元素检测模型，先识别按钮与输入框坐标，再交由大模型决策，减少纯大模型图像输入频次与延迟。
+2. **可视宏录制与技能生成器 (Visual Macro to Skill)**
+   - 允许用户手动操作一次（如打卡、发特定消息），自动生成可参数化的结构化 YAML/Kotlin Skill 脚本。
+3. **安全审计日志与行为回放**
+   - 增强任务复盘系统，支持对整场操作生成的断点决策树与脱敏审计日志一键导出为诊断包。

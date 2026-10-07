@@ -1,9 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <data-extraction-rules>
     <cloud-backup>
-        <include domain="sharedpref" path="." />
+        <exclude domain="file" path="datastore/agentpaw_settings.preferences_pb" />
+        <exclude domain="sharedpref" path="." />
+        <exclude domain="file" path="conversations" />
+        <exclude domain="file" path="active_breakpoint.json" />
+        <exclude domain="file" path="running_task.json" />
     </cloud-backup>
     <device-transfer>
-        <include domain="sharedpref" path="." />
+        <exclude domain="file" path="datastore/agentpaw_settings.preferences_pb" />
+        <exclude domain="sharedpref" path="." />
+        <exclude domain="file" path="conversations" />
+        <exclude domain="file" path="active_breakpoint.json" />
+        <exclude domain="file" path="running_task.json" />
     </device-transfer>
 </data-extraction-rules>

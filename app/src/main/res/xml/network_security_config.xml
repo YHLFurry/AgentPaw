@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- 允许本地回环地址与局域网开发设备 (Ollama / LocalAI / vLLM 等) 明文 HTTP 通信 -->
+    <!-- 客户端核心层在应用层严格校验：公网 API 端点必须强制使用 HTTPS 保护 API Key -->
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

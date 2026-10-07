@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -24,7 +25,9 @@ import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.PhoneAndroid
+import androidx.compose.material.icons.outlined.Security
 import androidx.compose.material.icons.outlined.Tune
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -49,6 +52,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.paw.agent.R
 import com.paw.agent.core.llm.LlmProvider
 import com.paw.agent.data.settings.UiThemeMode
+import com.paw.agent.ui.components.adaptive.AppCard
 import com.paw.agent.ui.components.adaptive.AppCircularProgressIndicator
 import com.paw.agent.ui.components.adaptive.AppIcon
 import com.paw.agent.ui.components.adaptive.AppIconButton
@@ -473,6 +477,10 @@ fun AgentControlPage(
     val hasOverlayPermission = remember(permRefreshTick.intValue) {
         com.paw.agent.device.DevicePermissionManager.canDrawOverlays(context)
     }
+    val coroutineScope = androidx.compose.runtime.rememberCoroutineScope()
+    val isRootGranted = remember(permRefreshTick.intValue) {
+        com.paw.agent.device.DevicePermissionManager.isRootAvailable()
+    }
 
     SettingsPageScaffold(
         title = stringResource(R.string.settings_group_agent),
@@ -510,6 +518,34 @@ fun AgentControlPage(
         }
 
         Spacer(Modifier.height(20.dp))
+
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.R) {
+            AppCard(
+                cornerRadius = 12.dp,
+                containerColor = AppTheme.colors.surfaceContainerHigh,
+                contentColor = AppTheme.colors.onSurface,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 12.dp),
+            ) {
+                Row(
+                    modifier = Modifier.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    AppIcon(
+                        imageVector = Icons.Outlined.Security,
+                        contentDescription = null,
+                        tint = AppTheme.colors.primary,
+                        modifier = Modifier.size(24.dp),
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    AppText(
+                        text = "系统兼容提示：当前设备为 Android ${android.os.Build.VERSION.RELEASE} (API ${android.os.Build.VERSION.SDK_INT})。无障碍截图需 Android 11+ (API 30+)。在 Android 8–10 下，视觉感知与多模态截图功能需开启 Shizuku 或 Root 模式。",
+                        style = AppTheme.typography.bodySmall,
+                    )
+                }
+            }
+        }
 
         SettingsGroupLabel(stringResource(R.string.settings_group_system_permissions))
         SettingsCard {
@@ -578,6 +614,45 @@ fun AgentControlPage(
                 actionText = stringResource(R.string.permission_open_settings),
                 onAction = {
                     com.paw.agent.device.DevicePermissionManager.openOverlaySettings(context)
+                },
+            )
+
+            SettingsRowDivider()
+
+            PermissionRow(
+                title = stringResource(R.string.permission_root),
+                subtitle = stringResource(R.string.permission_root_summary),
+                isGranted = isRootGranted,
+                statusText = if (isRootGranted) {
+                    stringResource(R.string.permission_root_granted)
+                } else {
+                    stringResource(R.string.permission_root_not_granted)
+                },
+                actionText = if (!isRootGranted) {
+                    stringResource(R.string.permission_root_request)
+                } else if (!isAccessibilityEnabled) {
+                    "ROOT 激活无障碍"
+                } else null,
+                onAction = {
+                    coroutineScope.launch {
+                        if (!isRootGranted) {
+                            val ok = com.paw.agent.device.DevicePermissionManager.requestOrTestRoot()
+                            permRefreshTick.intValue++
+                            if (ok) {
+                                snackbarHostState.showSnackbar("ROOT 权限授权成功")
+                            } else {
+                                snackbarHostState.showSnackbar("未能获取 ROOT 授权，请检查 Magisk/KernelSU/APatch")
+                            }
+                        } else if (!isAccessibilityEnabled) {
+                            val ok = com.paw.agent.device.DevicePermissionManager.enableAccessibilityViaRoot(context)
+                            permRefreshTick.intValue++
+                            if (ok) {
+                                snackbarHostState.showSnackbar("已通过 ROOT 成功激活无障碍服务")
+                            } else {
+                                snackbarHostState.showSnackbar("ROOT 激活无障碍服务失败")
+                            }
+                        }
+                    }
                 },
             )
         }

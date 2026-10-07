@@ -1,6 +1,7 @@
 package com.paw.agent.ui.chat
 
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -21,7 +22,11 @@ import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -194,32 +199,100 @@ private fun ToolMessageBody(message: Message) {
         MessageStatus.FAILED -> Icons.Outlined.ErrorOutline to AppTheme.colors.error
         else -> Icons.Outlined.CheckCircle to AppTheme.colors.primary
     }
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        AppIcon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = tint,
-            modifier = Modifier.size(16.dp),
-        )
-        Spacer(Modifier.size(8.dp))
-        AppText(
-            text = message.content,
-            style = AppTheme.typography.bodySmall,
-            color = AppTheme.colors.onSurfaceVariant,
-        )
+    val hasLog = !message.fullLog.isNullOrBlank()
+    val isExpanded = androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+
+    Column {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            AppIcon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = tint,
+                modifier = Modifier.size(16.dp),
+            )
+            Spacer(Modifier.size(8.dp))
+            AppText(
+                text = message.content,
+                style = AppTheme.typography.bodySmall,
+                color = AppTheme.colors.onSurfaceVariant,
+            )
+        }
+
+        if (hasLog) {
+            Spacer(Modifier.height(4.dp))
+            androidx.compose.foundation.layout.Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .clickable { isExpanded.value = !isExpanded.value }
+                    .padding(vertical = 2.dp, horizontal = 4.dp),
+            ) {
+                AppText(
+                    text = if (isExpanded.value) "收起执行详情 ▲" else "展开完整日志 ▼",
+                    style = AppTheme.typography.labelSmall,
+                    color = AppTheme.colors.primary,
+                )
+            }
+
+            if (isExpanded.value) {
+                Spacer(Modifier.height(4.dp))
+                AppSurface(
+                    color = AppTheme.colors.surfaceVariant.copy(alpha = 0.35f),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
+                ) {
+                    AppText(
+                        text = message.fullLog.orEmpty(),
+                        style = AppTheme.typography.bodySmall.copy(
+                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                        ),
+                        color = AppTheme.colors.onSurfaceVariant,
+                        modifier = Modifier.padding(8.dp),
+                    )
+                }
+            }
+        }
     }
 }
 
 @Composable
 private fun MessageImages(images: List<String>) {
     images.forEach { raw ->
-        val base64Data = if (raw.contains(",")) raw.substringAfter(",") else raw
-        val bitmap = remember(raw) {
-            runCatching {
-                val bytes = android.util.Base64.decode(base64Data, android.util.Base64.DEFAULT)
-                android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
-            }.getOrNull()
+        val bitmapState by produceState<androidx.compose.ui.graphics.ImageBitmap?>(initialValue = null, key1 = raw) {
+            value = withContext(Dispatchers.IO) {
+                runCatching {
+                    if (raw.startsWith("file://") || java.io.File(raw).exists()) {
+                        val path = raw.removePrefix("file://")
+                        val boundsOpts = android.graphics.BitmapFactory.Options().apply {
+                            inJustDecodeBounds = true
+                        }
+                        android.graphics.BitmapFactory.decodeFile(path, boundsOpts)
+                        val reqWidth = 720
+                        val reqHeight = 1280
+                        var sampleSize = 1
+                        if (boundsOpts.outHeight > reqHeight || boundsOpts.outWidth > reqWidth) {
+                            val halfHeight = boundsOpts.outHeight / 2
+                            val halfWidth = boundsOpts.outWidth / 2
+                            while ((halfHeight / sampleSize) >= reqHeight && (halfWidth / sampleSize) >= reqWidth) {
+                                sampleSize *= 2
+                            }
+                        }
+                        val opts = android.graphics.BitmapFactory.Options().apply {
+                            inSampleSize = sampleSize
+                            inPreferredConfig = android.graphics.Bitmap.Config.RGB_565
+                        }
+                        android.graphics.BitmapFactory.decodeFile(path, opts)?.asImageBitmap()
+                    } else {
+                        val base64Data = if (raw.contains(",")) raw.substringAfter(",") else raw
+                        val bytes = android.util.Base64.decode(base64Data, android.util.Base64.DEFAULT)
+                        val opts = android.graphics.BitmapFactory.Options().apply {
+                            inPreferredConfig = android.graphics.Bitmap.Config.RGB_565
+                        }
+                        android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)?.asImageBitmap()
+                    }
+                }.getOrNull()
+            }
         }
+        val bitmap = bitmapState
         if (bitmap != null) {
             Image(
                 bitmap = bitmap,

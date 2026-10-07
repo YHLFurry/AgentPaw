@@ -10,14 +10,15 @@ import kotlinx.coroutines.flow.update
 import java.util.UUID
 
 /**
- * Holds the active conversation.
+ * Holds conversation state.
  *
- * Deliberately in-memory for this first framework drop — persisting history is
- * on the roadmap. The interface is already async so swapping in a Room-backed
- * implementation later will not touch the ViewModel.
+ * Provides [InMemoryConversationRepository] for testing and lightweight usages,
+ * and [PersistentConversationRepository] for production disk persistence, screenshot
+ * asset storage, and history analysis.
  */
 interface ConversationRepository {
     val conversation: StateFlow<Conversation>
+    val isInitialized: StateFlow<Boolean>
 
     fun newConversation(): String
     fun addMessage(message: Message)
@@ -30,6 +31,9 @@ interface ConversationRepository {
 }
 
 class InMemoryConversationRepository : ConversationRepository {
+
+    private val _isInitialized = MutableStateFlow(true)
+    override val isInitialized: StateFlow<Boolean> = _isInitialized.asStateFlow()
 
     private val _conversation = MutableStateFlow(
         Conversation(

@@ -16,7 +16,7 @@
   <img src="https://img.shields.io/badge/Platform-Android_8.0+_(API_26+)-3DDC84?logo=android&logoColor=white" alt="Platform" />
   <img src="https://img.shields.io/badge/Kotlin-2.2.21-7F52FF?logo=kotlin&logoColor=white" alt="Kotlin" />
   <img src="https://img.shields.io/badge/Jetpack_Compose-Material_3_&_Miuix-4285F4?logo=jetpackcompose&logoColor=white" alt="UI" />
-  <img src="https://img.shields.io/badge/Tests-109_Passed-brightgreen" alt="Tests" />
+  <img src="https://img.shields.io/badge/Tests-139_Passed-brightgreen" alt="Tests" />
   <img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License" />
 </p>
 
@@ -83,20 +83,22 @@ Whether you want to automate repetitive device operations, build custom AI mobil
 
 ### 1. Installation & Prerequisites
 - Android 8.0 (API level 26) or higher.
+- **Android Version & Vision Capabilities**: Due to Android platform security restrictions, native zero-root accessibility screenshots are only supported on Android 11+ (API 30+). On Android 8–10, UI tree inspection and node-based clicking work seamlessly; for full multimodal screenshots and vision perception, enable **Shizuku** or **Root** mode.
 - Download the latest `app-debug.apk` from GitHub Releases or build from source.
 
 ### 2. Granting Permissions
 To enable AgentPaw to control your phone, grant the required permissions according to your needs:
 1. **Accessibility Service**: Go to *System Settings → Accessibility → AgentPaw* and enable the service (Required for standard on-screen control).
 2. **Display over other apps**: Enable the floating overlay permission so the stop/resume capsule can display over third-party apps.
-3. **Shizuku (Optional)**: If you have Shizuku installed, grant permission in the Shizuku Manager for ADB-level execution.
+3. **Shizuku (Recommended)**: If you have Shizuku installed, grant permission in the Shizuku Manager for high-speed ADB-level execution and full screenshot capabilities across all supported Android versions.
 4. **Root (Optional)**: For rooted devices, grant `su` access when prompted or in settings.
 
 ### 3. Configuring LLM Provider
 AgentPaw supports any OpenAI-compatible API endpoint:
-- **Preset Providers**: OpenAI, DeepSeek, Google Gemini, Moonshot / Kimi, Ollama (local on `http://10.0.2.2:11434/v1` or LAN).
+- **Preset Providers**: OpenAI, DeepSeek, Google Gemini, Moonshot / Kimi, Ollama (local on `http://10.0.2.2:11434/v1`, `http://localhost:11434/v1`, `http://127.0.0.1:11434/v1`, or private LAN IP e.g. `http://192.168.x.x:11434/v1`).
+- **Transport Security**: Cleartext HTTP is allowed for private LAN/local models for fast debugging, while HTTPS is strictly enforced for public cloud endpoints to secure API keys and commands.
 - **Custom Endpoints**: Any vLLM, LM Studio, OneAPI, or self-hosted endpoint.
-- **Privacy First**: Your API keys are strictly stored on-device in encrypted private DataStore preferences and are never uploaded to any third-party telemetry.
+- **Privacy First**: Your API keys are strictly stored on-device in hardware-backed Android Keystore and private DataStore preferences, never uploaded to any telemetry.
 
 ### 4. Running and Managing Tasks
 1. Send a natural instruction in the chat (e.g., *"Open Settings and turn on Dark Mode"*).
@@ -150,7 +152,7 @@ cd AgentPaw
 # Compile Debug APK
 ./gradlew :app:assembleDebug
 
-# Run all 109 unit tests across all modules
+# Run all 139 unit tests across all modules
 ./gradlew testDebugUnitTest
 ```
 
@@ -158,12 +160,15 @@ The compiled APK will be located at:
 `app/build/outputs/apk/debug/app-debug.apk`
 
 ### Test Coverage Highlights
-All **109** unit tests (101 core + 8 app) pass out-of-the-box on the JVM without requiring an emulator:
+All **139** unit tests (122 core + 17 app) pass out-of-the-box on the JVM without requiring an emulator:
 - `ResumeIntentDetectorTest`: Breakpoint intent parsing, follow-up instructions, resume prompt generation.
 - `AgentTest`: Multi-round loop, cancellation, tool recovery, and event emission.
 - `InterpreterTest`: Sandboxed shell execution, security path boundaries, pipelines, and arithmetic logic.
-- `AndroidPhoneToolsTest`: Phone tool schemas, device perception, and hybrid delegation.
+- `AndroidPhoneToolsTest` & `ToolControlSignalTest`: Device interaction schemas, structured safety pause on sensitive screens, and explicit user risk confirmation signaling.
+- `HybridPhoneControllerSecurityTest`: Shell command injection prevention via strict package name regex and installation validation under Root/Shizuku modes.
+- `OpenAiCompatibleClientSecurityTest`: Mandatory HTTPS transport validation for public APIs and private network IP verification.
 - `AdaptiveScreenshotProcessorTest`: Multimodal image downscaling and compression.
+- `PersistentConversationRepositoryTest`: Multi-round history persistence, off-main-thread image processing, and secure local storage.
 
 ---
 

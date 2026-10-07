@@ -3,7 +3,6 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
     <!-- Shizuku 授权通道：缺少该权限时 Shizuku Manager 会直接拒绝授权请求 -->
     <uses-permission android:name="moe.shizuku.manager.permission.API_V23" />
     <!-- Agent 停止悬浮窗按钮（无障碍操作期间的一键停止） -->
