@@ -25,6 +25,36 @@ object SafetyGuard {
         val lower = text.lowercase()
         return sensitiveKeywords.any { lower.contains(it) }
     }
+
+    fun checkRisk(toolName: String, arguments: String, screenText: String): com.paw.agent.core.agent.RiskDecision {
+        return com.paw.agent.core.agent.RiskActionGuard.evaluate(toolName, arguments, screenText)
+    }
+
+    fun formatConfirmationPayload(
+        risk: com.paw.agent.core.agent.RiskDecision,
+        toolName: String = "",
+        arguments: String = "",
+    ): String {
+        val safeTarget = risk.target.replace("\"", "\\\"")
+        val safeImpact = risk.impact.replace("\"", "\\\"")
+        val safeReason = if (risk.impact.isNotBlank()) safeImpact else "命中高风险防护规则"
+        val escapedArgs = arguments.replace("\\", "\\\\").replace("\"", "\\\"")
+        return """
+        {
+          "status": "requires_confirmation",
+          "requires_confirmation": true,
+          "risk_level": "${risk.level}",
+          "category": "${risk.category}",
+          "action": "${risk.action}",
+          "target": "$safeTarget",
+          "impact": "$safeImpact",
+          "reason": "$safeReason",
+          "tool_name": "$toolName",
+          "arguments": "$escapedArgs",
+          "message": "[安全确认拦截] 检测到高风险操作【${risk.action}】。目标：$safeTarget，影响：$safeImpact。已自动暂停，需要用户显式确认。"
+        }
+        """.trimIndent()
+    }
 }
 
 class TakeScreenshotTool(
@@ -123,7 +153,14 @@ class TapTool(
         val state = phoneController.getScreenState()
         val allText = state.elements.joinToString(" ") { it.text + " " + it.contentDescription }
         if (SafetyGuard.isSensitive(allText)) {
-            return """{"status":"paused","message":"[SAFETY PAUSE] Detected sensitive password/payment screen. Automated tapping is paused for security. Please complete this step manually on your device."}"""
+            return """{"status":"paused","is_safety_pause":true,"reason":"检测到敏感密码/支付页面，自动化操作已安全暂停","message":"[SAFETY PAUSE] Detected sensitive password/payment screen. Automated tapping is paused for security. Please complete this step manually on your device."}"""
+        }
+        val confirmed = root["confirmed"]?.jsonPrimitive?.contentOrNull?.toBoolean() ?: false
+        if (!confirmed) {
+            val risk = SafetyGuard.checkRisk("tap", arguments, allText)
+            if (risk.requiresConfirmation) {
+                return SafetyGuard.formatConfirmationPayload(risk, toolName = "tap", arguments = arguments)
+            }
         }
 
         val ok = phoneController.tap(x, y, cropRoi)
@@ -195,7 +232,14 @@ class InputTextTool(
         val state = phoneController.getScreenState()
         val allText = state.elements.joinToString(" ") { it.text + " " + it.contentDescription }
         if (SafetyGuard.isSensitive(allText)) {
-            return """{"status":"paused","message":"[SAFETY PAUSE] Detected sensitive password/payment screen. Automated text input is paused for security. Please complete this step manually on your device."}"""
+            return """{"status":"paused","is_safety_pause":true,"reason":"检测到敏感密码/支付页面，自动化操作已安全暂停","message":"[SAFETY PAUSE] Detected sensitive password/payment screen. Automated text input is paused for security. Please complete this step manually on your device."}"""
+        }
+        val confirmed = root["confirmed"]?.jsonPrimitive?.contentOrNull?.toBoolean() ?: false
+        if (!confirmed) {
+            val risk = SafetyGuard.checkRisk("input_text", arguments, allText)
+            if (risk.requiresConfirmation) {
+                return SafetyGuard.formatConfirmationPayload(risk, toolName = "input_text", arguments = arguments)
+            }
         }
 
         val ok = phoneController.inputText(text, clear)
@@ -232,6 +276,18 @@ class KeyActionTool(
         val root = json.parseToJsonElement(arguments).jsonObject
         val action = root["action"]?.jsonPrimitive?.contentOrNull?.uppercase()
             ?: return "Error: 'action' is required"
+
+        if (action == "ENTER") {
+            val state = phoneController.getScreenState()
+            val allText = state.elements.joinToString(" ") { it.text + " " + it.contentDescription }
+            val confirmed = root["confirmed"]?.jsonPrimitive?.contentOrNull?.toBoolean() ?: false
+            if (!confirmed) {
+                val risk = SafetyGuard.checkRisk("key_action", arguments, allText)
+                if (risk.requiresConfirmation) {
+                    return SafetyGuard.formatConfirmationPayload(risk)
+                }
+            }
+        }
 
         val ok = when (action) {
             "BACK" -> phoneController.pressBack()
@@ -293,6 +349,13 @@ class DeepLinkTool(
     override suspend fun execute(arguments: String, context: AgentContext): String {
         val root = json.parseToJsonElement(arguments).jsonObject
         val uri = root["uri"]?.jsonPrimitive?.contentOrNull ?: return "Error: 'uri' is required"
+        val confirmed = root["confirmed"]?.jsonPrimitive?.contentOrNull?.toBoolean() ?: false
+        if (!confirmed) {
+            val risk = SafetyGuard.checkRisk("open_deeplink", arguments, "")
+            if (risk.requiresConfirmation) {
+                return SafetyGuard.formatConfirmationPayload(risk)
+            }
+        }
 
         val ok = phoneController.openDeepLink(uri)
         return if (ok) """{"status":"success","opened":"$uri"}"""
@@ -355,7 +418,14 @@ class ClickElementTool(
         val state = phoneController.getScreenState()
         val allText = state.elements.joinToString(" ") { it.text + " " + it.contentDescription }
         if (SafetyGuard.isSensitive(allText)) {
-            return """{"status":"paused","message":"[SAFETY PAUSE] Detected sensitive password/payment screen. Automated tapping is paused for security. Please complete this step manually on your device."}"""
+            return """{"status":"paused","is_safety_pause":true,"reason":"检测到敏感密码/支付页面，自动化操作已安全暂停","message":"[SAFETY PAUSE] Detected sensitive password/payment screen. Automated tapping is paused for security. Please complete this step manually on your device."}"""
+        }
+        val confirmed = root["confirmed"]?.jsonPrimitive?.contentOrNull?.toBoolean() ?: false
+        if (!confirmed) {
+            val risk = SafetyGuard.checkRisk("click_element", arguments, allText)
+            if (risk.requiresConfirmation) {
+                return SafetyGuard.formatConfirmationPayload(risk, toolName = "click_element", arguments = arguments)
+            }
         }
 
         // 1) Resolve the target element's pixel bounds.

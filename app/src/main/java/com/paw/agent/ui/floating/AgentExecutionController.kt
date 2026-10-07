@@ -44,8 +44,23 @@ object AgentExecutionController {
     }
 
     fun requestStop() {
-        stopCallback?.invoke()
-        _state.value = _state.value.copy(isRunning = false, currentAction = "已手动停止", isPaused = false)
+        val cb = stopCallback
+        if (cb != null) {
+            cb.invoke()
+            if (!_state.value.isPaused) {
+                _state.value = _state.value.copy(isRunning = false, currentAction = "已手动停止", isPaused = false)
+            }
+        } else {
+            _state.value = _state.value.copy(isRunning = false, currentAction = "已手动停止", isPaused = false)
+        }
+    }
+
+    fun markStopped(reason: String = "已手动停止") {
+        _state.value = _state.value.copy(
+            isRunning = false,
+            currentAction = reason,
+            isPaused = false,
+        )
     }
 
     fun requestResume() {

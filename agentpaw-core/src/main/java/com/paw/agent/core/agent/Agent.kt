@@ -21,6 +21,8 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import java.io.File
+import java.util.Base64
 
 /**
  * Events emitted by [Agent.run] while it works through a turn.
@@ -32,8 +34,14 @@ sealed interface AgentEvent {
     /** An assistant message was created; [message] is updated as tokens arrive. */
     data class AssistantDelta(val message: Message) : AgentEvent
 
+    /**
+     * An assistant turn was completed with pending tool calls.
+     * [message] carries the populated toolCalls and COMPLETE status.
+     */
+    data class AssistantTurn(val message: Message, val round: Int = 1) : AgentEvent
+
     /** A tool the model asked for is about to run. */
-    data class ToolStarted(val call: ToolCall) : AgentEvent
+    data class ToolStarted(val call: ToolCall, val round: Int = 1) : AgentEvent
 
     /** A tool finished, successfully or not. */
     data class ToolFinished(val result: ToolResult) : AgentEvent
@@ -95,17 +103,6 @@ class Agent(
                 return@flow
             }
 
-            if (effectiveMaxRounds != null && round > effectiveMaxRounds) {
-                val msg = currentAssistant(
-                    buffer,
-                    assistantId,
-                    MessageStatus.FAILED,
-                    "Stopped after $effectiveMaxRounds tool rounds",
-                )
-                emit(AgentEvent.Failed(msg))
-                return@flow
-            }
-
             // ---- one model call ----
             buffer = StringBuilder()
             val pendingToolCalls = mutableListOf<ToolCall>()
@@ -158,6 +155,17 @@ class Agent(
                 return@flow
             }
 
+            if (effectiveMaxRounds != null && round >= effectiveMaxRounds) {
+                val msg = currentAssistant(
+                    buffer,
+                    assistantId,
+                    MessageStatus.FAILED,
+                    "Stopped after $effectiveMaxRounds tool rounds",
+                )
+                emit(AgentEvent.Failed(msg))
+                return@flow
+            }
+
             val assistantMessage = currentAssistant(
                 buffer,
                 assistantId,
@@ -165,6 +173,7 @@ class Agent(
             ).copy(toolCalls = pendingToolCalls)
 
             workingHistory = workingHistory + assistantMessage
+            emit(AgentEvent.AssistantTurn(assistantMessage, round + 1))
 
             for (call in pendingToolCalls) {
                 currentCoroutineContext().ensureActive()
@@ -173,7 +182,7 @@ class Agent(
                     return@flow
                 }
 
-                emit(AgentEvent.ToolStarted(call))
+                emit(AgentEvent.ToolStarted(call, round + 1))
                 val result = executeTool(call, context)
                 emit(AgentEvent.ToolFinished(result))
                 workingHistory = workingHistory + result.toMessages()
@@ -189,6 +198,23 @@ class Agent(
 
             round++
         }
+    }
+
+    /**
+     * 直接执行已获得用户显式授权确认的特定工具，用于断点恢复与高风险操作闭环
+     */
+    suspend fun executeDirectTool(
+        toolName: String,
+        arguments: String,
+        conversationId: String = "conversation",
+    ): ToolResult {
+        val context = AgentContext(conversationId, 0) { false }
+        val call = ToolCall(
+            id = "confirmed_" + java.util.UUID.randomUUID().toString(),
+            name = toolName,
+            arguments = arguments,
+        )
+        return executeTool(call, context)
     }
 
     private suspend fun executeTool(call: ToolCall, context: AgentContext): ToolResult {
@@ -222,31 +248,51 @@ class Agent(
                 if (config.systemPrompt.isNotBlank()) {
                     add(WireMessage(role = "system", content = config.systemPrompt))
                 }
-                history.forEach { message ->
+                // Retain only the latest 2 observations with full images to prevent token bloat
+                val allImageIndices = history.mapIndexedNotNull { index, msg ->
+                    if (msg.images.isNotEmpty()) index else null
+                }
+                val keepImageIndices = allImageIndices.takeLast(2).toSet()
+
+                history.forEachIndexed { index, message ->
                     when (message.role) {
                         MessageRole.SYSTEM -> add(
                             WireMessage(role = "system", content = message.content),
                         )
 
                         MessageRole.USER -> {
-                            if (message.images.isEmpty()) {
-                                add(WireMessage(role = "user", content = message.content))
+                            val shouldSendImages = message.images.isNotEmpty() && index in keepImageIndices
+                            if (!shouldSendImages) {
+                                val textContent = if (message.images.isNotEmpty() && index !in keepImageIndices) {
+                                    "${message.content} (Previous screenshot omitted to preserve context)"
+                                } else {
+                                    message.content
+                                }
+                                add(WireMessage(role = "user", content = textContent))
                             } else {
                                 val parts = buildList {
                                     if (message.content.isNotBlank()) {
                                         add(com.paw.agent.core.llm.dto.ContentPart.TextPart(message.content))
                                     }
                                     message.images.forEach { img ->
-                                        val url = if (img.startsWith("data:") || img.startsWith("http://") || img.startsWith("https://")) {
-                                            img
-                                        } else {
-                                            "data:image/jpeg;base64,$img"
+                                        val url = when {
+                                            img.startsWith("data:") || img.startsWith("http://") || img.startsWith("https://") -> img
+                                            img.startsWith("file://") || File(img).exists() -> {
+                                                val f = File(img.removePrefix("file://"))
+                                                if (f.exists()) {
+                                                    val b64 = Base64.getEncoder().encodeToString(f.readBytes())
+                                                    "data:image/jpeg;base64,$b64"
+                                                } else null
+                                            }
+                                            else -> "data:image/jpeg;base64,$img"
                                         }
-                                        add(
-                                            com.paw.agent.core.llm.dto.ContentPart.ImagePart(
-                                                imageUrl = com.paw.agent.core.llm.dto.ImageUrl(url = url),
-                                            ),
-                                        )
+                                        if (url != null) {
+                                            add(
+                                                com.paw.agent.core.llm.dto.ContentPart.ImagePart(
+                                                    imageUrl = com.paw.agent.core.llm.dto.ImageUrl(url = url),
+                                                ),
+                                            )
+                                        }
                                     }
                                 }
                                 add(
@@ -281,13 +327,16 @@ class Agent(
                             }
                         }
 
-                        MessageRole.TOOL -> add(
-                            WireMessage(
-                                role = "tool",
-                                content = message.content,
-                                toolCallId = message.toolCallId,
-                            ),
-                        )
+                        MessageRole.TOOL -> {
+                            val sanitized = SensitiveDataMasker.mask(message.content)
+                            add(
+                                WireMessage(
+                                    role = "tool",
+                                    content = sanitized,
+                                    toolCallId = message.toolCallId,
+                                ),
+                            )
+                        }
                     }
                 }
             },
@@ -348,7 +397,7 @@ class Agent(
             Message(
                 id = "${toolCallId}_result",
                 role = MessageRole.TOOL,
-                content = content,
+                content = SensitiveDataMasker.mask(content),
                 toolCallId = toolCallId,
                 status = if (isError) MessageStatus.FAILED else MessageStatus.COMPLETE,
             ),

@@ -198,10 +198,8 @@ class HybridPhoneController(
         durationMs: Long,
     ): Boolean {
         if (userStopRequested()) return false
-        val x1 = AdaptiveScreenshotProcessor.toPhysicalX(startXNormalized, screenWidth)
-        val y1 = AdaptiveScreenshotProcessor.toPhysicalY(startYNormalized, screenHeight)
-        val x2 = AdaptiveScreenshotProcessor.toPhysicalX(endXNormalized, screenWidth)
-        val y2 = AdaptiveScreenshotProcessor.toPhysicalY(endYNormalized, screenHeight)
+        val (x1, y1) = toPhysical(startXNormalized, startYNormalized, null)
+        val (x2, y2) = toPhysical(endXNormalized, endYNormalized, null)
 
         if (shouldUseRoot) {
             val ok = rootController.swipe(x1.roundToInt(), y1.roundToInt(), x2.roundToInt(), y2.roundToInt(), durationMs)
@@ -309,22 +307,20 @@ class HybridPhoneController(
         }
 
         // 2. Direct package match
-        val directIntent = pm.getLaunchIntentForPackage(query)
-        if (directIntent != null) {
-            directIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            context.startActivity(directIntent)
-            return@withContext true
+        if (PACKAGE_NAME_REGEX.matches(query)) {
+            val directIntent = pm.getLaunchIntentForPackage(query)
+            if (directIntent != null) {
+                directIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                context.startActivity(directIntent)
+                return@withContext true
+            }
         }
 
-        // 3. Match by installed app label
-        val installed = pm.getInstalledApplications(0)
-        val matched = installed.firstOrNull { app ->
-            val label = pm.getApplicationLabel(app).toString().lowercase()
-            label == query || label.contains(query) || app.packageName.lowercase().contains(query)
-        }
+        // 3. Match by installed app label using prioritized precision ranking
+        val matchedPkg = findBestMatchingPackage(query, pm)
 
-        if (matched != null) {
-            val intent = pm.getLaunchIntentForPackage(matched.packageName)
+        if (matchedPkg != null) {
+            val intent = pm.getLaunchIntentForPackage(matchedPkg)
             if (intent != null) {
                 intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 context.startActivity(intent)
@@ -332,9 +328,12 @@ class HybridPhoneController(
             }
         }
 
-        val targetPkg = aliasedPkg ?: matched?.packageName ?: query
+        // 4. Resolve safe target package
+        // 严格安全防线：只允许合法包名格式；未匹配到已安装应用或合法别名时直接失败，严禁将未经验证的原始输入作为 shell 参数
+        val candidatePkg = aliasedPkg ?: matchedPkg ?: if (PACKAGE_NAME_REGEX.matches(query) && isPackageInstalled(query, pm)) query else null
+        val targetPkg = candidatePkg?.takeIf { PACKAGE_NAME_REGEX.matches(it) } ?: return@withContext false
 
-        // 4. Root execution via monkey or am start
+        // 5. Root execution via monkey
         if (shouldUseRoot) {
             val res = rootController.executeCommand("monkey -p $targetPkg -c android.intent.category.LAUNCHER 1")
             if (!res.contains("No activities found") && !res.startsWith("Error:")) {
@@ -342,13 +341,80 @@ class HybridPhoneController(
             }
         }
 
-        // 5. Fallback to monkey via Shizuku
+        // 6. Fallback to monkey via Shizuku
         if (shouldUseShizuku) {
             val res = shizukuController.executeCommand("monkey -p $targetPkg -c android.intent.category.LAUNCHER 1")
             return@withContext !res.contains("No activities found") && !res.startsWith("Error:")
         }
 
         false
+    }
+
+    private fun isPackageInstalled(packageName: String, pm: android.content.pm.PackageManager): Boolean {
+        return runCatching {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                pm.getPackageInfo(packageName, android.content.pm.PackageManager.PackageInfoFlags.of(0))
+            } else {
+                @Suppress("DEPRECATION")
+                pm.getPackageInfo(packageName, 0)
+            }
+            true
+        }.getOrDefault(false)
+    }
+
+    private fun findBestMatchingPackage(query: String, pm: android.content.pm.PackageManager): String? {
+        val q = query.trim().lowercase()
+        val launcherIntent = Intent(Intent.ACTION_MAIN).apply {
+            addCategory(Intent.CATEGORY_LAUNCHER)
+        }
+        val resolveInfos = pm.queryIntentActivities(launcherIntent, 0)
+
+        data class Candidate(val packageName: String, val score: Int, val labelLength: Int)
+        val candidates = mutableListOf<Candidate>()
+
+        for (ri in resolveInfos) {
+            val label = ri.loadLabel(pm).toString().trim().lowercase()
+            val pkg = ri.activityInfo.packageName.lowercase()
+
+            val score = when {
+                label == q -> 100
+                pkg == q -> 95
+                label.startsWith(q) -> 80
+                pkg.endsWith(".$q") -> 75
+                label.contains(q) -> 60
+                pkg.contains(q) -> 40
+                else -> 0
+            }
+
+            if (score > 0) {
+                candidates.add(Candidate(ri.activityInfo.packageName, score, label.length))
+            }
+        }
+
+        if (candidates.isEmpty()) {
+            runCatching {
+                pm.getInstalledApplications(0).forEach { app ->
+                    val label = pm.getApplicationLabel(app).toString().trim().lowercase()
+                    val pkg = app.packageName.lowercase()
+                    val score = when {
+                        label == q -> 100
+                        pkg == q -> 95
+                        label.startsWith(q) -> 80
+                        pkg.endsWith(".$q") -> 75
+                        label.contains(q) -> 60
+                        pkg.contains(q) -> 40
+                        else -> 0
+                    }
+                    if (score > 0) {
+                        candidates.add(Candidate(app.packageName, score, label.length))
+                    }
+                }
+            }
+        }
+
+        return candidates
+            .sortedWith(compareByDescending<Candidate> { it.score }.thenBy { it.labelLength })
+            .firstOrNull()?.packageName
     }
 
     override suspend fun openDeepLink(uri: String): Boolean = withContext(Dispatchers.IO) {
@@ -462,6 +528,8 @@ class HybridPhoneController(
         // 兼容已有代码与单测的复合别名映射
         val POPULAR_APP_ALIASES: Map<String, String>
             get() = DEFAULT_APP_ALIASES + dynamicAppAliases
+
+        val PACKAGE_NAME_REGEX = Regex("^[a-zA-Z][a-zA-Z0-9_]*(\\.[a-zA-Z][a-zA-Z0-9_]*)+$")
     }
 }
 

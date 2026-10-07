@@ -206,6 +206,39 @@ class RootController {
         return buffer.toByteArray()
     }
 
+    /**
+     * 通过 ROOT 权限静默一键开启无障碍服务，避免用户手动翻找复杂系统设置。
+     */
+    suspend fun enableAccessibilityViaRoot(packageName: String, serviceClassName: String): Boolean = withContext(Dispatchers.IO) {
+        if (!isAvailable) return@withContext false
+        val comp = "$packageName/$serviceClassName"
+        val currentSetting = executeCommand("settings get secure enabled_accessibility_services").trim()
+        val newSetting = if (currentSetting.isBlank() || currentSetting == "null") {
+            comp
+        } else if (!currentSetting.contains(comp)) {
+            "$currentSetting:$comp"
+        } else {
+            currentSetting
+        }
+        val res1 = executeCommand("settings put secure enabled_accessibility_services $newSetting")
+        val res2 = executeCommand("settings put secure accessibility_enabled 1")
+        !res1.startsWith("Error:") && !res2.startsWith("Error:")
+    }
+
+    /**
+     * 获取当前系统 su 二进制信息与授权类型 (Magisk / KernelSU / APatch / SuperSU 等)
+     */
+    suspend fun getSuBinaryInfo(): String = withContext(Dispatchers.IO) {
+        if (!isAvailable) return@withContext "未授权 / 不可用"
+        val version = executeCommand("su -v").trim()
+        if (version.isNotBlank() && !version.startsWith("Error:")) {
+            version
+        } else {
+            val which = executeCommand("which su").trim()
+            if (which.isNotBlank()) which else "Root 特权模式"
+        }
+    }
+
     companion object {
         fun escapeForInputText(text: String): String =
             text.replace("'", "'\\''").replace(" ", "%s")

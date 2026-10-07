@@ -112,6 +112,15 @@ class AppContainer(application: Application) {
     }
 
     val agent: Agent by lazy { Agent(llmClient = llmClient, toolRegistry = toolRegistry) }
+
+    val agentTaskRunner: com.paw.agent.runner.AgentTaskRunner by lazy {
+        com.paw.agent.runner.AgentTaskRunner(
+            context = application,
+            agent = agent,
+            conversationRepository = conversationRepository,
+            settingsRepository = settingsRepository,
+        )
+    }
 }
 
 class AgentPawApplication : Application() {

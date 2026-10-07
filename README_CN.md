@@ -16,7 +16,7 @@
   <img src="https://img.shields.io/badge/平台-Android_8.0+_(API_26+)-3DDC84?logo=android&logoColor=white" alt="Platform" />
   <img src="https://img.shields.io/badge/语言-Kotlin_2.2.21-7F52FF?logo=kotlin&logoColor=white" alt="Kotlin" />
   <img src="https://img.shields.io/badge/界面-Material_3_&_Miuix-4285F4?logo=jetpackcompose&logoColor=white" alt="UI" />
-  <img src="https://img.shields.io/badge/单元测试-109_全部通过-brightgreen" alt="Tests" />
+  <img src="https://img.shields.io/badge/单元测试-139_全部通过-brightgreen" alt="Tests" />
   <img src="https://img.shields.io/badge/开源协议-Apache_2.0-blue.svg" alt="License" />
 </p>
 
@@ -84,19 +84,21 @@
 
 ### 1. 安装与系统要求
 - 支持 Android 8.0 (API 26) 及更高版本。
+- **系统版本与视觉能力说明**：由于 Android 系统限制，免 Root/Shizuku 模式下的无障碍原生截图仅在 Android 11 (API 30)+ 上可用。如果设备运行 Android 8–10，基础的 UI 树层级分析与控件点击正常工作；如需多模态视觉感知与屏幕截图能力，请开启 **Shizuku** 或 **Root** 模式。
 - 前往 GitHub Releases 下载最新的 `app-debug.apk`，或从源码编译安装。
 
 ### 2. 权限开启（根据需要按需开启）
 1. **无障碍服务**：进入手机「系统设置」→「辅助功能 / 无障碍」→ 开启「AgentPaw」（基础屏幕感知与点击必需）。
 2. **悬浮窗权限**：允许 AgentPaw 显示在其他应用上层，便于跨应用执行时弹出停止与续操浮窗。
-3. **Shizuku 授权（可选）**：如果手机安装了 Shizuku 并已启动，授权 AgentPaw 即可获得高速 ADB 自动化体验。
+3. **Shizuku 授权（推荐）**：如果手机安装了 Shizuku 并已启动，授权 AgentPaw 即可获得高速 ADB 自动化及低版本系统全功能截图体验。
 4. **ROOT 权限（可选）**：如果是玩机 Root 设备，可在 Magisk / KernelSU / APatch 中为本应用授权。
 
 ### 3. 配置大语言模型 (LLM)
 AgentPaw 兼容标准 OpenAI 协议格式：
-- **内置预设**：OpenAI、DeepSeek、Google Gemini、Moonshot (Kimi)、Ollama（本地运行无需外部 Key，填 `http://10.0.2.2:11434/v1` 或局域网 IP）。
+- **内置预设**：OpenAI、DeepSeek、Google Gemini、Moonshot (Kimi)、Ollama（本地运行无需外部 Key，支持 `http://10.0.2.2:11434/v1`、`http://localhost:11434/v1`、`http://127.0.0.1:11434/v1` 或私有局域网 IP 如 `http://192.168.x.x:11434/v1`）。
+- **网络与通信安全**：私有局域网/本机模型支持明文 HTTP 快速调试；公网第三方 API 强制使用 HTTPS 连接以确保 API Key 与敏感指令传输安全。
 - **自定义服务**：支持任何兼容 OpenAI 接口的自建模型服务（如 vLLM、LM Studio、OneAPI 等）。
-- **隐私保护承诺**：您的所有 API Key 仅保存在本地设备内部的加密私有 DataStore 中，绝不回传任何第三方统计或埋点。
+- **隐私保护承诺**：您的所有 API Key 仅保存在本地设备内部的 Android Keystore 加密存储中，绝不回传任何第三方统计或埋点。
 
 ### 4. 开启任务与断点续操
 1. 在聊天框向 AgentPaw 发送自然语言任务（例如：“*帮我打开设置并开启深色模式*”）。
@@ -161,12 +163,15 @@ cd AgentPaw
 `app/build/outputs/apk/debug/app-debug.apk`
 
 ### 自动化测试覆盖
-工程包含 **109** 个自动化单元测试（核心模块 101 项 + UI 模块 8 项），在 JVM 环境毫秒级完成回归验证：
+工程包含 **139** 个自动化单元测试（核心模块 122 项 + UI 模块 17 项），在 JVM 环境毫秒级完成回归验证：
 - `ResumeIntentDetectorTest`：覆盖完整断点意图识别、带补充修正条件意图解析、断点防重提示词构建。
 - `AgentTest`：多轮工具调用、用户中途取消、工具执行失败回退与流式事件响应。
 - `InterpreterTest`：沙箱环境变量隔离、防路径穿越穿透（如 `../../..`）、复杂管道流与数学运算。
-- `AndroidPhoneToolsTest`：手机各类点击/滑动/输入工具的 Schema 规范性与控制器转发校验。
+- `AndroidPhoneToolsTest` & `ToolControlSignalTest`：手机各类点击/滑动/输入工具的 Schema 规范性、敏感密码/支付页面结构化安全暂停与二次授权信号拦截。
+- `HybridPhoneControllerSecurityTest`：Root / Shizuku 模式下的包名白名单与严格格式正则校验，从根本上防止恶意 Shell 命令注入。
+- `OpenAiCompatibleClientSecurityTest`：公网 API 强制 HTTPS 传输，局域网与本地私有 IP 范围合规校验。
 - `AdaptiveScreenshotProcessorTest`：多模态截图自适应动态缩放与压降策略验证。
+- `PersistentConversationRepositoryTest`：多轮会话持久化、图片异步解耦与数据安全保障。
 
 ---
 

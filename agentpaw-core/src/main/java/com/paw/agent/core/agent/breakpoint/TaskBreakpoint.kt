@@ -1,5 +1,6 @@
 package com.paw.agent.core.agent.breakpoint
 
+import kotlinx.serialization.Serializable
 import java.util.UUID
 
 /**
@@ -13,6 +14,7 @@ import java.util.UUID
  * @param isInterrupted 是否为中途中断的在途步骤
  * @param timestamp 记录时间戳
  */
+@Serializable
 data class StepSnapshot(
     val stepIndex: Int,
     val toolName: String,
@@ -24,6 +26,20 @@ data class StepSnapshot(
 )
 
 /**
+ * 待用户确认的高风险操作详细快照
+ */
+@Serializable
+data class RiskConfirmationDetails(
+    val action: String,
+    val target: String,
+    val reason: String,
+    val riskLevel: String = "HIGH",
+    val toolName: String = "",
+    val arguments: String = "",
+    val isConfirmed: Boolean = false,
+)
+
+/**
  * 任务断点现场快照
  *
  * 记录用户中途停止时的完整现场，包括：
@@ -32,7 +48,9 @@ data class StepSnapshot(
  * - 之前已成功完成的步骤集合（用于防重复执行）
  * - 中断时的动作步骤（若处于执行中）
  * - 用户补充指示与恢复上下文
+ * - 高风险操作确认状态与安全暂停标记
  */
+@Serializable
 data class TaskBreakpoint(
     val id: String = UUID.randomUUID().toString(),
     val originalGoal: String,
@@ -41,6 +59,8 @@ data class TaskBreakpoint(
     val completedSteps: List<StepSnapshot> = emptyList(),
     val interruptedStep: StepSnapshot? = null,
     val interruptedReason: String = "用户中途停止操作",
+    val riskConfirmation: RiskConfirmationDetails? = null,
+    val isSafetyPaused: Boolean = false,
     val timestamp: Long = System.currentTimeMillis(),
 ) {
     /**
@@ -67,11 +87,19 @@ data class TaskBreakpoint(
             userFollowUpInstruction.trim()
         }
 
+        val contextNote = when {
+            riskConfirmation != null && riskConfirmation.isConfirmed ->
+                "\n【高风险操作授权执行完毕】：用户已显式确认并授权执行了 [${riskConfirmation.action}: ${riskConfirmation.target}]。该高危动作已完成，严禁重复询问或重复执行！请直接从后续步骤推进。\n"
+            isSafetyPaused ->
+                "\n【敏感页面安全提示】：此前因检测到密码/支付/验证码敏感页面自动暂停。用户现已在手机上完成敏感操作。请直接从后续步骤推进。\n"
+            else -> ""
+        }
+
         return """
         【断点续操恢复指令（严格执行）】
         任务原目标：$originalGoal
         断点暂停位置：$interruptedText
-
+        $contextNote
         【已成功执行的步骤清单（严禁重复执行以下已完成的操作）】：
         $stepsText
 

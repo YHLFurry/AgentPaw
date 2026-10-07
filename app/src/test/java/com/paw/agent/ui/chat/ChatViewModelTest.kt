@@ -100,7 +100,7 @@ class ChatViewModelTest {
     }
 
     @Test
-    fun `ToolStarted removes empty placeholder assistant message`() = runTest(testDispatcher) {
+    fun `ToolStarted preserves assistant message with toolCalls for valid protocol`() = runTest(testDispatcher) {
         // Model directly emits tool call without prior text
         val toolCall = ToolCall(id = "call_1", name = "echo", arguments = "{\"text\":\"ping\"}")
         val client = ScriptedLlmClient(
@@ -116,14 +116,16 @@ class ChatViewModelTest {
         advanceUntilIdle()
 
         val messages = conversationRepository.conversation.value.messages
-        // Must NOT have an empty assistant message before the tool message
-        assertEquals(3, messages.size)
+        // Must preserve assistant message with toolCalls before the tool message
+        assertEquals(4, messages.size)
         assertEquals(MessageRole.USER, messages[0].role)
-        assertEquals(MessageRole.TOOL, messages[1].role)
-        assertEquals("call_1", messages[1].toolCallId)
-        assertEquals(MessageRole.ASSISTANT, messages[2].role)
-        assertEquals("All done", messages[2].content)
-        assertEquals(MessageStatus.COMPLETE, messages[2].status)
+        assertEquals(MessageRole.ASSISTANT, messages[1].role)
+        assertEquals(listOf(toolCall), messages[1].toolCalls)
+        assertEquals(MessageRole.TOOL, messages[2].role)
+        assertEquals("call_1", messages[2].toolCallId)
+        assertEquals(MessageRole.ASSISTANT, messages[3].role)
+        assertEquals("All done", messages[3].content)
+        assertEquals(MessageStatus.COMPLETE, messages[3].status)
     }
 
     @Test

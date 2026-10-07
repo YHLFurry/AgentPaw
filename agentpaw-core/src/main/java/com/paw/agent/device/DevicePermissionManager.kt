@@ -144,5 +144,43 @@ object DevicePermissionManager {
      */
     suspend fun requestOrTestRoot(): Boolean = rootController.refreshAvailability()
 
+    /**
+     * 通过 ROOT 权限为本应用一键静默激活无障碍服务
+     */
+    suspend fun enableAccessibilityViaRoot(context: Context): Boolean {
+        return rootController.enableAccessibilityViaRoot(
+            packageName = context.packageName,
+            serviceClassName = AgentAccessibilityService::class.java.name,
+        )
+    }
+    /**
+     * 检测是否拥有通知权限（Android 13+ 前台服务通知需要）
+     */
+    fun hasNotificationPermission(context: Context): Boolean =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            androidx.core.content.ContextCompat.checkSelfPermission(
+                context,
+                android.Manifest.permission.POST_NOTIFICATIONS,
+            ) == PackageManager.PERMISSION_GRANTED
+        } else true
+
+    /**
+     * 打开通知设置页面
+     */
+    fun openNotificationSettings(context: Context) {
+        val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+            }
+        } else {
+            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                data = Uri.parse("package:${context.packageName}")
+            }
+        }.apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        }
+        context.startActivity(intent)
+    }
+
     private const val SHIZUKU_PACKAGE = "moe.shizuku.privileged.api"
 }

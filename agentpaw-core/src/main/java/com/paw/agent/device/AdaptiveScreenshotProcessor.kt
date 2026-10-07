@@ -22,6 +22,7 @@ class AdaptiveScreenshotProcessor {
         original: Bitmap,
         mode: VisionResolutionMode = VisionResolutionMode.AUTO,
         cropRoi: List<Int>? = null,
+        maxByteSize: Int = DEFAULT_MAX_IMAGE_BYTES,
     ): ScreenshotResult {
         val origWidth = original.width
         val origHeight = original.height
@@ -70,16 +71,41 @@ class AdaptiveScreenshotProcessor {
             workingBitmap
         }
 
-        // 3. Compress to JPEG and Base64 encode
-        val outputStream = ByteArrayOutputStream()
-        finalBitmap.compress(Bitmap.CompressFormat.JPEG, quality, outputStream)
-        val bytes = outputStream.toByteArray()
+        // 3. Compress to JPEG with size cap enforcement
+        var currentBitmap = finalBitmap
+        var currentQuality = quality
+        var outputStream = ByteArrayOutputStream()
+        currentBitmap.compress(Bitmap.CompressFormat.JPEG, currentQuality, outputStream)
+        var bytes = outputStream.toByteArray()
+
+        var iterations = 0
+        while (bytes.size > maxByteSize && iterations < 5) {
+            iterations++
+            if (currentQuality > 40) {
+                currentQuality = (currentQuality - 15).coerceAtLeast(30)
+            } else {
+                val nextW = (currentBitmap.width * 0.8f).roundToInt().coerceAtLeast(240)
+                val nextH = (currentBitmap.height * 0.8f).roundToInt().coerceAtLeast(240)
+                val scaled = Bitmap.createScaledBitmap(currentBitmap, nextW, nextH, true)
+                if (currentBitmap != finalBitmap && currentBitmap != workingBitmap && currentBitmap != original) {
+                    currentBitmap.recycle()
+                }
+                currentBitmap = scaled
+            }
+            outputStream = ByteArrayOutputStream()
+            currentBitmap.compress(Bitmap.CompressFormat.JPEG, currentQuality, outputStream)
+            bytes = outputStream.toByteArray()
+        }
+
         val base64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
 
         // Estimated tokens based on OpenAI / VLM tiled token formula (~85 tokens base + ~170 per 512x512 tile)
-        val tiles = max(1, (finalBitmap.width + 511) / 512 * ((finalBitmap.height + 511) / 512))
+        val tiles = max(1, (currentBitmap.width + 511) / 512 * ((currentBitmap.height + 511) / 512))
         val estimatedTokens = 85 + tiles * 170
 
+        if (currentBitmap != finalBitmap && currentBitmap != workingBitmap && currentBitmap != original) {
+            currentBitmap.recycle()
+        }
         if (finalBitmap != workingBitmap && finalBitmap != original) {
             finalBitmap.recycle()
         }
@@ -91,7 +117,7 @@ class AdaptiveScreenshotProcessor {
             base64Data = base64,
             width = origWidth,
             height = origHeight,
-            isDownscaled = scale < 1.0f || isCropped,
+            isDownscaled = scale < 1.0f || isCropped || iterations > 0,
             scaleFactor = scale,
             estimatedTokens = estimatedTokens,
             modeUsed = mode,
@@ -99,6 +125,8 @@ class AdaptiveScreenshotProcessor {
     }
 
     companion object {
+        const val DEFAULT_MAX_IMAGE_BYTES: Int = 384 * 1024 // 384KB byte limit per screenshot
+
         fun toPhysicalX(xNormalized: Int, screenWidth: Int): Float =
             ((xNormalized.coerceIn(0, 1000) / 1000f) * screenWidth)
 

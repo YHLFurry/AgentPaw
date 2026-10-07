@@ -155,7 +155,18 @@ class AndroidPhoneToolsTest {
         assertEquals("wechat", controller.lastLaunched)
 
         val deepLinkTool = DeepLinkTool(controller)
-        deepLinkTool.execute("""{"uri": "alipays://platformapi/startapp"}""", context)
+        // General non-payment deeplink executes directly
+        val normalRes = deepLinkTool.execute("""{"uri": "bilibili://video/123"}""", context)
+        assertTrue(normalRes.contains("success"))
+        assertEquals("bilibili://video/123", controller.lastDeepLink)
+
+        // Payment deeplink requires confirmation when unconfirmed
+        val riskRes = deepLinkTool.execute("""{"uri": "alipays://platformapi/startapp"}""", context)
+        assertTrue(riskRes.contains("requires_confirmation"))
+
+        // Payment deeplink executes when confirmed is true
+        val confirmedRes = deepLinkTool.execute("""{"uri": "alipays://platformapi/startapp", "confirmed": true}""", context)
+        assertTrue(confirmedRes.contains("success"))
         assertEquals("alipays://platformapi/startapp", controller.lastDeepLink)
     }
 

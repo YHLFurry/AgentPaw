@@ -80,6 +80,7 @@ fun AgentPawApp(
             agent = container.agent,
             conversationRepository = container.conversationRepository,
             settingsRepository = container.settingsRepository,
+            taskRunner = container.agentTaskRunner,
         ),
     )
 
@@ -100,9 +101,11 @@ fun AgentPawApp(
                 modelLabel = settings.llm.model,
                 splitVisionLanguageMode = settings.splitVisionLanguageMode,
                 activeBreakpoint = uiState.activeBreakpoint,
+                isInitialized = uiState.isInitialized,
                 onDraftChange = chatViewModel::onDraftChange,
                 onSendOrStop = { chatViewModel.onSendOrStop(settings.llm) },
                 onResumeBreakpoint = { chatViewModel.resumeBreakpoint(config = settings.llm) },
+                onConfirmRiskAction = { chatViewModel.confirmRiskAction(settings.llm) },
                 onDismissBreakpoint = chatViewModel::dismissBreakpoint,
                 onOpenSettings = { navController.navigate(Routes.SETTINGS) },
                 onOpenHistory = { navController.navigate(Routes.HISTORY) },

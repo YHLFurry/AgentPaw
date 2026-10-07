@@ -202,4 +202,75 @@ class PersistentConversationRepositoryTest {
         assertEquals(1, statsLegacy.stepCount)
         assertEquals(1, statsLegacy.toolCounts["inputText"])
     }
+
+    @Test
+    fun `initialization race condition preserves newly posted message`() = runTest {
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        val testScope = TestScope(testDispatcher)
+        val dir = tempFolder.newFolder("test_race")
+
+        // Pre-populate old conversation on disk
+        val oldConvFile = File(dir, "old-session.json")
+        oldConvFile.writeText("""
+            {
+              "id": "old-session",
+              "title": "旧历史会话",
+              "createdAt": 1000,
+              "updatedAt": 2000,
+              "messages": [
+                { "id": "m-old", "role": "user", "content": "历史任务" }
+              ]
+            }
+        """.trimIndent())
+
+        // Create repo instance
+        val repo = PersistentConversationRepository(
+            scope = testScope,
+            storageDirectory = dir,
+            ioDispatcher = testDispatcher,
+        )
+
+        // Immediately add a new message before disk load finishes
+        repo.addMessage(Message(id = "m-new", role = MessageRole.USER, content = "用户刚发送的新任务"))
+
+        // Complete all async coroutines
+        testScope.advanceUntilIdle()
+
+        assertTrue(repo.isInitialized.value)
+        val messages = repo.conversation.value.messages
+        assertTrue("Newly posted message must not be overwritten by disk reload", messages.any { it.content == "用户刚发送的新任务" })
+    }
+
+    @Test
+    fun `clear deletes image files belonging to current conversation`() = runTest {
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        val testScope = TestScope(testDispatcher)
+        val dir = tempFolder.newFolder("test_clear_media")
+
+        val repo = PersistentConversationRepository(
+            scope = testScope,
+            storageDirectory = dir,
+            ioDispatcher = testDispatcher,
+        )
+        testScope.advanceUntilIdle()
+
+        val sampleBase64 = "data:image/jpeg;base64,/9j/4AAQSkZJRg=="
+        repo.addMessage(Message(
+            id = "img-msg",
+            role = MessageRole.USER,
+            content = "带图消息",
+            images = listOf(sampleBase64),
+        ))
+        testScope.advanceUntilIdle()
+
+        val imagesDir = File(dir, "images")
+        val imageFilesBefore = imagesDir.listFiles() ?: emptyArray()
+        assertTrue("Image file should be extracted and saved to disk", imageFilesBefore.isNotEmpty())
+
+        repo.clear()
+        testScope.advanceUntilIdle()
+
+        val imageFilesAfter = imagesDir.listFiles() ?: emptyArray()
+        assertEquals("Image files belonging to cleared conversation should be deleted", 0, imageFilesAfter.size)
+    }
 }

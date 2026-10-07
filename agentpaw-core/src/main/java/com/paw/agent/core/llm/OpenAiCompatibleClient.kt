@@ -7,16 +7,25 @@ import com.paw.agent.core.llm.dto.Choice
 import com.paw.agent.core.llm.dto.ToolCallDelta
 import com.paw.agent.core.model.ToolCall
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.job
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import okhttp3.Call
+import okhttp3.Callback
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.Response
+import java.io.IOException
 import java.util.concurrent.TimeUnit
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 
 /**
  * The default [LlmClient], speaking the OpenAI chat-completions protocol over
@@ -37,6 +46,12 @@ class OpenAiCompatibleClient(
         if (!config.isUsable) {
             throw LlmException.NotConfigured(
                 "Base URL, model and (where required) an API key must be set",
+            )
+        }
+
+        if (config.baseUrl.startsWith("http://", ignoreCase = true) && !isLocalOrPrivateAddress(config.baseUrl)) {
+            throw LlmException.NotConfigured(
+                "公网 API 必须使用 HTTPS 连接以确保 API Key 与通信安全。明文 HTTP 仅允许用于本地或局域网私有模型 (如 127.0.0.1, localhost, 192.168.x.x, 10.x.x.x)。",
             )
         }
 
@@ -62,84 +77,117 @@ class OpenAiCompatibleClient(
         val toolIds = LinkedHashMap<Int, String>()
         var sawContent = false
 
-        httpClient.newCall(httpRequest).execute().use { response ->
-            if (!response.isSuccessful) {
-                // Safe to consume the body here: this response is not a stream.
-                throw response.toLlmException(response.body?.string().orEmpty())
+        val call = httpClient.newCall(httpRequest)
+        currentCoroutineContext().job.invokeOnCompletion { cause ->
+            if (cause is kotlinx.coroutines.CancellationException) {
+                call.cancel()
             }
+        }
 
-            val body = response.body ?: throw LlmException.EmptyResponse()
+        try {
+            val response = try {
+                suspendCancellableCoroutine<Response> { cont ->
+                    cont.invokeOnCancellation { call.cancel() }
+                    call.enqueue(object : Callback {
+                        override fun onFailure(call: Call, e: IOException) {
+                            if (cont.isActive) cont.resumeWithException(e)
+                        }
 
-            if (!config.stream) {
-                val text = body.string()
-                val parsed = runCatching {
-                    json.decodeFromString(ChatCompletionResponse.serializer(), text)
-                }.getOrElse { throw LlmException.Malformed(it) }
-
-                parsed.error?.let { throw LlmException.Http(200, it.describe()) }
-
-                val message = parsed.choices.firstOrNull()?.message
-                    ?: throw LlmException.EmptyResponse()
-
-                message.content?.asString()?.takeIf { it.isNotEmpty() }?.let { emit(LlmChunk.Delta(it)) }
-
-                message.toolCalls?.takeIf { it.isNotEmpty() }?.let { calls ->
-                    emit(
-                        LlmChunk.ToolCalls(
-                            calls.map { call ->
-                                ToolCall(
-                                    id = call.id,
-                                    name = call.function.name,
-                                    arguments = call.function.arguments,
-                                )
-                            },
-                        ),
+                        override fun onResponse(call: Call, response: Response) {
+                            cont.resume(response)
+                        }
+                    })
+                }
+            } catch (e: java.io.IOException) {
+                if (e.message?.contains("Cleartext HTTP traffic", ignoreCase = true) == true) {
+                    throw LlmException.NotConfigured(
+                        "Cleartext HTTP is disabled to protect API keys. Use HTTPS or localhost/127.0.0.1 for local models.",
                     )
                 }
-                emit(LlmChunk.Done(parsed.choices.firstOrNull()?.finishReason, parsed.usage))
-                return@use
+                throw e
             }
 
-            // ---- streaming (SSE) ----
-            val source = body.source()
-            while (!source.exhausted()) {
-                val line = source.readUtf8Line() ?: break
-                if (!line.startsWith(SSE_DATA_PREFIX)) continue
-
-                val data = line.removePrefix(SSE_DATA_PREFIX).trim()
-                if (data.isEmpty()) continue
-                if (data == SSE_DONE) break
-
-                val chunk = runCatching {
-                    json.decodeFromString(ChatCompletionResponse.serializer(), data)
-                }.getOrElse { throw LlmException.Malformed(it) }
-
-                chunk.error?.let { throw LlmException.Http(200, it.describe()) }
-
-                val choice: Choice = chunk.choices.firstOrNull() ?: continue
-
-                choice.delta?.content?.takeIf { it.isNotEmpty() }?.let {
-                    sawContent = true
-                    emit(LlmChunk.Delta(it))
+            response.use {
+                if (!response.isSuccessful) {
+                    // Safe to consume the body here: this response is not a stream.
+                    throw response.toLlmException(response.body?.string().orEmpty())
                 }
 
-                choice.delta?.toolCalls?.forEach {
-                    accumulate(it, toolArgs, toolNames, toolIds)
-                }
+                val body = response.body ?: throw LlmException.EmptyResponse()
 
-                if (choice.finishReason != null) {
-                    if (toolArgs.isNotEmpty()) emit(LlmChunk.ToolCalls(toolCalls(toolArgs, toolNames, toolIds)))
-                    emit(LlmChunk.Done(choice.finishReason, chunk.usage))
+                if (!config.stream) {
+                    val text = body.string()
+                    val parsed = runCatching {
+                        json.decodeFromString(ChatCompletionResponse.serializer(), text)
+                    }.getOrElse { throw LlmException.Malformed(it) }
+
+                    parsed.error?.let { throw LlmException.Http(200, it.describe()) }
+
+                    val message = parsed.choices.firstOrNull()?.message
+                        ?: throw LlmException.EmptyResponse()
+
+                    message.content?.asString()?.takeIf { it.isNotEmpty() }?.let { emit(LlmChunk.Delta(it)) }
+
+                    message.toolCalls?.takeIf { it.isNotEmpty() }?.let { calls ->
+                        emit(
+                            LlmChunk.ToolCalls(
+                                calls.map { call ->
+                                    ToolCall(
+                                        id = call.id,
+                                        name = call.function.name,
+                                        arguments = call.function.arguments,
+                                    )
+                                },
+                            ),
+                        )
+                    }
+                    emit(LlmChunk.Done(parsed.choices.firstOrNull()?.finishReason, parsed.usage))
                     return@use
                 }
-            }
 
-            if (toolArgs.isNotEmpty()) {
-                emit(LlmChunk.ToolCalls(toolCalls(toolArgs, toolNames, toolIds)))
-            } else if (!sawContent) {
-                throw LlmException.EmptyResponse()
+                // ---- streaming (SSE) ----
+                val source = body.source()
+                while (!source.exhausted()) {
+                    val line = source.readUtf8Line() ?: break
+                    if (!line.startsWith(SSE_DATA_PREFIX)) continue
+
+                    val data = line.removePrefix(SSE_DATA_PREFIX).trim()
+                    if (data.isEmpty()) continue
+                    if (data == SSE_DONE) break
+
+                    val chunk = runCatching {
+                        json.decodeFromString(ChatCompletionResponse.serializer(), data)
+                    }.getOrElse { throw LlmException.Malformed(it) }
+
+                    chunk.error?.let { throw LlmException.Http(200, it.describe()) }
+
+                    val choice: Choice = chunk.choices.firstOrNull() ?: continue
+
+                    choice.delta?.content?.takeIf { it.isNotEmpty() }?.let {
+                        sawContent = true
+                        emit(LlmChunk.Delta(it))
+                    }
+
+                    choice.delta?.toolCalls?.forEach {
+                        accumulate(it, toolArgs, toolNames, toolIds)
+                    }
+
+                    if (choice.finishReason != null) {
+                        if (toolArgs.isNotEmpty()) emit(LlmChunk.ToolCalls(toolCalls(toolArgs, toolNames, toolIds)))
+                        emit(LlmChunk.Done(choice.finishReason, chunk.usage))
+                        return@use
+                    }
+                }
+
+                if (toolArgs.isNotEmpty()) {
+                    emit(LlmChunk.ToolCalls(toolCalls(toolArgs, toolNames, toolIds)))
+                } else if (!sawContent) {
+                    throw LlmException.EmptyResponse()
+                }
+                emit(LlmChunk.Done(null, null))
             }
-            emit(LlmChunk.Done(null, null))
+        } finally {
+            call.cancel()
         }
     }.flowOn(Dispatchers.IO)
 
@@ -148,6 +196,12 @@ class OpenAiCompatibleClient(
             runCatching {
                 if (!config.isUsable) {
                     throw LlmException.NotConfigured("Fill in the required fields first")
+                }
+
+                if (config.baseUrl.startsWith("http://", ignoreCase = true) && !isLocalOrPrivateAddress(config.baseUrl)) {
+                    throw LlmException.NotConfigured(
+                        "公网 API 必须使用 HTTPS 连接以确保 API Key 与通信安全。明文 HTTP 仅允许用于本地或局域网私有模型 (如 127.0.0.1, localhost, 192.168.x.x, 10.x.x.x)。",
+                    )
                 }
 
                 val probe = ChatCompletionRequest(
@@ -164,7 +218,29 @@ class OpenAiCompatibleClient(
                     .apply { applyAuth(config) }
                     .build()
 
-                httpClient.newCall(request).execute().use { response ->
+                val call = httpClient.newCall(request)
+                val response = try {
+                    suspendCancellableCoroutine<Response> { cont ->
+                        cont.invokeOnCancellation { call.cancel() }
+                        call.enqueue(object : Callback {
+                            override fun onFailure(call: Call, e: IOException) {
+                                if (cont.isActive) cont.resumeWithException(e)
+                            }
+
+                            override fun onResponse(call: Call, response: Response) {
+                                cont.resume(response)
+                            }
+                        })
+                    }
+                } catch (e: java.io.IOException) {
+                    if (e.message?.contains("Cleartext HTTP traffic", ignoreCase = true) == true) {
+                        throw LlmException.NotConfigured(
+                            "Cleartext HTTP is disabled to protect API keys. Use HTTPS or localhost/127.0.0.1 for local models.",
+                        )
+                    }
+                    throw e
+                }
+                response.use {
                     if (!response.isSuccessful) {
                         throw response.toLlmException(response.body?.string().orEmpty())
                     }
@@ -219,7 +295,7 @@ class OpenAiCompatibleClient(
         )
     }
 
-    private companion object {
+    companion object {
         const val SSE_DATA_PREFIX = "data:"
         const val SSE_DONE = "[DONE]"
 
@@ -247,6 +323,19 @@ class OpenAiCompatibleClient(
             explicitNulls = false
             encodeDefaults = true
             coerceInputValues = true
+        }
+
+        fun isLocalOrPrivateAddress(url: String): Boolean {
+            val host = runCatching { java.net.URI(url).host }.getOrNull()?.lowercase() ?: return false
+            if (host == "localhost" || host == "127.0.0.1" || host == "10.0.2.2" || host.endsWith(".local")) {
+                return true
+            }
+            if (host.startsWith("192.168.") || host.startsWith("10.")) return true
+            if (host.startsWith("172.")) {
+                val second = host.substringAfter("172.").substringBefore(".").toIntOrNull()
+                if (second != null && second in 16..31) return true
+            }
+            return false
         }
     }
 }

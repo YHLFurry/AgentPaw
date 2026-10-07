@@ -63,7 +63,7 @@ class DataStoreSettingsRepository(
             val updated = transform(prefs.toLlmConfig())
             prefs[Keys.PROVIDER] = updated.provider.name
             prefs[Keys.BASE_URL] = updated.baseUrl
-            prefs[Keys.API_KEY] = updated.apiKey
+            prefs[Keys.API_KEY] = com.paw.agent.data.security.KeystoreSecretStorage.encrypt(updated.apiKey)
             prefs[Keys.MODEL] = updated.model
             prefs[Keys.TEMPERATURE] = updated.temperature
             prefs[Keys.TOP_P] = updated.topP
@@ -125,7 +125,7 @@ class DataStoreSettingsRepository(
         return LlmConfig(
             provider = provider,
             baseUrl = this[Keys.BASE_URL] ?: provider.defaultBaseUrl,
-            apiKey = this[Keys.API_KEY].orEmpty(),
+            apiKey = com.paw.agent.data.security.KeystoreSecretStorage.decrypt(this[Keys.API_KEY].orEmpty()),
             model = this[Keys.MODEL] ?: provider.defaultModel,
             temperature = this[Keys.TEMPERATURE] ?: 0.7f,
             topP = this[Keys.TOP_P] ?: 1.0f,
