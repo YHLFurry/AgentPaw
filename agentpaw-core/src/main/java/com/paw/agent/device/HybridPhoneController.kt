@@ -29,60 +29,129 @@ class HybridPhoneController(
         get() = context.resources.displayMetrics.heightPixels
 
     /**
+     * 最近一次截图的真实像素尺寸（截图源分辨率）。
+     * 用它作为 [0,1000] 归一化坐标的反向映射基准，而不是 `displayMetrics`——
+     * 二者在多数设备一致，但当 Shizuku 的 `screencap` 返回原生分辨率、或在
+     * 多 display / 旋转场景下，`displayMetrics` 可能与模型实际"看到"的截图尺寸
+     * 不一致，从而让点击整体偏移。以截图源尺寸为基准可消除该偏差。
+     */
+    @Volatile
+    private var lastScreenshotWidth: Int = 0
+
+    @Volatile
+    private var lastScreenshotHeight: Int = 0
+
+    /**
      * 用户是否已通过停止悬浮窗按钮请求停止。
      * 置位后所有无障碍/Shizuku 交互操作快速失败，保证"停止"立即生效。
      */
     private fun userStopRequested(): Boolean = AgentAccessibilityService.isStopRequested
 
-    override suspend fun tap(xNormalized: Int, yNormalized: Int): Boolean {
+    /** 归一化坐标映射所用的真实屏幕宽度（优先用最近一次截图源尺寸）。 */
+    private fun refWidth(): Int = if (lastScreenshotWidth > 0) lastScreenshotWidth else screenWidth
+
+    /** 归一化坐标映射所用的真实屏幕高度（优先用最近一次截图源尺寸）。 */
+    private fun refHeight(): Int = if (lastScreenshotHeight > 0) lastScreenshotHeight else screenHeight
+
+    /**
+     * 将 [0,1000] 归一化坐标还原为真实屏幕像素坐标。若提供了 `cropRoi`
+     * （[ymin, xmin, ymax, xmax]，同样是 0..1000 归一化全屏坐标），则先把它
+     * 反向展开回全屏空间，再映射到像素——这样基于"裁剪后截图"推断出的坐标
+     * 也会落回正确位置，而非整屏中心。
+     */
+    private fun toPhysical(
+        xNormalized: Int,
+        yNormalized: Int,
+        cropRoi: List<Int>?,
+    ): Pair<Float, Float> {
+        val w = refWidth().coerceAtLeast(1)
+        val h = refHeight().coerceAtLeast(1)
+
+        val (fx, fy) = if (cropRoi != null && cropRoi.size == 4) {
+            val xmin = (cropRoi[1] / 1000f).coerceIn(0f, 1f)
+            val xmax = (cropRoi[3] / 1000f).coerceIn(0f, 1f)
+            val ymin = (cropRoi[0] / 1000f).coerceIn(0f, 1f)
+            val ymax = (cropRoi[2] / 1000f).coerceIn(0f, 1f)
+            val fxFull = xmin + ((xNormalized.coerceIn(0, 1000) / 1000f)) * (xmax - xmin)
+            val fyFull = ymin + ((yNormalized.coerceIn(0, 1000) / 1000f)) * (ymax - ymin)
+            Pair(fxFull, fyFull)
+        } else {
+            Pair(xNormalized.coerceIn(0, 1000) / 1000f, yNormalized.coerceIn(0, 1000) / 1000f)
+        }
+
+        return Pair((fx.coerceIn(0f, 1f) * w), (fy.coerceIn(0f, 1f) * h))
+    }
+
+    /** 点击后短暂稳定，确保手势被系统处理、下一帧渲染完成，提升连续操作的命中率。 */
+    private suspend fun settleAfterTap() {
+        kotlinx.coroutines.delay(100)
+    }
+
+    override suspend fun tap(xNormalized: Int, yNormalized: Int, cropRoi: List<Int>?): Boolean {
         if (userStopRequested()) return false
-        val x = AdaptiveScreenshotProcessor.toPhysicalX(xNormalized, screenWidth)
-        val y = AdaptiveScreenshotProcessor.toPhysicalY(yNormalized, screenHeight)
+        val (x, y) = toPhysical(xNormalized, yNormalized, cropRoi)
 
         if (shizukuController.isAvailable) {
             val ok = shizukuController.tap(x.roundToInt(), y.roundToInt())
-            if (ok) return true
+            if (ok) { settleAfterTap(); return true }
         }
 
         val service = AgentAccessibilityService.instance
         if (service != null) {
-            return service.clickAt(x, y)
+            val ok = service.clickAt(x, y)
+            if (ok) { settleAfterTap(); return true }
         }
         return false
     }
 
-    override suspend fun doubleTap(xNormalized: Int, yNormalized: Int): Boolean {
+    override suspend fun doubleTap(xNormalized: Int, yNormalized: Int, cropRoi: List<Int>?): Boolean {
         if (userStopRequested()) return false
-        val x = AdaptiveScreenshotProcessor.toPhysicalX(xNormalized, screenWidth)
-        val y = AdaptiveScreenshotProcessor.toPhysicalY(yNormalized, screenHeight)
+        val (x, y) = toPhysical(xNormalized, yNormalized, cropRoi)
 
         val service = AgentAccessibilityService.instance
         if (service != null) {
             val ok = service.doubleClickAt(x, y)
-            if (ok) return true
+            if (ok) { settleAfterTap(); return true }
         }
 
         if (shizukuController.isAvailable) {
             shizukuController.tap(x.roundToInt(), y.roundToInt())
             kotlinx.coroutines.delay(100)
-            return shizukuController.tap(x.roundToInt(), y.roundToInt())
+            val ok = shizukuController.tap(x.roundToInt(), y.roundToInt())
+            if (ok) { settleAfterTap(); return true }
+            return ok
         }
         return false
     }
 
-    override suspend fun longPress(xNormalized: Int, yNormalized: Int, durationMs: Long): Boolean {
+    override suspend fun longPress(xNormalized: Int, yNormalized: Int, durationMs: Long, cropRoi: List<Int>?): Boolean {
         if (userStopRequested()) return false
-        val x = AdaptiveScreenshotProcessor.toPhysicalX(xNormalized, screenWidth)
-        val y = AdaptiveScreenshotProcessor.toPhysicalY(yNormalized, screenHeight)
+        val (x, y) = toPhysical(xNormalized, yNormalized, cropRoi)
 
         val service = AgentAccessibilityService.instance
         if (service != null) {
             val ok = service.longPressAt(x, y, durationMs)
-            if (ok) return true
+            if (ok) { settleAfterTap(); return true }
         }
 
         if (shizukuController.isAvailable) {
             return shizukuController.swipe(x.roundToInt(), y.roundToInt(), x.roundToInt(), y.roundToInt(), durationMs)
+        }
+        return false
+    }
+
+    override suspend fun tapAtPixel(centerX: Float, centerY: Float): Boolean {
+        if (userStopRequested()) return false
+        // 真实屏幕像素坐标，直接用无障碍手势或 input tap 派发，不做任何归一化。
+        if (shizukuController.isAvailable) {
+            val ok = shizukuController.tap(centerX.roundToInt(), centerY.roundToInt())
+            if (ok) { settleAfterTap(); return true }
+        }
+
+        val service = AgentAccessibilityService.instance
+        if (service != null) {
+            val ok = service.clickAt(centerX, centerY)
+            if (ok) { settleAfterTap(); return true }
         }
         return false
     }
@@ -231,6 +300,10 @@ class HybridPhoneController(
         } else {
             AgentAccessibilityService.instance?.captureScreen()
         } ?: return null
+
+        // 记录本次截图的真实源分辨率，作为后续 tap 归一化反向映射的基准。
+        lastScreenshotWidth = rawBitmap.width
+        lastScreenshotHeight = rawBitmap.height
 
         return screenshotProcessor.processScreenshot(rawBitmap, mode, cropRoi)
     }

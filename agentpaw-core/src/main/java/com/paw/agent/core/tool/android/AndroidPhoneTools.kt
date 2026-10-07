@@ -4,6 +4,7 @@ import com.paw.agent.core.agent.AgentContext
 import com.paw.agent.core.agent.AgentTool
 import com.paw.agent.core.model.ToolDefinition
 import com.paw.agent.device.PhoneController
+import com.paw.agent.device.RectBounds
 import com.paw.agent.device.VisionResolutionMode
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.contentOrNull
@@ -71,6 +72,11 @@ class TakeScreenshotTool(
         val isSensitive = SafetyGuard.isSensitive(allText)
         val safetyAlert = if (isSensitive) """,\n  "safety_alert": "SENSITIVE_PAYMENT_OR_PASSWORD_SCREEN_PAUSED"""" else ""
 
+        // 回显本次截图所用的裁剪区域与真实源分辨率，方便模型在后续 tap/double_tap/
+        // long_press 中传入相同的 crop_roi，使基于裁剪截图推断的坐标正确落回全屏。
+        val cropEcho = if (cropRoi != null) """,\n  "crop_roi": [${cropRoi[0]}, ${cropRoi[1]}, ${cropRoi[2]}, ${cropRoi[3]}]""" else ""
+        val sourceEcho = """,\n  "source_width": ${result.width},\n  "source_height": ${result.height}"""
+
         return """
         {
           "status": "success",
@@ -78,7 +84,7 @@ class TakeScreenshotTool(
           "height": ${result.height},
           "mode": "${result.modeUsed}",
           "estimated_tokens": ${result.estimatedTokens},
-          "image_base64": "${result.base64Data}"$safetyAlert
+          "image_base64": "${result.base64Data}"$cropEcho$sourceEcho$safetyAlert
         }
         """.trimIndent()
     }
@@ -89,13 +95,18 @@ class TapTool(
 ) : AgentTool {
     override val definition = ToolDefinition(
         name = "tap",
-        description = "Taps on the Android screen at normalized coordinates [x, y] in range 0..1000 where (0,0) is top-left and (1000,1000) is bottom-right.",
+        description = "Taps on the Android screen at normalized coordinates [x, y] in range 0..1000 where (0,0) is top-left and (1000,1000) is bottom-right. If the screenshot you inferred these coordinates from was cropped via take_screenshot's crop_roi, pass the SAME crop_roi here so the point maps back to the full screen. For clicking a known button, prefer `click_element` (pixel-accurate via the accessibility tree).",
         parametersSchema = """
         {
           "type": "object",
           "properties": {
             "x": { "type": "integer", "description": "Horizontal coordinate in 0..1000 range" },
-            "y": { "type": "integer", "description": "Vertical coordinate in 0..1000 range" }
+            "y": { "type": "integer", "description": "Vertical coordinate in 0..1000 range" },
+            "crop_roi": {
+              "type": "array",
+              "items": { "type": "integer" },
+              "description": "Optional [ymin, xmin, ymax, xmax] in 0..1000 used by the screenshot this tap is based on. Must match take_screenshot's crop_roi."
+            }
           },
           "required": ["x", "y"]
         }
@@ -106,6 +117,8 @@ class TapTool(
         val root = json.parseToJsonElement(arguments).jsonObject
         val x = root["x"]?.jsonPrimitive?.intOrNull ?: return "Error: 'x' is required"
         val y = root["y"]?.jsonPrimitive?.intOrNull ?: return "Error: 'y' is required"
+        val cropRoi = root["crop_roi"]?.jsonArray?.mapNotNull { it.jsonPrimitive.intOrNull }
+            ?.takeIf { it.size == 4 }
 
         val state = phoneController.getScreenState()
         val allText = state.elements.joinToString(" ") { it.text + " " + it.contentDescription }
@@ -113,7 +126,7 @@ class TapTool(
             return """{"status":"paused","message":"[SAFETY PAUSE] Detected sensitive password/payment screen. Automated tapping is paused for security. Please complete this step manually on your device."}"""
         }
 
-        val ok = phoneController.tap(x, y)
+        val ok = phoneController.tap(x, y, cropRoi)
         return if (ok) """{"status":"success","action":"tap","x":$x,"y":$y}"""
         else """{"status":"error","message":"Tap failed. Check accessibility or Shizuku permissions."}"""
     }
@@ -298,8 +311,8 @@ class GetScreenStateTool(
 
     override suspend fun execute(arguments: String, context: AgentContext): String {
         val state = phoneController.getScreenState()
-        val elementsSummary = state.elements.take(30).map { elem ->
-            """{"text":"${elem.text}","desc":"${elem.contentDescription}","id":"${elem.viewId}","clickable":${elem.isClickable},"bounds":[${elem.bounds.left},${elem.bounds.top},${elem.bounds.right},${elem.bounds.bottom}]}"""
+        val elementsSummary = state.elements.take(30).mapIndexed { idx, elem ->
+            """{"index":$idx,"text":"${elem.text}","desc":"${elem.contentDescription}","id":"${elem.viewId}","clickable":${elem.isClickable},"bounds":[${elem.bounds.left},${elem.bounds.top},${elem.bounds.right},${elem.bounds.bottom}],"center":[${elem.bounds.centerX},${elem.bounds.centerY}]}"""
         }.joinToString(",")
 
         return """
@@ -313,18 +326,100 @@ class GetScreenStateTool(
     }
 }
 
+class ClickElementTool(
+    private val phoneController: PhoneController,
+) : AgentTool {
+    override val definition = ToolDefinition(
+        name = "click_element",
+        description = "Clicks a specific on-screen UI element with PIXEL-ACCURATE precision using the accessibility hierarchy — no coordinate guessing, so it almost never needs retries. Prefer this over `tap` whenever the target is a known button/control (e.g. inside a user-installed app). Resolve the target by ONE of: `bounds` (exact [left, top, right, bottom] in real screen pixels from get_screen_state), `index` (0-based element index from get_screen_state), or `text`/`view_id` to match. The element's true center is clicked in real screen pixels.",
+        parametersSchema = """
+        {
+          "type": "object",
+          "properties": {
+            "bounds": {
+              "type": "array",
+              "items": { "type": "integer" },
+              "description": "Element bounds [left, top, right, bottom] in real screen pixels (from get_screen_state). Highest priority."
+            },
+            "index": { "type": "integer", "description": "0-based index of the element as listed by get_screen_state." },
+            "text": { "type": "string", "description": "Substring to match against an element's text or content description." },
+            "view_id": { "type": "string", "description": "Android view id resource name to match exactly." }
+          }
+        }
+        """.trimIndent(),
+    )
+
+    override suspend fun execute(arguments: String, context: AgentContext): String {
+        val root = json.parseToJsonElement(arguments).jsonObject
+
+        val state = phoneController.getScreenState()
+        val allText = state.elements.joinToString(" ") { it.text + " " + it.contentDescription }
+        if (SafetyGuard.isSensitive(allText)) {
+            return """{"status":"paused","message":"[SAFETY PAUSE] Detected sensitive password/payment screen. Automated tapping is paused for security. Please complete this step manually on your device."}"""
+        }
+
+        // 1) Resolve the target element's pixel bounds.
+        val rect: RectBounds? = resolveBounds(root, state)
+
+        if (rect == null) {
+            return """{"status":"error","message":"Could not resolve a target element. Provide `bounds` (from get_screen_state), a valid `index`, or matching `text`/`view_id`."}"""
+        }
+
+        // 2) Click the exact center in real screen pixels (no normalization round-trip).
+        val cx = rect.centerX.toFloat()
+        val cy = rect.centerY.toFloat()
+        val ok = phoneController.tapAtPixel(cx, cy)
+        return if (ok) {
+            """{"status":"success","action":"click_element","bounds":[${rect.left},${rect.top},${rect.right},${rect.bottom}],"center":[$cx,$cy]}"""
+        } else {
+            """{"status":"error","message":"click_element failed. Check accessibility or Shizuku permissions."}"""
+        }
+    }
+
+    private fun resolveBounds(
+        root: kotlinx.serialization.json.JsonObject,
+        state: com.paw.agent.device.ScreenStateInfo,
+    ): RectBounds? {
+        // Priority 1: explicit pixel bounds.
+        val bounds = root["bounds"]?.jsonArray?.mapNotNull { it.jsonPrimitive.intOrNull }
+            ?.takeIf { it.size == 4 }
+        if (bounds != null) {
+            return RectBounds(bounds[0], bounds[1], bounds[2], bounds[3])
+        }
+
+        // Priority 2: index into the current accessibility hierarchy.
+        val index = root["index"]?.jsonPrimitive?.intOrNull
+        if (index != null && index in state.elements.indices) {
+            return state.elements[index].bounds
+        }
+
+        // Priority 3: match by text / content description / view id.
+        val text = root["text"]?.jsonPrimitive?.contentOrNull
+        val viewId = root["view_id"]?.jsonPrimitive?.contentOrNull
+        return state.elements.firstOrNull { elem ->
+            (viewId != null && elem.viewId == viewId) ||
+                (text != null && ((elem.text + " " + elem.contentDescription).contains(text, ignoreCase = true)))
+        }?.bounds
+    }
+}
+
 class DoubleTapTool(
     private val phoneController: PhoneController,
 ) : AgentTool {
     override val definition = ToolDefinition(
         name = "double_tap",
-        description = "Double taps at normalized coordinates [x, y] in 0..1000 range.",
+        description = "Double taps at normalized coordinates [x, y] in 0..1000 range. Pass the same crop_roi used by the screenshot if it was cropped.",
         parametersSchema = """
         {
           "type": "object",
           "properties": {
             "x": { "type": "integer", "description": "Horizontal coordinate in 0..1000 range" },
-            "y": { "type": "integer", "description": "Vertical coordinate in 0..1000 range" }
+            "y": { "type": "integer", "description": "Vertical coordinate in 0..1000 range" },
+            "crop_roi": {
+              "type": "array",
+              "items": { "type": "integer" },
+              "description": "Optional [ymin, xmin, ymax, xmax] in 0..1000 matching take_screenshot's crop_roi."
+            }
           },
           "required": ["x", "y"]
         }
@@ -335,8 +430,10 @@ class DoubleTapTool(
         val root = json.parseToJsonElement(arguments).jsonObject
         val x = root["x"]?.jsonPrimitive?.intOrNull ?: return "Error: 'x' is required"
         val y = root["y"]?.jsonPrimitive?.intOrNull ?: return "Error: 'y' is required"
+        val cropRoi = root["crop_roi"]?.jsonArray?.mapNotNull { it.jsonPrimitive.intOrNull }
+            ?.takeIf { it.size == 4 }
 
-        val ok = phoneController.doubleTap(x, y)
+        val ok = phoneController.doubleTap(x, y, cropRoi)
         return if (ok) """{"status":"success","action":"double_tap","x":$x,"y":$y}"""
         else """{"status":"error","message":"Double tap failed"}"""
     }
@@ -347,14 +444,19 @@ class LongPressTool(
 ) : AgentTool {
     override val definition = ToolDefinition(
         name = "long_press",
-        description = "Long presses at normalized coordinates [x, y] in 0..1000 range for a given duration.",
+        description = "Long presses at normalized coordinates [x, y] in 0..1000 range for a given duration. Pass the same crop_roi used by the screenshot if it was cropped.",
         parametersSchema = """
         {
           "type": "object",
           "properties": {
             "x": { "type": "integer", "description": "Horizontal coordinate in 0..1000 range" },
             "y": { "type": "integer", "description": "Vertical coordinate in 0..1000 range" },
-            "duration_ms": { "type": "integer", "description": "Hold duration in milliseconds (default 1000)" }
+            "duration_ms": { "type": "integer", "description": "Hold duration in milliseconds (default 1000)" },
+            "crop_roi": {
+              "type": "array",
+              "items": { "type": "integer" },
+              "description": "Optional [ymin, xmin, ymax, xmax] in 0..1000 matching take_screenshot's crop_roi."
+            }
           },
           "required": ["x", "y"]
         }
@@ -366,8 +468,10 @@ class LongPressTool(
         val x = root["x"]?.jsonPrimitive?.intOrNull ?: return "Error: 'x' is required"
         val y = root["y"]?.jsonPrimitive?.intOrNull ?: return "Error: 'y' is required"
         val duration = root["duration_ms"]?.jsonPrimitive?.intOrNull?.toLong() ?: 1000L
+        val cropRoi = root["crop_roi"]?.jsonArray?.mapNotNull { it.jsonPrimitive.intOrNull }
+            ?.takeIf { it.size == 4 }
 
-        val ok = phoneController.longPress(x, y, duration)
+        val ok = phoneController.longPress(x, y, duration, cropRoi)
         return if (ok) """{"status":"success","action":"long_press","x":$x,"y":$y,"duration_ms":$duration}"""
         else """{"status":"error","message":"Long press failed"}"""
     }
