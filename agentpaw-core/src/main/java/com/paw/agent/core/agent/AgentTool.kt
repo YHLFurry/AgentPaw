@@ -49,13 +49,23 @@ class AgentContext(
  */
 class ToolRegistry(tools: List<AgentTool> = emptyList()) {
 
-    private val toolsByName: Map<String, AgentTool> = tools.associateBy { it.definition.name }
+    private val toolsMap = java.util.concurrent.ConcurrentHashMap<String, AgentTool>().apply {
+        tools.forEach { put(it.definition.name, it) }
+    }
 
-    val definitions: List<ToolDefinition> = tools.map { it.definition }
+    val definitions: List<ToolDefinition> get() = toolsMap.values.map { it.definition }
 
-    val isEmpty: Boolean get() = toolsByName.isEmpty()
+    val isEmpty: Boolean get() = toolsMap.isEmpty()
 
-    fun find(name: String): AgentTool? = toolsByName[name]
+    fun find(name: String): AgentTool? = toolsMap[name]
 
-    fun with(tool: AgentTool): ToolRegistry = ToolRegistry(toolsByName.values + tool)
+    fun register(tool: AgentTool) {
+        toolsMap[tool.definition.name] = tool
+    }
+
+    fun unregister(name: String) {
+        toolsMap.remove(name)
+    }
+
+    fun with(tool: AgentTool): ToolRegistry = ToolRegistry(toolsMap.values.toList() + tool)
 }

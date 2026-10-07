@@ -25,6 +25,7 @@ object AgentExecutionController {
     val state: StateFlow<ExecutionState> = _state.asStateFlow()
 
     private var stopCallback: (() -> Unit)? = null
+    private var resumeCallback: (() -> Unit)? = null
 
     fun registerStopCallback(callback: () -> Unit) {
         stopCallback = callback
@@ -34,9 +35,30 @@ object AgentExecutionController {
         stopCallback = null
     }
 
+    fun registerResumeCallback(callback: () -> Unit) {
+        resumeCallback = callback
+    }
+
+    fun unregisterResumeCallback() {
+        resumeCallback = null
+    }
+
     fun requestStop() {
         stopCallback?.invoke()
-        _state.value = _state.value.copy(isRunning = false, currentAction = "已手动停止")
+        _state.value = _state.value.copy(isRunning = false, currentAction = "已手动停止", isPaused = false)
+    }
+
+    fun requestResume() {
+        resumeCallback?.invoke()
+    }
+
+    fun markPaused(step: Int, reason: String = "已在断点处暂停") {
+        _state.value = _state.value.copy(
+            isRunning = false,
+            isPaused = true,
+            currentStep = step,
+            currentAction = reason,
+        )
     }
 
     fun updateProgress(step: Int, maxSteps: Int, action: String) {

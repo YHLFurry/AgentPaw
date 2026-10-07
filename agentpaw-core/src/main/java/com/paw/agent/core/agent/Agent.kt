@@ -38,6 +38,9 @@ sealed interface AgentEvent {
     /** A tool finished, successfully or not. */
     data class ToolFinished(val result: ToolResult) : AgentEvent
 
+    /** AI 智能识别的步间等待延时与节奏调整 */
+    data class AdaptivePaced(val call: ToolCall, val delayMillis: Long, val reason: String) : AgentEvent
+
     /** The turn ended normally. */
     data class Completed(val message: Message) : AgentEvent
 
@@ -69,6 +72,7 @@ class Agent(
         history: List<Message>,
         isCancelled: () -> Boolean = { false },
         depth: Int = 0,
+        enableAdaptivePacing: Boolean = true,
     ): Flow<AgentEvent> = flow {
         val conversationId = "conversation"
         val context = AgentContext(conversationId, depth) { isCancelled() }
@@ -173,6 +177,14 @@ class Agent(
                 val result = executeTool(call, context)
                 emit(AgentEvent.ToolFinished(result))
                 workingHistory = workingHistory + result.toMessages()
+
+                if (enableAdaptivePacing && !isCancelled()) {
+                    val decision = AdaptivePacingEngine.evaluateDelay(call, assistantMessage.content)
+                    if (decision.delayMillis > 0) {
+                        emit(AgentEvent.AdaptivePaced(call, decision.delayMillis, decision.reason))
+                        kotlinx.coroutines.delay(decision.delayMillis)
+                    }
+                }
             }
 
             round++

@@ -32,6 +32,8 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -232,6 +234,36 @@ class ChatViewModelTest {
         assertEquals(MessageStatus.CANCELLED, assistant.status)
     }
 
+    @Test
+    fun `stop preserves breakpoint and sending resume continues task from breakpoint`() = runTest(testDispatcher) {
+        val client = object : LlmClient {
+            override fun complete(config: LlmConfig, request: ChatCompletionRequest): Flow<LlmChunk> = flow {
+                emit(LlmChunk.Delta("Step 1 executed successfully"))
+                kotlinx.coroutines.awaitCancellation()
+            }
+            override suspend fun testConnection(config: LlmConfig): Result<Unit> = Result.success(Unit)
+        }
+        val agent = Agent(client, ToolRegistry())
+        val viewModel = ChatViewModel(agent, conversationRepository, settingsRepository)
+
+        sendMessage(viewModel, "自动化下单流程")
+        testDispatcher.scheduler.runCurrent()
+
+        viewModel.stop()
+        advanceUntilIdle()
+
+        assertNotNull(viewModel.uiState.value.activeBreakpoint)
+        assertEquals("自动化下单流程", viewModel.uiState.value.activeBreakpoint?.originalGoal)
+
+        // Sending "继续" automatically triggers breakpoint continuation
+        sendMessage(viewModel, "继续执行剩余操作")
+        testDispatcher.scheduler.runCurrent()
+
+        // Active breakpoint is consumed upon resuming
+        assertNull(viewModel.uiState.value.activeBreakpoint)
+        viewModel.stop()
+    }
+
     // --- Helpers ---
 
     private class ScriptedLlmClient(
@@ -281,6 +313,22 @@ class ChatViewModelTest {
 
         override suspend fun resetLlm() {
             _settings.update { it.copy(llm = LlmConfig()) }
+        }
+
+        override suspend fun setExpertMode(enabled: Boolean) {
+            _settings.update { it.copy(expertMode = enabled) }
+        }
+
+        override suspend fun setSplitVisionLanguageMode(enabled: Boolean) {
+            _settings.update { it.copy(splitVisionLanguageMode = enabled) }
+        }
+
+        override suspend fun setRootModeEnabled(enabled: Boolean) {
+            _settings.update { it.copy(rootModeEnabled = enabled) }
+        }
+
+        override suspend fun setAdaptivePacingEnabled(enabled: Boolean) {
+            _settings.update { it.copy(adaptivePacingEnabled = enabled) }
         }
     }
 }

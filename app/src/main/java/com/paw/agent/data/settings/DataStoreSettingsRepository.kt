@@ -45,6 +45,10 @@ class DataStoreSettingsRepository(
         val DYNAMIC_COLOR = booleanPreferencesKey("ui_dynamic_color")
         val DARK_THEME = booleanPreferencesKey("ui_dark_theme")
         val UI_THEME = stringPreferencesKey("ui_theme_mode")
+        val EXPERT_MODE = booleanPreferencesKey("ui_expert_mode")
+        val SPLIT_VISION_LANGUAGE = booleanPreferencesKey("ui_split_vision_language")
+        val ROOT_MODE = booleanPreferencesKey("agent_root_mode")
+        val ADAPTIVE_PACING = booleanPreferencesKey("agent_adaptive_pacing")
     }
 
     override val settings: Flow<AppSettings> = context.dataStore.data
@@ -81,6 +85,22 @@ class DataStoreSettingsRepository(
 
     override suspend fun setUiTheme(mode: UiThemeMode) {
         context.dataStore.edit { it[Keys.UI_THEME] = mode.storageKey }
+    }
+
+    override suspend fun setExpertMode(enabled: Boolean) {
+        context.dataStore.edit { it[Keys.EXPERT_MODE] = enabled }
+    }
+
+    override suspend fun setSplitVisionLanguageMode(enabled: Boolean) {
+        context.dataStore.edit { it[Keys.SPLIT_VISION_LANGUAGE] = enabled }
+    }
+
+    override suspend fun setRootModeEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[Keys.ROOT_MODE] = enabled }
+    }
+
+    override suspend fun setAdaptivePacingEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[Keys.ADAPTIVE_PACING] = enabled }
     }
 
     /** Clears only the LLM keys; appearance choices (theme, dark, dynamic) stay. */
@@ -122,5 +142,9 @@ class DataStoreSettingsRepository(
         dynamicColor = this[Keys.DYNAMIC_COLOR] ?: true,
         darkTheme = this[Keys.DARK_THEME] ?: false,
         uiTheme = UiThemeMode.fromName(this[Keys.UI_THEME]),
+        expertMode = this[Keys.EXPERT_MODE] ?: false,
+        splitVisionLanguageMode = this[Keys.SPLIT_VISION_LANGUAGE] ?: false,
+        rootModeEnabled = this[Keys.ROOT_MODE] ?: false,
+        adaptivePacingEnabled = this[Keys.ADAPTIVE_PACING] ?: true,
     )
 }

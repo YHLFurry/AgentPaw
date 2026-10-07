@@ -150,4 +150,58 @@
     <string name="cd_paw_logo">AgentPaw logo</string>
     <string name="cd_back">Back</string>
     <string name="cd_clear_all">Clear conversation</string>
+
+    <!-- About & Expert Mode -->
+    <string name="about_title">About AgentPaw</string>
+    <string name="about_app_name">AgentPaw</string>
+    <string name="about_tagline">Next-Gen Autonomous AI Phone Agent</string>
+    <string name="about_developer">Developer</string>
+    <string name="about_developer_name">YHLFurry / Kira &amp; Team</string>
+    <string name="about_repo_url">https://github.com/YHLFurry/AgentPaw</string>
+    <string name="about_open_source">Open Source Repository</string>
+    <string name="about_open_source_desc">View code, submit issues, and contribute on GitHub</string>
+    <string name="about_license">License</string>
+    <string name="about_license_name">Apache License 2.0</string>
+    <string name="about_expert_unlocked">🎉 资深（专家）模式已解锁！高级功能已在设置中开启</string>
+    <string name="about_expert_locked">资深（专家）模式已关闭</string>
+    <string name="about_expert_hint">长按上方图标可切换资深模式</string>
+
+    <!-- Expert Mode Settings -->
+    <string name="settings_group_expert">资深（专家）模式</string>
+    <string name="settings_group_expert_summary">视觉与语言分离、ROOT 提权执行与自适应动态节奏</string>
+    <string name="settings_split_vision_language">视觉与语言分离显示</string>
+    <string name="settings_split_vision_language_summary">将 AI 的文本思考链 (CoT) 与视觉感知/执行动作分流独立展示</string>
+    <string name="settings_root_mode">ROOT 执行模式</string>
+    <string name="settings_root_mode_summary">启用 root 提权执行通道，支持高速后台截屏、模拟操作与系统级控制</string>
+    <string name="settings_adaptive_pacing">AI 智能识别步间等待时间</string>
+    <string name="settings_adaptive_pacing_summary">根据操作类型与应用上下文，自动动态调整每步执行节奏与缓冲间隔</string>
+    <string name="permission_root">ROOT 超级用户权限</string>
+    <string name="permission_root_summary">最高系统级特权：高速免无障碍执行与全功能驱动</string>
+    <string name="permission_root_granted">已获取 Root 提权授权</string>
+    <string name="permission_root_not_granted">未检测到 Root 权限或授权被拒绝</string>
+    <string name="permission_root_request">申请 / 检测 Root</string>
+
+    <!-- Task History & Comparison -->
+    <string name="history_title">任务历史记录</string>
+    <string name="history_empty">暂无过往任务记录</string>
+    <string name="history_restore">载入并回溯此任务</string>
+    <string name="history_compare">对比任务</string>
+    <string name="history_compare_title">任务执行对比分析</string>
+    <string name="history_select_to_compare">请选择两条任务进行对比</string>
+    <string name="history_step_count">%1$d 步操作</string>
+    <string name="history_duration">%1$.1f 秒</string>
+    <string name="history_detail_title">任务执行详情</string>
+    <string name="history_delete">删除记录</string>
+
+    <!-- Custom Skills -->
+    <string name="skills_title">自定义技能 (Skills)</string>
+    <string name="skills_summary">编排多步复合动作，供 AI 智能识别与调用</string>
+    <string name="skills_create">新建技能</string>
+    <string name="skills_edit">编辑技能</string>
+    <string name="skills_name">技能标识 (例如 skill_my_macro)</string>
+    <string name="skills_display_name">显示名称</string>
+    <string name="skills_description">技能用途描述 (供 AI 理解)</string>
+    <string name="skills_add_step">添加动作步骤</string>
+    <string name="skills_test_run">一键测试执行</string>
+    <string name="skills_empty">暂无自定义技能，点击右上角新建</string>
 </resources>

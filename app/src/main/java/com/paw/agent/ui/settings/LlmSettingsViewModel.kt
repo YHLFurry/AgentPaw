@@ -40,6 +40,10 @@ data class LlmSettingsUiState(
     val apiKeyError: String? = null,
     val savedAt: Long? = null,
     val testState: TestState = TestState.Idle,
+    val expertMode: Boolean = false,
+    val splitVisionLanguageMode: Boolean = false,
+    val rootModeEnabled: Boolean = false,
+    val adaptivePacingEnabled: Boolean = true,
 ) {
     /** No inline errors: safe to persist. */
     val isValid: Boolean
@@ -71,9 +75,15 @@ class LlmSettingsViewModel(
     init {
         viewModelScope.launch {
             settingsRepository.settings.collect { settings ->
-                // Only seed the form once; later edits must not be clobbered.
+                val llm = settings.llm
+                _uiState.value = _uiState.value.copy(
+                    expertMode = settings.expertMode,
+                    splitVisionLanguageMode = settings.splitVisionLanguageMode,
+                    rootModeEnabled = settings.rootModeEnabled,
+                    adaptivePacingEnabled = settings.adaptivePacingEnabled,
+                )
+                // Only seed the LLM form once; later edits must not be clobbered.
                 if (!_uiState.value.savedAt.let { it != null }) {
-                    val llm = settings.llm
                     _uiState.value = _uiState.value.copy(
                         provider = llm.provider,
                         baseUrl = llm.baseUrl,
@@ -90,6 +100,26 @@ class LlmSettingsViewModel(
                 }
             }
         }
+    }
+
+    fun onToggleExpertMode(enabled: Boolean) {
+        _uiState.value = _uiState.value.copy(expertMode = enabled)
+        viewModelScope.launch { settingsRepository.setExpertMode(enabled) }
+    }
+
+    fun onToggleSplitVisionLanguage(enabled: Boolean) {
+        _uiState.value = _uiState.value.copy(splitVisionLanguageMode = enabled)
+        viewModelScope.launch { settingsRepository.setSplitVisionLanguageMode(enabled) }
+    }
+
+    fun onToggleRootMode(enabled: Boolean) {
+        _uiState.value = _uiState.value.copy(rootModeEnabled = enabled)
+        viewModelScope.launch { settingsRepository.setRootModeEnabled(enabled) }
+    }
+
+    fun onToggleAdaptivePacing(enabled: Boolean) {
+        _uiState.value = _uiState.value.copy(adaptivePacingEnabled = enabled)
+        viewModelScope.launch { settingsRepository.setAdaptivePacingEnabled(enabled) }
     }
 
     fun onProviderChange(provider: LlmProvider) {

@@ -199,8 +199,9 @@ class AgentFloatingService : Service() {
         }
         container.addView(statusText)
 
-        // 停止按钮
-        val stopButton = Button(this).apply {
+        // 停止/恢复按钮
+        val actionButton = Button(this).apply {
+            id = View.generateViewId()
             text = "⏹ 停止"
             textSize = 11f
             setTextColor(Color.WHITE)
@@ -212,21 +213,25 @@ class AgentFloatingService : Service() {
             minHeight = dpToPx(28)
             minimumHeight = dpToPx(28)
             setOnClickListener {
-                stopAccessibilityOperations()
-                AgentExecutionController.requestStop()
+                if (AgentExecutionController.state.value.isPaused) {
+                    AgentExecutionController.requestResume()
+                } else {
+                    stopAccessibilityOperations()
+                    AgentExecutionController.requestStop()
+                }
             }
         }
-        container.addView(stopButton)
+        container.addView(actionButton)
 
         fun applyExpandedState() {
             if (isExpanded) {
                 statusText.visibility = View.VISIBLE
-                stopButton.visibility = View.VISIBLE
+                actionButton.visibility = View.VISIBLE
                 toggleButton.text = "收起 ◀"
                 container.setPadding(dpToPx(12), dpToPx(6), dpToPx(8), dpToPx(6))
             } else {
                 statusText.visibility = View.GONE
-                stopButton.visibility = View.GONE
+                actionButton.visibility = View.GONE
                 toggleButton.text = "🐾 展开 ▶"
                 container.setPadding(dpToPx(10), dpToPx(6), dpToPx(10), dpToPx(6))
             }
@@ -340,14 +345,16 @@ class AgentFloatingService : Service() {
                 val tv = floatingView?.findViewById<TextView>(STATUS_TEXT_ID)
                 tv?.text = "$stepPrefix$briefAction"
 
-                // 同步更新通知栏
+                // 同步更新通知栏与浮窗状态
                 if (state.isRunning) {
                     updateNotification("$stepPrefix$briefAction")
-                }
-
-                if (!state.isRunning) {
+                } else if (state.isPaused) {
+                    updateNotification("⏸ 任务已在断点处暂停，点击可恢复")
+                    val tv = floatingView?.findViewById<TextView>(STATUS_TEXT_ID)
+                    tv?.text = "⏸ [第${state.currentStep}步断点暂停] 点击继续"
+                } else {
                     updateNotification(state.currentAction.ifBlank { "任务已结束" })
-                    // 任务结束，延时 1.5 秒自动收起销毁浮窗
+                    // 任务彻底结束（非断点暂停），延时 1.5 秒自动收起销毁浮窗
                     delay(1500)
                     stopSelf()
                 }

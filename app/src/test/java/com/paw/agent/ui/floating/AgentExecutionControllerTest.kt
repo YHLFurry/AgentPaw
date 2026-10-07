@@ -57,4 +57,27 @@ class AgentExecutionControllerTest {
         state = AgentExecutionController.state.value
         assertFalse(state.isRunning)
     }
+
+    @Test
+    fun `markPaused and requestResume manage breakpoint pause state properly`() {
+        var resumeInvoked = false
+        AgentExecutionController.registerResumeCallback {
+            resumeInvoked = true
+        }
+
+        AgentExecutionController.markStarted(maxSteps = 15)
+        AgentExecutionController.updateProgress(step = 4, maxSteps = 15, action = "tap 200 400")
+
+        AgentExecutionController.markPaused(step = 4, reason = "已在第4步断点处暂停")
+        var state = AgentExecutionController.state.value
+        assertFalse(state.isRunning)
+        assertTrue(state.isPaused)
+        assertEquals(4, state.currentStep)
+        assertEquals("已在第4步断点处暂停", state.currentAction)
+
+        AgentExecutionController.requestResume()
+        assertTrue(resumeInvoked)
+
+        AgentExecutionController.unregisterResumeCallback()
+    }
 }
