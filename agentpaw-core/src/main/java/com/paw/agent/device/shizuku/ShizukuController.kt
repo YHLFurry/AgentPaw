@@ -79,9 +79,23 @@ class ShizukuController {
 
     suspend fun inputText(text: String): Boolean = withContext(Dispatchers.IO) {
         if (!isAvailable) return@withContext false
-        val escaped = text.replace(" ", "%s").replace("&", "\\&")
-        val result = executeCommand("input text '$escaped'")
-        !result.startsWith("Error:")
+        if (text.any { it.code > 127 }) {
+            return@withContext false
+        }
+        val lines = text.split("\n")
+        for (i in lines.indices) {
+            val line = lines[i]
+            if (line.isNotEmpty()) {
+                val escaped = line.replace("'", "'\\''").replace(" ", "%s")
+                val result = executeCommand("input text '$escaped'")
+                if (result.startsWith("Error:")) return@withContext false
+            }
+            if (i < lines.lastIndex) {
+                val enterRes = executeCommand("input keyevent 66") // KEYCODE_ENTER
+                if (enterRes.startsWith("Error:")) return@withContext false
+            }
+        }
+        true
     }
 
     suspend fun getForegroundPackage(): String = withContext(Dispatchers.IO) {

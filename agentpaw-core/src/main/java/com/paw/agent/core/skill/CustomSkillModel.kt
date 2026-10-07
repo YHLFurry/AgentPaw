@@ -35,6 +35,7 @@ data class SkillActionStep(
     val y: Int = 500,
     val extra: String = "",
     val waitMillis: Long = 500L,
+    val exactMatch: Boolean = false,
     val description: String = "",
 )
 
@@ -94,9 +95,20 @@ class CustomExecutableSkill(
 
                 SkillActionType.TAP_ELEMENT -> {
                     val state = phoneController.getScreenState()
-                    val matched = state.elements.firstOrNull { elem ->
-                        elem.text.contains(interpolatedTarget, ignoreCase = true) ||
-                            elem.contentDescription.contains(interpolatedTarget, ignoreCase = true)
+                    val matched = if (step.exactMatch) {
+                        state.elements.firstOrNull { elem ->
+                            elem.text.equals(interpolatedTarget, ignoreCase = true) ||
+                                elem.contentDescription.equals(interpolatedTarget, ignoreCase = true)
+                        }
+                    } else {
+                        // 优先精准全字匹配，其次回退至包含匹配，避免"搜索"误点"搜索结果"
+                        state.elements.firstOrNull { elem ->
+                            elem.text.equals(interpolatedTarget, ignoreCase = true) ||
+                                elem.contentDescription.equals(interpolatedTarget, ignoreCase = true)
+                        } ?: state.elements.firstOrNull { elem ->
+                            elem.text.contains(interpolatedTarget, ignoreCase = true) ||
+                                elem.contentDescription.contains(interpolatedTarget, ignoreCase = true)
+                        }
                     }
                     if (matched != null) {
                         phoneController.tapAtPixel(
@@ -128,7 +140,10 @@ class CustomExecutableSkill(
                 }
 
                 SkillActionType.WAIT -> {
-                    // 仅等待
+                    val waitTime = interpolatedTarget.toLongOrNull() ?: step.waitMillis
+                    if (waitTime > 0) {
+                        delay(waitTime)
+                    }
                 }
 
                 SkillActionType.SHELL_COMMAND -> {
@@ -140,7 +155,7 @@ class CustomExecutableSkill(
             }
 
             executedCount++
-            if (step.waitMillis > 0) {
+            if (step.type != SkillActionType.WAIT && step.waitMillis > 0) {
                 delay(step.waitMillis)
             }
         }

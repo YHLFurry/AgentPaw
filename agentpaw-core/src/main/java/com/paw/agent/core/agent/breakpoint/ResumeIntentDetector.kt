@@ -67,9 +67,9 @@ object ResumeIntentDetector {
             }
         }
 
-        // 3. 包含断点继续语义，例如 "我输入完了，继续"、"已经登录，继续执行"、"继续后面几步"
+        // 3. 包含断点继续语义，例如 "我输入完了，继续"、"已经登录，继续执行"、"手动完成了，接着做"
         val resumePattern = Regex("""(?i).*(?:已经|已|我已|手动).*(?:好|了|完毕|完成).*[,，\s]*(?:继续|接着).*""")
-        if (resumePattern.matches(text) || text.contains("继续执行") || text.contains("接着做") || text.contains("继续操作")) {
+        if (resumePattern.matches(text)) {
             return ResumeIntentResult(isResume = true, additionalInstruction = text)
         }
 

@@ -132,8 +132,35 @@ object AdaptivePacingEngine {
     }
 
     private fun checkNavigationalClick(argumentsJson: String): Boolean {
-        val lower = argumentsJson.lowercase()
         val triggerKeywords = listOf("确定", "搜索", "确认", "登录", "提交", "支付", "下一步", "完成", "search", "submit", "login", "confirm", "next", "enter", "send")
+        val values = runCatching {
+            val element = json.parseToJsonElement(argumentsJson)
+            extractStringValues(element)
+        }.getOrNull()
+
+        if (values != null && values.isNotEmpty()) {
+            return values.any { text ->
+                val lower = text.lowercase()
+                triggerKeywords.any { lower.contains(it) }
+            }
+        }
+        val lower = argumentsJson.lowercase()
         return triggerKeywords.any { lower.contains(it) }
+    }
+
+    private fun extractStringValues(element: kotlinx.serialization.json.JsonElement): List<String> {
+        val result = mutableListOf<String>()
+        when (element) {
+            is kotlinx.serialization.json.JsonObject -> {
+                element.values.forEach { result.addAll(extractStringValues(it)) }
+            }
+            is kotlinx.serialization.json.JsonArray -> {
+                element.forEach { result.addAll(extractStringValues(it)) }
+            }
+            is kotlinx.serialization.json.JsonPrimitive -> {
+                if (element.isString) result.add(element.content)
+            }
+        }
+        return result
     }
 }
