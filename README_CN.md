@@ -190,7 +190,7 @@ dependencyResolutionManagement {
 
 // build.gradle.kts
 dependencies {
-    implementation("com.paw.agent:agentpaw-core:0.1.0")
+    implementation("com.paw.agent:agentpaw-core:0.1.5")
 }
 ```
 

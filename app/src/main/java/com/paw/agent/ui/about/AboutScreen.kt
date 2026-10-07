@@ -196,13 +196,27 @@ fun AboutScreen(
             Spacer(Modifier.height(28.dp))
 
             // 版本与项目信息卡片
+            val packageInfo = remember(context) {
+                runCatching { context.packageManager.getPackageInfo(context.packageName, 0) }.getOrNull()
+            }
+            val displayVersion = remember(packageInfo) {
+                val name = packageInfo?.versionName?.removeSuffix("-debug") ?: "0.1.5"
+                val code = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                    packageInfo?.longVersionCode ?: 6L
+                } else {
+                    @Suppress("DEPRECATION")
+                    packageInfo?.versionCode?.toLong() ?: 6L
+                }
+                "v$name (Build $code)"
+            }
+
             SettingsGroupLabel("应用程序信息")
             SettingsCard {
                 SettingsNavRow(
                     icon = Icons.Outlined.Info,
                     title = stringResource(R.string.settings_version),
                     summary = "版本与内部编译标识",
-                    trailing = "v0.1.3 (Build 4)",
+                    trailing = displayVersion,
                     onClick = {},
                 )
 
