@@ -408,7 +408,25 @@ class HybridPhoneController(
     }
 
     companion object {
-        val POPULAR_APP_ALIASES = mapOf(
+        private val dynamicAppAliases = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+        /**
+         * 动态注册或覆盖应用别名映射，方便宿主应用扩展或从配置资源载入
+         */
+        fun registerAppAlias(alias: String, packageName: String) {
+            dynamicAppAliases[alias.lowercase()] = packageName
+        }
+
+        fun registerAppAliases(aliases: Map<String, String>) {
+            aliases.forEach { (k, v) -> dynamicAppAliases[k.lowercase()] = v }
+        }
+
+        fun getAppPackageName(nameOrAlias: String): String? {
+            val lower = nameOrAlias.lowercase()
+            return dynamicAppAliases[lower] ?: DEFAULT_APP_ALIASES[lower]
+        }
+
+        val DEFAULT_APP_ALIASES = mapOf(
             "微信" to "com.tencent.mm",
             "wechat" to "com.tencent.mm",
             "支付宝" to "com.eg.android.AlipayGphone",
@@ -440,6 +458,10 @@ class HybridPhoneController(
             "设置" to "com.android.settings",
             "settings" to "com.android.settings",
         )
+
+        // 兼容已有代码与单测的复合别名映射
+        val POPULAR_APP_ALIASES: Map<String, String>
+            get() = DEFAULT_APP_ALIASES + dynamicAppAliases
     }
 }
 

@@ -2,12 +2,15 @@ package com.paw.agent.device.root
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import java.io.ByteArrayOutputStream
-import java.io.DataOutputStream
 import java.io.File
 import java.io.InputStream
+import java.util.concurrent.TimeUnit
 
 /**
  * Android ROOT 权限执行控制器。
@@ -42,7 +45,7 @@ class RootController {
         ok
     }
 
-    private fun checkSuDirectly(): Boolean {
+    private fun checkSuDirectly(timeoutMs: Long = 3_000L): Boolean {
         // 先检查常见 su 路径是否存在，避免在完全未 root 的设备上启动阻塞进程
         val suPaths = arrayOf(
             "/system/bin/su",
@@ -60,7 +63,13 @@ class RootController {
         if (!suExists) {
             // 也可能通过 magisk su 放在环境变量 PATH 中
             val whichResult = runCatching {
-                Runtime.getRuntime().exec(arrayOf("sh", "-c", "which su")).inputStream.bufferedReader().use { it.readText().trim() }
+                val whichProc = Runtime.getRuntime().exec(arrayOf("sh", "-c", "which su"))
+                val finished = whichProc.waitFor(timeoutMs, TimeUnit.MILLISECONDS)
+                if (!finished) {
+                    whichProc.destroy()
+                    return false
+                }
+                whichProc.inputStream.bufferedReader().use { it.readText().trim() }
             }.getOrDefault("")
             if (whichResult.isBlank() || whichResult.contains("not found")) {
                 return false
@@ -69,43 +78,73 @@ class RootController {
 
         return runCatching {
             val process = Runtime.getRuntime().exec(arrayOf("su", "-c", "id"))
+            val finished = process.waitFor(timeoutMs, TimeUnit.MILLISECONDS)
+            if (!finished) {
+                process.destroy()
+                return false
+            }
             val output = process.inputStream.bufferedReader().use { it.readText() }
-            process.waitFor()
             output.contains("uid=0")
         }.getOrDefault(false)
     }
 
     /**
-     * 在 root 提权环境中同步/异步执行任意 shell 命令
+     * 在 root 提权环境中执行任意 shell 命令，具备超时与协程取消响应
      */
-    suspend fun executeCommand(cmd: String): String = withContext(Dispatchers.IO) {
-        runCatching {
-            val process = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd))
-            val output = process.inputStream.bufferedReader().use { it.readText() }
-            val error = process.errorStream.bufferedReader().use { it.readText() }
-            process.waitFor()
-            if (error.isNotBlank() && output.isBlank()) {
-                "Error: $error".trim()
-            } else {
-                output.trim()
+    suspend fun executeCommand(cmd: String, timeoutMs: Long = 10_000L): String = withContext(Dispatchers.IO) {
+        var process: Process? = null
+        try {
+            withTimeout(timeoutMs) {
+                val p = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd))
+                process = p
+                val output = p.inputStream.bufferedReader().use { it.readText() }
+                val error = p.errorStream.bufferedReader().use { it.readText() }
+                p.waitFor()
+                if (error.isNotBlank() && output.isBlank()) {
+                    "Error: $error".trim()
+                } else {
+                    output.trim()
+                }
             }
-        }.getOrElse { "Error: ${it.message}" }
+        } catch (e: TimeoutCancellationException) {
+            process?.destroy()
+            "Error: Command timed out after ${timeoutMs}ms"
+        } catch (e: CancellationException) {
+            process?.destroy()
+            throw e
+        } catch (e: Throwable) {
+            process?.destroy()
+            "Error: ${e.message}"
+        }
     }
 
     /**
-     * 利用 root 权限高速截取全屏快照
+     * 利用 root 权限高速截取全屏快照，具备超时与取消保护
      */
-    suspend fun captureScreen(): Bitmap? = withContext(Dispatchers.IO) {
-        runCatching {
-            val process = Runtime.getRuntime().exec(arrayOf("su", "-c", "screencap -p"))
-            val bytes = readAllBytes(process.inputStream)
-            process.waitFor()
-            if (bytes.isNotEmpty()) {
-                BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-            } else {
-                null
+    suspend fun captureScreen(timeoutMs: Long = 8_000L): Bitmap? = withContext(Dispatchers.IO) {
+        var process: Process? = null
+        try {
+            withTimeout(timeoutMs) {
+                val p = Runtime.getRuntime().exec(arrayOf("su", "-c", "screencap -p"))
+                process = p
+                val bytes = readAllBytes(p.inputStream)
+                p.waitFor()
+                if (bytes.isNotEmpty()) {
+                    BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                } else {
+                    null
+                }
             }
-        }.getOrNull()
+        } catch (e: TimeoutCancellationException) {
+            process?.destroy()
+            null
+        } catch (e: CancellationException) {
+            process?.destroy()
+            throw e
+        } catch (e: Throwable) {
+            process?.destroy()
+            null
+        }
     }
 
     suspend fun tap(x: Int, y: Int): Boolean = withContext(Dispatchers.IO) {
@@ -123,10 +162,32 @@ class RootController {
         !result.startsWith("Error:")
     }
 
+    /**
+     * 安全输入文本：处理单引号与特殊字符转义，遇非 ASCII（中文、表情）返回 false 触发保底方案
+     */
     suspend fun inputText(text: String): Boolean = withContext(Dispatchers.IO) {
-        val escaped = text.replace(" ", "%s").replace("&", "\\&")
-        val result = executeCommand("input text '$escaped'")
-        !result.startsWith("Error:")
+        // 1. Android input text 仅支持 ASCII 字符，非 ASCII (如中文、表情) 会被静默丢弃
+        // 若包含非 ASCII 字符，返回 false 交由无障碍/剪贴板软键盘保底机制输入
+        if (text.any { it.code > 127 }) {
+            return@withContext false
+        }
+
+        // 2. 按换行拆分处理，避免多行文本导致命令中断
+        val lines = text.split("\n")
+        for (i in lines.indices) {
+            val line = lines[i]
+            if (line.isNotEmpty()) {
+                // 安全转义：将单引号 ' 转义为 '\''，避免 shell 注入与语法崩溃；空格转为 %s
+                val escaped = line.replace("'", "'\\''").replace(" ", "%s")
+                val result = executeCommand("input text '$escaped'")
+                if (result.startsWith("Error:")) return@withContext false
+            }
+            if (i < lines.lastIndex) {
+                val enterRes = executeCommand("input keyevent 66") // KEYCODE_ENTER
+                if (enterRes.startsWith("Error:")) return@withContext false
+            }
+        }
+        true
     }
 
     suspend fun getForegroundPackage(): String = withContext(Dispatchers.IO) {
@@ -143,5 +204,13 @@ class RootController {
             buffer.write(data, 0, n)
         }
         return buffer.toByteArray()
+    }
+
+    companion object {
+        fun escapeForInputText(text: String): String =
+            text.replace("'", "'\\''").replace(" ", "%s")
+
+        fun hasNonAscii(text: String): Boolean =
+            text.any { it.code > 127 }
     }
 }

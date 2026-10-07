@@ -422,9 +422,14 @@ class ChatViewModel(
         AgentExecutionController.markStarted(maxSteps)
         AgentExecutionController.updateProgress(stepCount, maxSteps, "从断点继续执行中...")
 
+        // 剥离可能存在的历史断点提示词，防止多次"停止→继续"后 systemPrompt 无限累加膨胀
+        val basePrompt = effectiveConfig.systemPrompt
+            .substringBefore("【断点续操恢复指令（严格执行）】")
+            .trim()
+
         val resumeConfig = effectiveConfig.copy(
-            systemPrompt = if (effectiveConfig.systemPrompt.isBlank()) resumePrompt
-            else "${effectiveConfig.systemPrompt}\n\n$resumePrompt",
+            systemPrompt = if (basePrompt.isBlank()) resumePrompt
+            else "$basePrompt\n\n$resumePrompt",
         )
 
         runJob = viewModelScope.launch {

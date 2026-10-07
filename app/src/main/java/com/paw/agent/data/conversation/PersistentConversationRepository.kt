@@ -41,12 +41,14 @@ data class TaskExecutionStats(
  * 具备磁盘持久化、多会话归档、任务回溯与对比分析能力的会话仓库
  */
 class PersistentConversationRepository(
-    private val context: Context,
+    context: Context? = null,
     private val scope: CoroutineScope = CoroutineScope(Dispatchers.IO),
+    storageDirectory: File? = null,
+    private val ioDispatcher: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.IO,
 ) : ConversationRepository {
 
     private val json = Json { prettyPrint = true; ignoreUnknownKeys = true }
-    private val storageDir = File(context.filesDir, "conversations").apply { mkdirs() }
+    private val storageDir = (storageDirectory ?: File(context?.filesDir ?: File(System.getProperty("java.io.tmpdir"), "agentpaw-conversations"), "conversations")).apply { mkdirs() }
     private val mutex = Mutex()
 
     private val _conversation = MutableStateFlow(
@@ -68,7 +70,7 @@ class PersistentConversationRepository(
     }
 
     private suspend fun loadAllFromDisk() = mutex.withLock {
-        withContext(Dispatchers.IO) {
+        withContext(ioDispatcher) {
             val files = storageDir.listFiles { _, name -> name.endsWith(".json") } ?: emptyArray()
             val loaded = files.mapNotNull { file ->
                 runCatching {
@@ -90,28 +92,33 @@ class PersistentConversationRepository(
     }
 
     override fun newConversation(): String {
-        val now = System.currentTimeMillis()
-        val newConv = Conversation(
-            id = UUID.randomUUID().toString(),
-            createdAt = now,
-            updatedAt = now,
-        )
-        _conversation.value = newConv
+        val newId = UUID.randomUUID().toString()
         scope.launch {
             mutex.withLock {
+                val now = System.currentTimeMillis()
+                val newConv = Conversation(
+                    id = newId,
+                    createdAt = now,
+                    updatedAt = now,
+                )
+                _conversation.value = newConv
                 saveToDiskLocked(newConv)
                 updateHistoryListLocked(newConv)
             }
         }
-        return newConv.id
+        return newId
     }
 
     /**
      * 回溯并载入历史任务记录，使其成为当前主活跃会话
      */
     fun loadConversation(id: String) {
-        val target = _historyList.value.firstOrNull { it.id == id } ?: return
-        _conversation.value = target
+        scope.launch {
+            mutex.withLock {
+                val target = _historyList.value.firstOrNull { it.id == id } ?: return@withLock
+                _conversation.value = target
+            }
+        }
     }
 
     /**
@@ -138,26 +145,30 @@ class PersistentConversationRepository(
     }
 
     override fun addMessage(message: Message) {
+        var nextConv: Conversation? = null
         _conversation.update { current ->
             val updated = current.copy(
                 messages = current.messages + message,
                 title = current.title.ifBlank { message.content.take(TITLE_MAX_CHARS) },
                 updatedAt = System.currentTimeMillis(),
             )
-            persistAsync(updated)
+            nextConv = updated
             updated
         }
+        nextConv?.let { persistAsync(it) }
     }
 
     override fun updateMessage(id: String, transform: (Message) -> Message) {
+        var nextConv: Conversation? = null
         _conversation.update { current ->
             val updated = current.copy(
                 messages = current.messages.map { if (it.id == id) transform(it) else it },
                 updatedAt = System.currentTimeMillis(),
             )
-            persistAsync(updated)
+            nextConv = updated
             updated
         }
+        nextConv?.let { persistAsync(it) }
     }
 
     override fun appendToMessage(id: String, text: String) {
@@ -166,23 +177,27 @@ class PersistentConversationRepository(
     }
 
     override fun removeMessage(id: String) {
+        var nextConv: Conversation? = null
         _conversation.update { current ->
             val updated = current.copy(
                 messages = current.messages.filterNot { it.id == id },
                 updatedAt = System.currentTimeMillis(),
             )
-            persistAsync(updated)
+            nextConv = updated
             updated
         }
+        nextConv?.let { persistAsync(it) }
     }
 
     override fun clear() {
         val now = System.currentTimeMillis()
+        var nextConv: Conversation? = null
         _conversation.update { current ->
             val updated = current.copy(messages = emptyList(), title = "", updatedAt = now)
-            persistAsync(updated)
+            nextConv = updated
             updated
         }
+        nextConv?.let { persistAsync(it) }
     }
 
     private fun persistAsync(conv: Conversation) {
@@ -221,14 +236,21 @@ class PersistentConversationRepository(
         fun computeStats(conv: Conversation): TaskExecutionStats {
             val initialGoal = conv.messages.firstOrNull { it.isUser }?.content ?: conv.title.ifBlank { "空任务" }
             val toolMessages = conv.messages.filter { it.role == MessageRole.TOOL }
-            val stepCount = toolMessages.size
+            val structuredCalls = conv.messages.flatMap { it.toolCalls }
+            val stepCount = if (structuredCalls.isNotEmpty()) structuredCalls.size else toolMessages.size
             val toolCounts = mutableMapOf<String, Int>()
 
-            toolMessages.forEach { msg ->
-                // 工具名称提取：从内容如 "✔ tapAtPixel: ..." 或 "⚙ 正在执行: tap ..."
-                val parts = msg.content.removePrefix("✔ ").removePrefix("❌ ").removePrefix("⚙ 正在执行: ").split(" ")
-                val toolName = parts.firstOrNull()?.removeSuffix(":") ?: "tool"
-                toolCounts[toolName] = (toolCounts[toolName] ?: 0) + 1
+            if (structuredCalls.isNotEmpty()) {
+                structuredCalls.forEach { call ->
+                    toolCounts[call.name] = (toolCounts[call.name] ?: 0) + 1
+                }
+            } else {
+                toolMessages.forEach { msg ->
+                    // 工具名称提取：从内容如 "✔ tapAtPixel: ..." 或 "⚙ 正在执行: tap ..."
+                    val parts = msg.content.removePrefix("✔ ").removePrefix("❌ ").removePrefix("⚙ 正在执行: ").split(" ")
+                    val toolName = parts.firstOrNull()?.removeSuffix(":") ?: "tool"
+                    toolCounts[toolName] = (toolCounts[toolName] ?: 0) + 1
+                }
             }
 
             val lastMsg = conv.messages.lastOrNull { it.isAssistant }
