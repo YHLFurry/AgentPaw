@@ -48,6 +48,13 @@ data class ScreenStateInfo(
     val elements: List<UiElementInfo> = emptyList(),
 )
 
+enum class PhoneControlMode {
+    AUTO,
+    ROOT,
+    SHIZUKU,
+    ACCESSIBILITY,
+}
+
 /**
  * Common seam for controlling Android device actions and observing screen state.
  *
@@ -58,6 +65,7 @@ data class ScreenStateInfo(
 interface PhoneController {
     val isAccessibilityEnabled: Boolean
     val isShizukuAvailable: Boolean
+    val isRootAvailable: Boolean get() = false
 
     /**
      * Tap at normalized [0,1000] coordinates. `cropRoi` (when non-null, in the same

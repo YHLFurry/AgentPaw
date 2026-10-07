@@ -47,12 +47,27 @@ class SkillToolAdapter(
         skill.execute(arguments, phoneController, context)
 }
 
-class SkillRegistry(skills: List<AgentSkill> = emptyList()) {
-    private val skillsByName = skills.associateBy { it.name }
+class SkillRegistry(initialSkills: List<AgentSkill> = emptyList()) {
+    private val skillsByName = java.util.concurrent.ConcurrentHashMap<String, AgentSkill>().apply {
+        initialSkills.forEach { put(it.name, it) }
+    }
 
     val allSkills: List<AgentSkill> get() = skillsByName.values.toList()
 
     fun find(name: String): AgentSkill? = skillsByName[name]
+
+    fun register(skill: AgentSkill) {
+        skillsByName[skill.name] = skill
+    }
+
+    fun unregister(name: String) {
+        skillsByName.remove(name)
+    }
+
+    fun replaceAll(skills: List<AgentSkill>) {
+        skillsByName.clear()
+        skills.forEach { skillsByName[it.name] = it }
+    }
 
     fun toTools(phoneController: PhoneController): List<AgentTool> =
         allSkills.map { SkillToolAdapter(it, phoneController) }

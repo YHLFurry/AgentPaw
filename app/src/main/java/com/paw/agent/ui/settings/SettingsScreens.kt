@@ -18,7 +18,10 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.Build
 import androidx.compose.material.icons.outlined.Cloud
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.PhoneAndroid
 import androidx.compose.material.icons.outlined.Tune
@@ -88,6 +91,10 @@ data class LlmSettingsActions(
     val onSave: () -> Unit,
     val onTestConnection: () -> Unit,
     val onReset: () -> Unit,
+    val onToggleExpertMode: (Boolean) -> Unit = {},
+    val onToggleSplitVisionLanguage: (Boolean) -> Unit = {},
+    val onToggleRootMode: (Boolean) -> Unit = {},
+    val onToggleAdaptivePacing: (Boolean) -> Unit = {},
 )
 
 /**
@@ -100,10 +107,14 @@ data class LlmSettingsActions(
 fun SettingsHomeScreen(
     providerName: String,
     themeName: String,
+    expertMode: Boolean,
     onOpenModelService: () -> Unit,
     onOpenGeneration: () -> Unit,
     onOpenAgent: () -> Unit,
     onOpenAppearance: () -> Unit,
+    onOpenSkills: () -> Unit,
+    onOpenAbout: () -> Unit,
+    onOpenExpert: () -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -153,6 +164,42 @@ fun SettingsHomeScreen(
                 summary = stringResource(R.string.settings_group_appearance_summary),
                 trailing = themeName,
                 onClick = onOpenAppearance,
+            )
+        }
+
+        Spacer(Modifier.height(12.dp))
+
+        SettingsCard {
+            SettingsNavRow(
+                icon = Icons.Outlined.Build,
+                title = stringResource(R.string.skills_title),
+                summary = stringResource(R.string.skills_summary),
+                onClick = onOpenSkills,
+            )
+        }
+
+        // 仅当在"关于"页面长按大图标解锁专家模式后，方才显示此卡片
+        if (expertMode) {
+            Spacer(Modifier.height(12.dp))
+            SettingsCard {
+                SettingsNavRow(
+                    icon = Icons.Outlined.AutoAwesome,
+                    title = stringResource(R.string.settings_group_expert),
+                    summary = stringResource(R.string.settings_group_expert_summary),
+                    trailing = "已解锁",
+                    onClick = onOpenExpert,
+                )
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
+
+        SettingsCard {
+            SettingsNavRow(
+                icon = Icons.Outlined.Info,
+                title = stringResource(R.string.about_title),
+                summary = "版本、开发者信息与开源许可",
+                onClick = onOpenAbout,
             )
         }
 

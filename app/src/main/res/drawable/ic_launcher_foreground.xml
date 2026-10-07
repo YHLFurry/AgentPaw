@@ -1,16 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  AgentPaw app icon — the brand paw print (matches agentpaw-logo.svg).
-
-  Drawn on the 108x108 adaptive-icon canvas; the guaranteed-safe mask area is
-  the inner 66dp circle (radius 33 around 54,54). The brand geometry lives on
-  a 512x512 grid (see agentpaw-logo.svg), embedded here via a 0.2 scale group:
-  every point (x,y) maps to (0.2x + 2.8, 0.2y + 1), which centres the artwork
-  bbox x 104..408 / y 132..398 at (54,54) and keeps all ink inside the circle.
-
-  All fills are #FFFFFF on purpose:
-    - the foreground composites over the gradient background layer
-    - the same drawable is the <monochrome> layer, which the launcher tints
+  AgentPaw App Icon Foreground Layer
+  Features an adorable, squishy, organic paw shape with brand logo highlights.
+  Complies with Android Adaptive Icon standard: 108dp x 108dp canvas,
+  all key artwork firmly enclosed inside the 66dp safe circle (radius 33dp centered at 54,54).
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
@@ -18,36 +11,70 @@
     android:viewportWidth="108"
     android:viewportHeight="108">
 
+    <!-- Soft Depth Shadow Layer: creates a squishy 3D floating effect -->
     <group
-        android:scaleX="0.2"
-        android:scaleY="0.2"
-        android:pivotX="0"
-        android:pivotY="0"
-        android:translateX="2.8"
-        android:translateY="1">
-
-        <!-- Toe beans: outer pair smaller + lower, forming a splayed arc. -->
+        android:translateY="2.2"
+        android:scaleX="0.98"
+        android:scaleY="0.98"
+        android:pivotX="54"
+        android:pivotY="54">
+        <!-- Shadow - Left Outer Toe Bean -->
         <path
-            android:fillColor="#FFFFFF"
-            android:pathData="M104,212 A34,48 0 1 0 172,212 A34,48 0 1 0 104,212 Z" />
-
+            android:fillColor="#35000000"
+            android:pathData="M 33.5,41.5 C 30.5,37.5 32.5,32.5 36.5,30.5 C 40.5,28.5 44.5,31.5 44.5,36.5 C 44.5,41.5 39.5,45.5 35.5,44.5 C 34.5,44.0 33.8,42.8 33.5,41.5 Z" />
+        <!-- Shadow - Left Inner Toe Bean -->
         <path
-            android:fillColor="#FFFFFF"
-            android:pathData="M174,180 A38,48 0 1 0 250,180 A38,48 0 1 0 174,180 Z" />
-
+            android:fillColor="#35000000"
+            android:pathData="M 46.5,33.5 C 44.5,29.5 46.5,23.5 50.5,23.5 C 54.5,23.5 57.5,28.5 56.5,33.5 C 55.5,38.5 49.5,39.5 47.5,37.5 C 46.8,36.5 46.6,35.0 46.5,33.5 Z" />
+        <!-- Shadow - Right Inner Toe Bean -->
         <path
-            android:fillColor="#FFFFFF"
-            android:pathData="M262,180 A38,48 0 1 0 338,180 A38,48 0 1 0 262,180 Z" />
-
+            android:fillColor="#35000000"
+            android:pathData="M 61.5,33.5 C 60.5,28.5 63.5,23.5 67.5,23.5 C 71.5,23.5 73.5,29.5 71.5,33.5 C 70.0,38.5 64.0,39.5 62.0,37.5 C 61.6,36.0 61.5,34.8 61.5,33.5 Z" />
+        <!-- Shadow - Right Outer Toe Bean -->
         <path
-            android:fillColor="#FFFFFF"
-            android:pathData="M340,212 A34,48 0 1 0 408,212 A34,48 0 1 0 340,212 Z" />
-
-        <!-- Main pad: rounded dome on top, three soft lobes at the base. -->
+            android:fillColor="#35000000"
+            android:pathData="M 74.5,41.5 C 74.0,42.8 73.5,44.0 72.5,44.5 C 68.5,45.5 63.5,41.5 63.5,36.5 C 63.5,31.5 67.5,28.5 71.5,30.5 C 75.5,32.5 77.5,37.5 74.5,41.5 Z" />
+        <!-- Shadow - Main Palm Pad -->
         <path
-            android:fillColor="#FFFFFF"
-            android:pathData="M155,296 C155,256 357,256 357,296 C368,320 368,350 338,372 A26,26 0 0 1 286,372 C285,365 283,365 282,372 A26,26 0 0 1 230,372 C229,365 227,365 226,372 A26,26 0 0 1 174,372 C144,350 144,320 155,296 Z" />
-
+            android:fillColor="#35000000"
+            android:pathData="M 54.0,50.5 C 60.5,44.5 71.0,45.5 75.0,52.5 C 79.5,60.5 75.0,70.5 67.5,74.5 C 63.5,76.5 57.5,75.0 54.0,72.5 C 50.5,75.0 44.5,76.5 40.5,74.5 C 33.0,70.5 28.5,60.5 33.0,52.5 C 37.0,45.5 47.5,44.5 54.0,50.5 Z" />
     </group>
+
+    <!-- Main Adorable Paw Geometry (Pure Crisp Snow White #FFFFFF) -->
+    <!-- Toe Bean 1 (Far Left): tilted cute oval bean -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M 33.5,41.0 C 30.2,36.8 32.2,31.2 36.5,29.2 C 40.8,27.2 45.0,30.5 45.0,35.8 C 45.0,41.2 39.8,45.2 35.8,44.2 C 34.6,43.8 33.8,42.5 33.5,41.0 Z" />
+
+    <!-- Toe Bean 2 (Center Left): plump upright taller bean -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M 46.5,33.0 C 44.2,28.8 46.2,22.5 50.5,22.5 C 54.8,22.5 57.8,27.8 56.8,33.0 C 55.8,38.2 49.5,39.2 47.5,37.2 C 46.8,36.2 46.6,34.5 46.5,33.0 Z" />
+
+    <!-- Toe Bean 3 (Center Right): plump upright taller bean -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M 61.5,33.0 C 60.5,27.8 63.5,22.5 67.8,22.5 C 72.1,22.5 74.1,28.8 71.8,33.0 C 70.0,38.5 64.0,39.2 62.0,37.2 C 61.6,35.5 61.5,34.2 61.5,33.0 Z" />
+
+    <!-- Toe Bean 4 (Far Right): tilted cute oval bean -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M 74.5,41.0 C 74.2,42.5 73.4,43.8 72.2,44.2 C 68.2,45.2 63.0,41.2 63.0,35.8 C 63.0,30.5 67.2,27.2 71.5,29.2 C 75.8,31.2 77.8,36.8 74.5,41.0 Z" />
+
+    <!-- Main Palm Pad (萌系三瓣饱满心形大肉垫) -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M 54.0,50.0 C 61.0,43.5 71.5,44.5 75.8,51.8 C 80.5,60.2 75.8,71.0 68.0,75.0 C 63.8,77.2 57.5,75.5 54.0,73.0 C 50.5,75.5 44.2,77.2 40.0,75.0 C 32.2,71.0 27.5,60.2 32.2,51.8 C 36.5,44.5 47.0,43.5 54.0,50.0 Z" />
+
+    <!-- Brand Feature Accent: AgentPaw Cute Core / High-Tech Paw Heart Spark -->
+    <!-- 融入本 APP 特色 Logo 标志元素：掌心软萌光印与科技晶芯 -->
+    <path
+        android:fillColor="#FFEDE9FE"
+        android:pathData="M 54.0,56.5 C 57.5,52.5 63.0,53.5 65.5,57.5 C 68.0,62.0 65.0,67.5 60.5,69.5 C 58.0,70.5 55.5,69.8 54.0,68.2 C 52.5,69.8 50.0,70.5 47.5,69.5 C 43.0,67.5 40.0,62.0 42.5,57.5 C 45.0,53.5 50.5,52.5 54.0,56.5 Z" />
+
+    <!-- Subtle Inner Playful Spark (萌萌星芒晶点) -->
+    <path
+        android:fillColor="#FFC7D2FE"
+        android:pathData="M 54.0,59.5 C 55.0,61.5 56.5,62.5 58.5,63.0 C 56.5,63.5 55.0,64.5 54.0,66.5 C 53.0,64.5 51.5,63.5 49.5,63.0 C 51.5,62.5 53.0,61.5 54.0,59.5 Z" />
 
 </vector>

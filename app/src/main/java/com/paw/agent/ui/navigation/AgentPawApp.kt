@@ -40,6 +40,13 @@ object Routes {
     const val SETTINGS_GENERATION = "settings/generation"
     const val SETTINGS_AGENT = "settings/agent"
     const val SETTINGS_APPEARANCE = "settings/appearance"
+    const val SETTINGS_EXPERT = "settings/expert"
+
+    const val ABOUT = "about"
+    const val SKILLS = "skills"
+    const val HISTORY = "history"
+    const val HISTORY_DETAIL = "history/detail/{id}"
+    const val HISTORY_COMPARE = "history/compare/{id1}/{id2}"
 }
 
 @Composable
@@ -57,6 +64,15 @@ fun AgentPawApp(
     // sub-agent read the same settings as this turn.
     LaunchedEffect(settings.llm) {
         container.onLlmConfigChanged(settings.llm)
+    }
+
+    // Keep phone controller mode aligned with rootModeEnabled setting
+    LaunchedEffect(settings.rootModeEnabled) {
+        container.phoneController.controlMode = if (settings.rootModeEnabled) {
+            com.paw.agent.device.PhoneControlMode.ROOT
+        } else {
+            com.paw.agent.device.PhoneControlMode.AUTO
+        }
     }
 
     val chatViewModel: ChatViewModel = viewModel(
@@ -82,9 +98,15 @@ fun AgentPawApp(
                 isGenerating = uiState.isGenerating,
                 configReady = uiState.configReady,
                 modelLabel = settings.llm.model,
+                splitVisionLanguageMode = settings.splitVisionLanguageMode,
+                activeBreakpoint = uiState.activeBreakpoint,
                 onDraftChange = chatViewModel::onDraftChange,
                 onSendOrStop = { chatViewModel.onSendOrStop(settings.llm) },
+                onResumeBreakpoint = { chatViewModel.resumeBreakpoint(config = settings.llm) },
+                onDismissBreakpoint = chatViewModel::dismissBreakpoint,
                 onOpenSettings = { navController.navigate(Routes.SETTINGS) },
+                onOpenHistory = { navController.navigate(Routes.HISTORY) },
+                onOpenSkills = { navController.navigate(Routes.SKILLS) },
                 onNewConversation = chatViewModel::newConversation,
             )
         }
@@ -98,10 +120,14 @@ fun AgentPawApp(
             SettingsHomeScreen(
                 providerName = llmState.provider.gridLabel,
                 themeName = stringResource(appearanceState.uiTheme.themeTitleRes),
+                expertMode = settings.expertMode,
                 onOpenModelService = { navController.navigate(Routes.SETTINGS_MODEL) },
                 onOpenGeneration = { navController.navigate(Routes.SETTINGS_GENERATION) },
                 onOpenAgent = { navController.navigate(Routes.SETTINGS_AGENT) },
                 onOpenAppearance = { navController.navigate(Routes.SETTINGS_APPEARANCE) },
+                onOpenSkills = { navController.navigate(Routes.SKILLS) },
+                onOpenAbout = { navController.navigate(Routes.ABOUT) },
+                onOpenExpert = { navController.navigate(Routes.SETTINGS_EXPERT) },
                 onBack = { navController.popBackStack() },
             )
         }
@@ -139,6 +165,71 @@ fun AgentPawApp(
                 actions = llmViewModel.toActions(),
                 onBack = { navController.popBackStack() },
                 snackbarHostState = rememberAppSnackbarHostState(),
+            )
+        }
+
+        composable(Routes.SETTINGS_EXPERT) {
+            val (llmViewModel, _) = rememberSettingsViewModels(navController, container)
+            val state by llmViewModel.uiState.collectAsStateWithLifecycle()
+
+            com.paw.agent.ui.settings.ExpertSettingsPage(
+                state = state,
+                actions = llmViewModel.toActions(),
+                onBack = { navController.popBackStack() },
+                snackbarHostState = rememberAppSnackbarHostState(),
+            )
+        }
+
+        composable(Routes.ABOUT) {
+            val (llmViewModel, _) = rememberSettingsViewModels(navController, container)
+            val state by llmViewModel.uiState.collectAsStateWithLifecycle()
+
+            com.paw.agent.ui.about.AboutScreen(
+                expertMode = state.expertMode,
+                onToggleExpertMode = llmViewModel::onToggleExpertMode,
+                onBack = { navController.popBackStack() },
+            )
+        }
+
+        composable(Routes.SKILLS) {
+            com.paw.agent.ui.skills.CustomSkillsScreen(
+                container = container,
+                onBack = { navController.popBackStack() },
+            )
+        }
+
+        composable(Routes.HISTORY) {
+            com.paw.agent.ui.history.HistoryScreen(
+                container = container,
+                onBack = { navController.popBackStack() },
+                onOpenDetail = { id -> navController.navigate("history/detail/$id") },
+                onOpenCompare = { id1, id2 -> navController.navigate("history/compare/$id1/$id2") },
+                onRestoreToChat = {
+                    navController.popBackStack(Routes.CHAT, false)
+                },
+            )
+        }
+
+        composable(Routes.HISTORY_DETAIL) { backStackEntry ->
+            val id = backStackEntry.arguments?.getString("id").orEmpty()
+            com.paw.agent.ui.history.HistoryDetailScreen(
+                conversationId = id,
+                container = container,
+                onBack = { navController.popBackStack() },
+                onRestoreToChat = {
+                    navController.popBackStack(Routes.CHAT, false)
+                },
+            )
+        }
+
+        composable(Routes.HISTORY_COMPARE) { backStackEntry ->
+            val id1 = backStackEntry.arguments?.getString("id1").orEmpty()
+            val id2 = backStackEntry.arguments?.getString("id2").orEmpty()
+            com.paw.agent.ui.history.TaskCompareScreen(
+                id1 = id1,
+                id2 = id2,
+                container = container,
+                onBack = { navController.popBackStack() },
             )
         }
 
@@ -211,4 +302,8 @@ private fun LlmSettingsViewModel.toActions(): LlmSettingsActions = LlmSettingsAc
     onSave = ::save,
     onTestConnection = ::testConnection,
     onReset = ::resetToDefaults,
+    onToggleExpertMode = ::onToggleExpertMode,
+    onToggleSplitVisionLanguage = ::onToggleSplitVisionLanguage,
+    onToggleRootMode = ::onToggleRootMode,
+    onToggleAdaptivePacing = ::onToggleAdaptivePacing,
 )

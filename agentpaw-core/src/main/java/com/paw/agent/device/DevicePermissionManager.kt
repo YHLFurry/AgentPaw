@@ -132,5 +132,17 @@ object DevicePermissionManager {
         }
     }
 
+    val rootController by lazy { com.paw.agent.device.root.RootController() }
+
+    /**
+     * 检测 ROOT 权限是否可用
+     */
+    fun isRootAvailable(): Boolean = rootController.isAvailable
+
+    /**
+     * 刷新并测试 ROOT 权限
+     */
+    suspend fun requestOrTestRoot(): Boolean = rootController.refreshAvailability()
+
     private const val SHIZUKU_PACKAGE = "moe.shizuku.privileged.api"
 }

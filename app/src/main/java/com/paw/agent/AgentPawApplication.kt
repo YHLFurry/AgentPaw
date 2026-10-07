@@ -30,8 +30,12 @@ class AppContainer(application: Application) {
         DataStoreSettingsRepository(application)
     }
 
-    val conversationRepository: ConversationRepository by lazy {
-        InMemoryConversationRepository()
+    val conversationRepository: com.paw.agent.data.conversation.PersistentConversationRepository by lazy {
+        com.paw.agent.data.conversation.PersistentConversationRepository(application)
+    }
+
+    val customSkillRepository: com.paw.agent.data.skill.CustomSkillRepository by lazy {
+        com.paw.agent.data.skill.CustomSkillRepository(application)
     }
 
     val llmClient: LlmClient by lazy { OpenAiCompatibleClient() }
@@ -53,7 +57,7 @@ class AppContainer(application: Application) {
         activeLlmConfig = config
     }
 
-    val phoneController: com.paw.agent.device.PhoneController by lazy {
+    val phoneController: com.paw.agent.device.HybridPhoneController by lazy {
         com.paw.agent.device.HybridPhoneController(application)
     }
 
@@ -102,7 +106,9 @@ class AppContainer(application: Application) {
                 com.paw.agent.core.tool.android.ClickElementTool(phoneController),
                 com.paw.agent.core.tool.android.WaitTool(),
             ) + skillRegistry.toTools(phoneController),
-        )
+        ).also {
+            customSkillRepository.syncToSkillRegistry(skillRegistry, it, phoneController)
+        }
     }
 
     val agent: Agent by lazy { Agent(llmClient = llmClient, toolRegistry = toolRegistry) }

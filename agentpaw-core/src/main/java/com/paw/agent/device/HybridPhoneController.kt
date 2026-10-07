@@ -13,14 +13,21 @@ import kotlin.math.roundToInt
 class HybridPhoneController(
     private val context: Context,
     private val shizukuController: ShizukuController = ShizukuController(),
+    val rootController: com.paw.agent.device.root.RootController = com.paw.agent.device.root.RootController(),
     private val screenshotProcessor: AdaptiveScreenshotProcessor = AdaptiveScreenshotProcessor(),
 ) : PhoneController {
+
+    @Volatile
+    var controlMode: PhoneControlMode = PhoneControlMode.AUTO
 
     override val isAccessibilityEnabled: Boolean
         get() = AgentAccessibilityService.isRunning
 
     override val isShizukuAvailable: Boolean
         get() = shizukuController.isAvailable
+
+    override val isRootAvailable: Boolean
+        get() = rootController.isAvailable
 
     private val screenWidth: Int
         get() = context.resources.displayMetrics.widthPixels
@@ -82,6 +89,12 @@ class HybridPhoneController(
         return Pair((fx.coerceIn(0f, 1f) * w), (fy.coerceIn(0f, 1f) * h))
     }
 
+    private val shouldUseRoot: Boolean
+        get() = (controlMode == PhoneControlMode.ROOT || controlMode == PhoneControlMode.AUTO) && rootController.isAvailable
+
+    private val shouldUseShizuku: Boolean
+        get() = (controlMode == PhoneControlMode.SHIZUKU || (controlMode == PhoneControlMode.AUTO && !rootController.isAvailable)) && shizukuController.isAvailable
+
     /** 点击后短暂稳定，确保手势被系统处理、下一帧渲染完成，提升连续操作的命中率。 */
     private suspend fun settleAfterTap() {
         kotlinx.coroutines.delay(100)
@@ -91,7 +104,12 @@ class HybridPhoneController(
         if (userStopRequested()) return false
         val (x, y) = toPhysical(xNormalized, yNormalized, cropRoi)
 
-        if (shizukuController.isAvailable) {
+        if (shouldUseRoot) {
+            val ok = rootController.tap(x.roundToInt(), y.roundToInt())
+            if (ok) { settleAfterTap(); return true }
+        }
+
+        if (shouldUseShizuku) {
             val ok = shizukuController.tap(x.roundToInt(), y.roundToInt())
             if (ok) { settleAfterTap(); return true }
         }
@@ -108,13 +126,20 @@ class HybridPhoneController(
         if (userStopRequested()) return false
         val (x, y) = toPhysical(xNormalized, yNormalized, cropRoi)
 
+        if (shouldUseRoot) {
+            rootController.tap(x.roundToInt(), y.roundToInt())
+            kotlinx.coroutines.delay(100)
+            val ok = rootController.tap(x.roundToInt(), y.roundToInt())
+            if (ok) { settleAfterTap(); return true }
+        }
+
         val service = AgentAccessibilityService.instance
         if (service != null) {
             val ok = service.doubleClickAt(x, y)
             if (ok) { settleAfterTap(); return true }
         }
 
-        if (shizukuController.isAvailable) {
+        if (shouldUseShizuku) {
             shizukuController.tap(x.roundToInt(), y.roundToInt())
             kotlinx.coroutines.delay(100)
             val ok = shizukuController.tap(x.roundToInt(), y.roundToInt())
@@ -128,13 +153,18 @@ class HybridPhoneController(
         if (userStopRequested()) return false
         val (x, y) = toPhysical(xNormalized, yNormalized, cropRoi)
 
+        if (shouldUseRoot) {
+            val ok = rootController.swipe(x.roundToInt(), y.roundToInt(), x.roundToInt(), y.roundToInt(), durationMs)
+            if (ok) { settleAfterTap(); return true }
+        }
+
         val service = AgentAccessibilityService.instance
         if (service != null) {
             val ok = service.longPressAt(x, y, durationMs)
             if (ok) { settleAfterTap(); return true }
         }
 
-        if (shizukuController.isAvailable) {
+        if (shouldUseShizuku) {
             return shizukuController.swipe(x.roundToInt(), y.roundToInt(), x.roundToInt(), y.roundToInt(), durationMs)
         }
         return false
@@ -142,8 +172,12 @@ class HybridPhoneController(
 
     override suspend fun tapAtPixel(centerX: Float, centerY: Float): Boolean {
         if (userStopRequested()) return false
-        // 真实屏幕像素坐标，直接用无障碍手势或 input tap 派发，不做任何归一化。
-        if (shizukuController.isAvailable) {
+        if (shouldUseRoot) {
+            val ok = rootController.tap(centerX.roundToInt(), centerY.roundToInt())
+            if (ok) { settleAfterTap(); return true }
+        }
+
+        if (shouldUseShizuku) {
             val ok = shizukuController.tap(centerX.roundToInt(), centerY.roundToInt())
             if (ok) { settleAfterTap(); return true }
         }
@@ -169,7 +203,12 @@ class HybridPhoneController(
         val x2 = AdaptiveScreenshotProcessor.toPhysicalX(endXNormalized, screenWidth)
         val y2 = AdaptiveScreenshotProcessor.toPhysicalY(endYNormalized, screenHeight)
 
-        if (shizukuController.isAvailable) {
+        if (shouldUseRoot) {
+            val ok = rootController.swipe(x1.roundToInt(), y1.roundToInt(), x2.roundToInt(), y2.roundToInt(), durationMs)
+            if (ok) return true
+        }
+
+        if (shouldUseShizuku) {
             val ok = shizukuController.swipe(x1.roundToInt(), y1.roundToInt(), x2.roundToInt(), y2.roundToInt(), durationMs)
             if (ok) return true
         }
@@ -183,45 +222,67 @@ class HybridPhoneController(
 
     override suspend fun inputText(text: String, clearBeforeInput: Boolean): Boolean {
         if (userStopRequested()) return false
+
+        // 1. 默认直接输入文本到聊天框/输入框 (优先通过无障碍直接注入，快速且完美兼容各类字符)
         val service = AgentAccessibilityService.instance
         if (service != null) {
-            val ok = service.inputText(text, clearBeforeInput)
-            if (ok) return true
+            val directOk = service.inputText(text, clearBeforeInput)
+            if (directOk) return true
         }
 
-        if (shizukuController.isAvailable) {
-            return shizukuController.inputText(text)
+        // 2. 若直接输入失败，则使用键盘保底 (Fallback to keyboard)
+        // 2.1 Root 模拟物理/系统键盘输入保底
+        if (shouldUseRoot) {
+            val rootOk = rootController.inputText(text)
+            if (rootOk) return true
         }
+
+        // 2.2 Shizuku 模拟键盘输入保底
+        if (shouldUseShizuku) {
+            val shizukuOk = shizukuController.inputText(text)
+            if (shizukuOk) return true
+        }
+
+        // 2.3 无障碍输入法软键盘保底（模拟聚焦激活软键盘并键入）
+        if (service != null) {
+            val fallbackOk = service.keyboardFallbackInput(text)
+            if (fallbackOk) return true
+        }
+
         return false
     }
 
     override suspend fun pressBack(): Boolean {
         if (userStopRequested()) return false
+        if (shouldUseRoot && rootController.keyEvent(4)) return true
         val service = AgentAccessibilityService.instance
         if (service != null && service.actionBack()) return true
-        if (shizukuController.isAvailable) return shizukuController.keyEvent(4)
+        if (shouldUseShizuku) return shizukuController.keyEvent(4)
         return false
     }
 
     override suspend fun pressHome(): Boolean {
         if (userStopRequested()) return false
+        if (shouldUseRoot && rootController.keyEvent(3)) return true
         val service = AgentAccessibilityService.instance
         if (service != null && service.actionHome()) return true
-        if (shizukuController.isAvailable) return shizukuController.keyEvent(3)
+        if (shouldUseShizuku) return shizukuController.keyEvent(3)
         return false
     }
 
     override suspend fun pressRecents(): Boolean {
         if (userStopRequested()) return false
+        if (shouldUseRoot && rootController.keyEvent(187)) return true
         val service = AgentAccessibilityService.instance
         if (service != null && service.actionRecents()) return true
-        if (shizukuController.isAvailable) return shizukuController.keyEvent(187)
+        if (shouldUseShizuku) return shizukuController.keyEvent(187)
         return false
     }
 
     override suspend fun pressEnter(): Boolean {
         if (userStopRequested()) return false
-        if (shizukuController.isAvailable) return shizukuController.keyEvent(66)
+        if (shouldUseRoot && rootController.keyEvent(66)) return true
+        if (shouldUseShizuku) return shizukuController.keyEvent(66)
         val service = AgentAccessibilityService.instance
         if (service != null) {
             // 无障碍模式下模拟点击软键盘右下角的确认/搜索键区域 (normalized coords ~ 920, 940)
@@ -271,9 +332,18 @@ class HybridPhoneController(
             }
         }
 
-        // 4. Fallback to monkey via Shizuku
-        if (shizukuController.isAvailable) {
-            val targetPkg = aliasedPkg ?: matched?.packageName ?: query
+        val targetPkg = aliasedPkg ?: matched?.packageName ?: query
+
+        // 4. Root execution via monkey or am start
+        if (shouldUseRoot) {
+            val res = rootController.executeCommand("monkey -p $targetPkg -c android.intent.category.LAUNCHER 1")
+            if (!res.contains("No activities found") && !res.startsWith("Error:")) {
+                return@withContext true
+            }
+        }
+
+        // 5. Fallback to monkey via Shizuku
+        if (shouldUseShizuku) {
             val res = shizukuController.executeCommand("monkey -p $targetPkg -c android.intent.category.LAUNCHER 1")
             return@withContext !res.contains("No activities found") && !res.startsWith("Error:")
         }
@@ -295,11 +365,17 @@ class HybridPhoneController(
         mode: VisionResolutionMode,
         cropRoi: List<Int>?,
     ): ScreenshotResult? {
-        val rawBitmap = if (shizukuController.isAvailable) {
-            shizukuController.captureScreen() ?: AgentAccessibilityService.instance?.captureScreen()
-        } else {
-            AgentAccessibilityService.instance?.captureScreen()
-        } ?: return null
+        val rawBitmap = (
+            if (shouldUseRoot) {
+                rootController.captureScreen()
+                    ?: if (shouldUseShizuku) shizukuController.captureScreen() else null
+                    ?: AgentAccessibilityService.instance?.captureScreen()
+            } else if (shouldUseShizuku) {
+                shizukuController.captureScreen() ?: AgentAccessibilityService.instance?.captureScreen()
+            } else {
+                AgentAccessibilityService.instance?.captureScreen()
+            }
+        ) ?: return null
 
         // 记录本次截图的真实源分辨率，作为后续 tap 归一化反向映射的基准。
         lastScreenshotWidth = rawBitmap.width
@@ -310,10 +386,18 @@ class HybridPhoneController(
 
     override suspend fun getScreenState(): ScreenStateInfo {
         val serviceState = AgentAccessibilityService.instance?.dumpScreenState()
-        val fgPkg = if (serviceState?.foregroundPackage.isNullOrBlank() && shizukuController.isAvailable) {
-            shizukuController.getForegroundPackage()
+        val fgPkg = if (serviceState?.foregroundPackage.isNullOrBlank()) {
+            if (shouldUseRoot) {
+                rootController.getForegroundPackage().ifBlank {
+                    if (shouldUseShizuku) shizukuController.getForegroundPackage() else ""
+                }
+            } else if (shouldUseShizuku) {
+                shizukuController.getForegroundPackage()
+            } else {
+                ""
+            }
         } else {
-            serviceState?.foregroundPackage.orEmpty()
+            serviceState.foregroundPackage
         }
 
         return ScreenStateInfo(
