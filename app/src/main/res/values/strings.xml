@@ -33,6 +33,19 @@
     <string name="settings_tab_llm">LLM</string>
     <string name="settings_tab_appearance">Appearance</string>
 
+    <!-- Settings home (two-level navigation) -->
+    <string name="settings_group_model_service">Model service</string>
+    <string name="settings_group_model_service_summary">Provider, endpoint, API key and model</string>
+    <string name="settings_group_generation">Generation</string>
+    <string name="settings_group_generation_summary">Temperature, Top P, output length and system prompt</string>
+    <string name="settings_group_agent">Device control &amp; permissions</string>
+    <string name="settings_group_agent_summary">Execution rounds, screenshot strategy and system permissions</string>
+    <string name="settings_group_appearance">Appearance</string>
+    <string name="settings_group_appearance_summary">Design system, dark mode and dynamic color</string>
+    <string name="settings_group_execution">Execution rounds</string>
+    <string name="settings_group_system_permissions">System permissions</string>
+    <string name="settings_current_provider">Current: %1$s</string>
+
     <!-- LLM settings -->
     <string name="settings_section_provider">Provider</string>
     <string name="settings_section_connection">Connection</string>

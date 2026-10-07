@@ -29,6 +29,19 @@
     <string name="settings_tab_llm">LLM 设置</string>
     <string name="settings_tab_appearance">外观设置</string>
 
+    <!-- Settings home (two-level navigation) -->
+    <string name="settings_group_model_service">模型服务</string>
+    <string name="settings_group_model_service_summary">服务商、接口地址、API Key 与模型</string>
+    <string name="settings_group_generation">生成参数</string>
+    <string name="settings_group_generation_summary">温度、Top P、输出长度与系统提示词</string>
+    <string name="settings_group_agent">手机控制与权限</string>
+    <string name="settings_group_agent_summary">执行步数、截图分辨率策略与系统权限</string>
+    <string name="settings_group_appearance">外观</string>
+    <string name="settings_group_appearance_summary">主题样式、深色模式与动态取色</string>
+    <string name="settings_group_execution">执行步数</string>
+    <string name="settings_group_system_permissions">系统权限</string>
+    <string name="settings_current_provider">当前：%1$s</string>
+
     <string name="settings_section_provider">服务商</string>
     <string name="settings_section_connection">连接</string>
     <string name="settings_section_model">模型</string>
