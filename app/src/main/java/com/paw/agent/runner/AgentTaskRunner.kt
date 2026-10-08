@@ -74,6 +74,7 @@ class AgentTaskRunner(
     private var activeAssistantId: String? = null
     private var sessionOriginalGoal: String? = null
     private val activeToolCalls = ConcurrentHashMap<String, ToolCall>()
+    private val activeToolMessageIds = ConcurrentHashMap<String, String>()
 
     private fun resolveOriginalGoal(): String {
         return sessionOriginalGoal?.ifBlank { null }
@@ -522,13 +523,15 @@ class AgentTaskRunner(
                     activeAssistantId = null
                 }
 
+                val toolMsgId = "tool_${event.call.id}_${UUID.randomUUID().toString().take(8)}"
                 activeToolCalls[event.call.id] = event.call
+                activeToolMessageIds[event.call.id] = toolMsgId
                 val actionDesc = "${event.call.name} ${event.call.arguments.take(40)}"
                 AgentExecutionController.updateProgress(stepCount, maxSteps, actionDesc)
 
                 conversationRepository.addMessage(
                     Message(
-                        id = event.call.id,
+                        id = toolMsgId,
                         role = MessageRole.TOOL,
                         content = "⚙ 正在执行: ${event.call.name} ${event.call.arguments.take(100)}",
                         toolCallId = event.call.id,
@@ -539,6 +542,7 @@ class AgentTaskRunner(
             }
 
             is AgentEvent.ToolFinished -> {
+                val toolMsgId = activeToolMessageIds.remove(event.result.toolCallId) ?: event.result.toolCallId
                 val call = activeToolCalls.remove(event.result.toolCallId)
                 val desensitized = com.paw.agent.core.agent.SensitiveDataMasker.mask(event.result.content)
                 val controlSignal = ToolControlSignal.parse(
@@ -558,7 +562,7 @@ class AgentTaskRunner(
                     else -> desensitized
                 }
 
-                conversationRepository.updateMessage(event.result.toolCallId) {
+                conversationRepository.updateMessage(toolMsgId) {
                     it.copy(
                         content = when {
                             isSafetyPaused -> "🛡️ 安全暂停: $briefContent"

@@ -34,7 +34,6 @@ class AgentContext(
     val conversationId: String,
     val depth: Int = 0,
     val grantedTokens: Set<String> = emptySet(),
-    val bypassSafetyGuard: Boolean = false,
     private val cancelledCheck: () -> Boolean = { false },
 ) {
     fun isCancelled(): Boolean = cancelledCheck()
@@ -44,7 +43,7 @@ class AgentContext(
 
     /** 校验特定工具调用或动作是否已被用户显式授予执行权限 */
     fun isGranted(token: String): Boolean =
-        bypassSafetyGuard || grantedTokens.contains(token) || grantedTokens.contains("*")
+        grantedTokens.contains(token) || grantedTokens.contains("*")
 }
 
 /**

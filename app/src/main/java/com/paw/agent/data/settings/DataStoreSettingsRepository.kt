@@ -64,9 +64,15 @@ class DataStoreSettingsRepository(
             val updated = transform(currentConfig)
             prefs[Keys.PROVIDER] = updated.provider.name
             prefs[Keys.BASE_URL] = updated.baseUrl
-            // 避免未变更时重复加密产生套娃
-            if (updated.apiKey != currentConfig.apiKey || !prefs.contains(Keys.API_KEY)) {
-                prefs[Keys.API_KEY] = com.paw.agent.data.security.KeystoreSecretStorage.encrypt(updated.apiKey)
+            val currentRawApiKey = prefs[Keys.API_KEY].orEmpty()
+            val currentDecrypted = com.paw.agent.data.security.KeystoreSecretStorage.decrypt(currentRawApiKey)
+            val wasDecryptionFailed = currentRawApiKey.isNotBlank() && currentDecrypted == null
+
+            // 若 API Key 产生变动，或此前解密失败需要重新写入，进行加密存储
+            if (updated.apiKey != currentDecrypted.orEmpty() || wasDecryptionFailed || !prefs.contains(Keys.API_KEY)) {
+                if (updated.apiKey.isNotBlank() || !wasDecryptionFailed) {
+                    prefs[Keys.API_KEY] = com.paw.agent.data.security.KeystoreSecretStorage.encrypt(updated.apiKey)
+                }
             }
             prefs[Keys.MODEL] = updated.model
             prefs[Keys.TEMPERATURE] = updated.temperature
@@ -126,10 +132,12 @@ class DataStoreSettingsRepository(
 
     private fun Preferences.toLlmConfig(): LlmConfig {
         val provider = LlmProvider.fromName(this[Keys.PROVIDER])
+        val rawApiKey = this[Keys.API_KEY].orEmpty()
+        val decrypted = com.paw.agent.data.security.KeystoreSecretStorage.decrypt(rawApiKey)
         return LlmConfig(
             provider = provider,
             baseUrl = this[Keys.BASE_URL] ?: provider.defaultBaseUrl,
-            apiKey = com.paw.agent.data.security.KeystoreSecretStorage.decrypt(this[Keys.API_KEY].orEmpty()).orEmpty(),
+            apiKey = decrypted.orEmpty(),
             model = this[Keys.MODEL] ?: provider.defaultModel,
             temperature = this[Keys.TEMPERATURE] ?: 0.7f,
             topP = this[Keys.TOP_P] ?: 1.0f,
@@ -141,14 +149,20 @@ class DataStoreSettingsRepository(
         )
     }
 
-    private fun Preferences.toSettings(): AppSettings = AppSettings(
-        llm = toLlmConfig(),
-        dynamicColor = this[Keys.DYNAMIC_COLOR] ?: true,
-        darkTheme = this[Keys.DARK_THEME] ?: false,
-        uiTheme = UiThemeMode.fromName(this[Keys.UI_THEME]),
-        expertMode = this[Keys.EXPERT_MODE] ?: false,
-        splitVisionLanguageMode = this[Keys.SPLIT_VISION_LANGUAGE] ?: false,
-        rootModeEnabled = this[Keys.ROOT_MODE] ?: false,
-        adaptivePacingEnabled = this[Keys.ADAPTIVE_PACING] ?: true,
-    )
+    private fun Preferences.toSettings(): AppSettings {
+        val rawApiKey = this[Keys.API_KEY].orEmpty()
+        val decrypted = com.paw.agent.data.security.KeystoreSecretStorage.decrypt(rawApiKey)
+        val decryptFailed = rawApiKey.isNotBlank() && decrypted == null
+        return AppSettings(
+            llm = toLlmConfig(),
+            dynamicColor = this[Keys.DYNAMIC_COLOR] ?: true,
+            darkTheme = this[Keys.DARK_THEME] ?: false,
+            uiTheme = UiThemeMode.fromName(this[Keys.UI_THEME]),
+            expertMode = this[Keys.EXPERT_MODE] ?: false,
+            splitVisionLanguageMode = this[Keys.SPLIT_VISION_LANGUAGE] ?: false,
+            rootModeEnabled = this[Keys.ROOT_MODE] ?: false,
+            adaptivePacingEnabled = this[Keys.ADAPTIVE_PACING] ?: true,
+            apiKeyDecryptionFailed = decryptFailed,
+        )
+    }
 }

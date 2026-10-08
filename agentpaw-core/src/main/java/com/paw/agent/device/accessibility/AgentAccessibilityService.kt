@@ -185,7 +185,9 @@ class AgentAccessibilityService : AccessibilityService() {
                             Bitmap.wrapHardwareBuffer(hardwareBuffer, colorSpace)?.copy(Bitmap.Config.ARGB_8888, false)
                         }.getOrNull()
                         hardwareBuffer.close()
-                        deferred.complete(bitmap)
+                        if (!deferred.complete(bitmap)) {
+                            bitmap?.recycle()
+                        }
                     }
 
                     override fun onFailure(errorCode: Int) {
@@ -193,9 +195,13 @@ class AgentAccessibilityService : AccessibilityService() {
                     }
                 },
             )
-            kotlinx.coroutines.withTimeoutOrNull(5000L) {
+            val res = kotlinx.coroutines.withTimeoutOrNull(5000L) {
                 deferred.await()
             }
+            if (res == null) {
+                deferred.cancel()
+            }
+            res
         } else {
             null
         }
@@ -204,9 +210,11 @@ class AgentAccessibilityService : AccessibilityService() {
     fun dumpScreenState(): ScreenStateInfo {
         val elements = mutableListOf<UiElementInfo>()
         val root = rootInActiveWindow
+        val isTruncated = BooleanArray(1)
+        val totalVisited = IntArray(1)
         if (root != null) {
             try {
-                traverseNode(root, elements, 0)
+                traverseNode(root, elements, 0, isTruncated, totalVisited)
             } finally {
                 if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
                     @Suppress("DEPRECATION")
@@ -218,11 +226,23 @@ class AgentAccessibilityService : AccessibilityService() {
             foregroundPackage = currentPackage.get(),
             foregroundActivity = currentActivity.get(),
             elements = elements,
+            truncated = isTruncated[0],
+            totalNodes = totalVisited[0],
         )
     }
 
-    private fun traverseNode(node: AccessibilityNodeInfo, list: MutableList<UiElementInfo>, depth: Int = 0) {
-        if (depth > 32 || list.size >= 300) return
+    private fun traverseNode(
+        node: AccessibilityNodeInfo,
+        list: MutableList<UiElementInfo>,
+        depth: Int = 0,
+        truncated: BooleanArray,
+        totalVisited: IntArray,
+    ) {
+        totalVisited[0]++
+        if (depth > 32 || list.size >= 300) {
+            truncated[0] = true
+            return
+        }
 
         val rect = Rect()
         node.getBoundsInScreen(rect)
@@ -248,10 +268,13 @@ class AgentAccessibilityService : AccessibilityService() {
         }
 
         for (i in 0 until node.childCount) {
-            if (list.size >= 300) break
+            if (list.size >= 300) {
+                truncated[0] = true
+                break
+            }
             val child = node.getChild(i) ?: continue
             try {
-                traverseNode(child, list, depth + 1)
+                traverseNode(child, list, depth + 1, truncated, totalVisited)
             } finally {
                 if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
                     @Suppress("DEPRECATION")

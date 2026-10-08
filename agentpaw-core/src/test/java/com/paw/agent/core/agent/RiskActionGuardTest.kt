@@ -71,16 +71,40 @@ class RiskActionGuardTest {
     }
 
     @Test
-    fun `test send message triggers moderate risk`() {
+    fun `test run_script triggers critical root shell risk`() {
         val decision = RiskActionGuard.evaluate(
-            toolName = "tap",
-            arguments = """{"x":900,"y":950}""",
-            screenContextText = "确认发送",
+            toolName = "run_script",
+            arguments = """{"script":"echo test"}""",
+        )
+        assertTrue(decision.isRisk)
+        assertEquals(RiskLevel.CRITICAL, decision.level)
+        assertEquals("ROOT_SHELL", decision.category)
+        assertTrue(decision.requiresConfirmation)
+    }
+
+    @Test
+    fun `test send message in args triggers moderate risk`() {
+        val decision = RiskActionGuard.evaluate(
+            toolName = "click_element",
+            arguments = """{"text":"确认发送"}""",
+            screenContextText = "聊天界面",
         )
         assertTrue(decision.isRisk)
         assertEquals(RiskLevel.MODERATE, decision.level)
         assertEquals("SEND_OR_SUBMIT", decision.category)
         assertTrue(decision.requiresConfirmation)
+    }
+
+    @Test
+    fun `test send message keyword on screen does not falsely trigger risk for positional tap`() {
+        val decision = RiskActionGuard.evaluate(
+            toolName = "tap",
+            arguments = """{"x":900,"y":950}""",
+            screenContextText = "确认发送",
+        )
+        assertFalse(decision.isRisk)
+        assertEquals(RiskLevel.LOW, decision.level)
+        assertFalse(decision.requiresConfirmation)
     }
 
     @Test

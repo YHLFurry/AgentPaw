@@ -92,18 +92,16 @@ object AdaptivePacingEngine {
             }
 
             toolName.contains("wait") -> {
-                // 如果是显式等待工具，读取显式参数，限制在 0.1 ~ 10.0 秒内
+                // 如果是显式等待工具，读取显式参数，限制在 0.1 ~ 10.0 秒内并直接返回，避免乘法放大
                 val explicitSec = runCatching {
                     json.parseToJsonElement(args).jsonObject["seconds"]?.jsonPrimitive?.content?.toDoubleOrNull()
                 }.getOrNull()
                 if (explicitSec != null && explicitSec > 0) {
                     val clampedSec = explicitSec.coerceIn(0.1, 10.0)
-                    baseDelay = (clampedSec * 1000).toLong()
-                    reason = "AI 显式指示等待"
-                } else {
-                    baseDelay = 1000L
-                    reason = "任务指令暂停与观察"
+                    val delay = (clampedSec * 1000).toLong()
+                    return PacingDecision(delay, "AI 显式指示等待 (${delay}ms)")
                 }
+                return PacingDecision(1000L, "任务指令暂停与观察 (1000ms)")
             }
 
             toolName.startsWith("skill_") -> {

@@ -54,7 +54,7 @@ object RiskActionGuard {
         val lowerScreen = screenContextText.lowercase()
 
         // 0. Shell 命令执行风险分析 (CRITICAL)
-        if (toolName.equals("shell_command", ignoreCase = true)) {
+        if (toolName.equals("shell_command", ignoreCase = true) || toolName.equals("run_script", ignoreCase = true)) {
             return RiskDecision(
                 isRisk = true,
                 level = RiskLevel.CRITICAL,
@@ -97,7 +97,7 @@ object RiskActionGuard {
                 )
             }
 
-            if (isEnter && SUBMIT_REGEX.containsMatchIn(lowerScreen)) {
+            if (isEnter && SUBMIT_REGEX.containsMatchIn(lowerArgs)) {
                 return RiskDecision(
                     isRisk = true,
                     level = RiskLevel.MODERATE,
@@ -112,7 +112,7 @@ object RiskActionGuard {
 
         // 3. 点击或手势动作风险分析 (涵盖 click_element, tap, double_tap, long_press, swipe)
         if (toolName in setOf("click_element", "tap", "double_tap", "long_press", "swipe")) {
-            // 支付风险（入参或屏幕文本命中）
+            // 支付风险（高置信度：入参或屏幕文本命中均拦截）
             if (PAYMENT_REGEX.containsMatchIn(lowerArgs) || PAYMENT_REGEX.containsMatchIn(lowerScreen)) {
                 val matched = PAYMENT_REGEX.find(lowerArgs)?.value ?: PAYMENT_REGEX.find(lowerScreen)?.value ?: "支付"
                 return RiskDecision(
@@ -126,7 +126,7 @@ object RiskActionGuard {
                 )
             }
 
-            // 删除/破坏性风险
+            // 删除/破坏性风险：仅针对入参中的目标元素或操作指令，杜绝因整屏包含无关"删除"选项而误拦截常规点击
             if (DESTRUCTION_REGEX.containsMatchIn(lowerArgs)) {
                 val matched = DESTRUCTION_REGEX.find(lowerArgs)?.value ?: "删除"
                 return RiskDecision(
@@ -138,20 +138,9 @@ object RiskActionGuard {
                     impact = "将永久删除数据或破坏既有资产",
                     requiresConfirmation = true,
                 )
-            } else if (DESTRUCTION_REGEX.containsMatchIn(lowerScreen)) {
-                val matched = DESTRUCTION_REGEX.find(lowerScreen)?.value ?: "删除"
-                return RiskDecision(
-                    isRisk = true,
-                    level = RiskLevel.MODERATE,
-                    category = "DELETE",
-                    action = "在可能包含删除操作的界面进行交互",
-                    target = "屏幕上下文: $matched",
-                    impact = "界面包含删除或销毁选项，需谨慎操作",
-                    requiresConfirmation = true,
-                )
             }
 
-            // 权限授权风险
+            // 权限授权风险：仅针对入参中的目标授权按钮
             if (AUTHORIZATION_REGEX.containsMatchIn(lowerArgs)) {
                 val matched = AUTHORIZATION_REGEX.find(lowerArgs)?.value ?: "授权"
                 return RiskDecision(
@@ -163,20 +152,9 @@ object RiskActionGuard {
                     impact = "将授予应用高危系统特权",
                     requiresConfirmation = true,
                 )
-            } else if (AUTHORIZATION_REGEX.containsMatchIn(lowerScreen)) {
-                val matched = AUTHORIZATION_REGEX.find(lowerScreen)?.value ?: "授权"
-                return RiskDecision(
-                    isRisk = true,
-                    level = RiskLevel.MODERATE,
-                    category = "AUTHORIZATION",
-                    action = "在可能包含系统授权的界面进行交互",
-                    target = "屏幕上下文: $matched",
-                    impact = "界面包含系统敏感授权或权限请求",
-                    requiresConfirmation = true,
-                )
             }
 
-            // 提交/发送风险
+            // 提交/发送风险：仅针对入参中的发送/提交目标按钮
             if (SUBMIT_REGEX.containsMatchIn(lowerArgs)) {
                 val matched = SUBMIT_REGEX.find(lowerArgs)?.value ?: "发送"
                 return RiskDecision(
@@ -186,17 +164,6 @@ object RiskActionGuard {
                     action = "点击发送或提交按钮",
                     target = "按钮/控件: $matched",
                     impact = "将发送公开或私密消息/表单",
-                    requiresConfirmation = true,
-                )
-            } else if (SUBMIT_REGEX.containsMatchIn(lowerScreen) && (toolName == "click_element" || toolName == "tap")) {
-                val matched = SUBMIT_REGEX.find(lowerScreen)?.value ?: "发送"
-                return RiskDecision(
-                    isRisk = true,
-                    level = RiskLevel.MODERATE,
-                    category = "SEND_OR_SUBMIT",
-                    action = "在可能包含提交/发送的界面点击",
-                    target = "屏幕上下文: $matched",
-                    impact = "可能触发消息发布或表单提交",
                     requiresConfirmation = true,
                 )
             }

@@ -30,7 +30,7 @@ object SafetyGuard {
         return sensitiveKeywords.any { lower.contains(it) }
     }
 
-    fun checkRisk(toolName: String, arguments: String, screenText: String): com.paw.agent.core.agent.RiskDecision {
+    fun checkRisk(toolName: String, arguments: String, screenText: String = ""): com.paw.agent.core.agent.RiskDecision {
         return com.paw.agent.core.agent.RiskActionGuard.evaluate(toolName, arguments, screenText)
     }
 
@@ -63,18 +63,21 @@ object SafetyGuard {
         phoneController: PhoneController,
         targetTextExtra: String = "",
     ): String? {
+        val isConfirmed = context.isGranted("risk_confirmed:$toolName")
+        if (isConfirmed) {
+            return null // 用户已显式授权此操作，直接放行，杜绝死循环
+        }
+
         val state = phoneController.getScreenState()
         val allText = state.elements.joinToString(" ") { it.text + " " + it.contentDescription }
         if (isSensitive(allText)) {
             return """{"status":"paused","is_safety_pause":true,"reason":"检测到敏感密码/支付页面，自动化操作已安全暂停","message":"[SAFETY PAUSE] Detected sensitive password/payment screen. Automated operation is paused for security. Please complete this step manually on your device."}"""
         }
-        val isConfirmed = context.bypassSafetyGuard || context.isGranted("risk_confirmed:$toolName") || context.isGranted("risk_confirmed")
-        if (!isConfirmed) {
-            val evalText = if (targetTextExtra.isNotBlank()) "$targetTextExtra $allText" else allText
-            val risk = checkRisk(toolName, arguments, evalText)
-            if (risk.requiresConfirmation) {
-                return formatConfirmationPayload(risk, toolName = toolName, arguments = arguments)
-            }
+
+        val evalText = if (targetTextExtra.isNotBlank()) "$targetTextExtra $allText" else allText
+        val risk = checkRisk(toolName, arguments, evalText)
+        if (risk.requiresConfirmation) {
+            return formatConfirmationPayload(risk, toolName = toolName, arguments = arguments)
         }
         return null
     }
@@ -214,8 +217,13 @@ class SwipeTool(
         val ey = root["end_y"]?.jsonPrimitive?.intOrNull ?: return "Error: 'end_y' is required"
         val duration = root["duration_ms"]?.jsonPrimitive?.intOrNull?.toLong() ?: 350L
 
-        val guardBlocked = SafetyGuard.checkScreenAndRisk("swipe", arguments, context, phoneController)
-        if (guardBlocked != null) return guardBlocked
+        val isConfirmed = context.isGranted("risk_confirmed:swipe")
+        if (!isConfirmed) {
+            val risk = SafetyGuard.checkRisk("swipe", arguments)
+            if (risk.requiresConfirmation) {
+                return SafetyGuard.formatConfirmationPayload(risk, toolName = "swipe", arguments = arguments)
+            }
+        }
 
         val ok = phoneController.swipe(sx, sy, ex, ey, duration)
         return if (ok) """{"status":"success","action":"swipe","from":[$sx,$sy],"to":[$ex,$ey]}"""
@@ -325,8 +333,13 @@ class LaunchAppTool(
         val root = json.parseToJsonElement(arguments).jsonObject
         val appName = root["app_name"]?.jsonPrimitive?.contentOrNull ?: return "Error: 'app_name' is required"
 
-        val guardBlocked = SafetyGuard.checkScreenAndRisk("launch_app", arguments, context, phoneController, targetTextExtra = appName)
-        if (guardBlocked != null) return guardBlocked
+        val isConfirmed = context.isGranted("risk_confirmed:launch_app")
+        if (!isConfirmed) {
+            val risk = SafetyGuard.checkRisk("launch_app", arguments, appName)
+            if (risk.requiresConfirmation) {
+                return SafetyGuard.formatConfirmationPayload(risk, toolName = "launch_app", arguments = arguments)
+            }
+        }
 
         val ok = phoneController.launchApp(appName)
         return if (ok) """{"status":"success","launched":"$appName"}"""
@@ -355,7 +368,7 @@ class DeepLinkTool(
         val root = json.parseToJsonElement(arguments).jsonObject
         val uri = root["uri"]?.jsonPrimitive?.contentOrNull ?: return "Error: 'uri' is required"
 
-        val isConfirmed = context.bypassSafetyGuard || context.isGranted("risk_confirmed:open_deeplink") || context.isGranted("risk_confirmed")
+        val isConfirmed = context.isGranted("risk_confirmed:open_deeplink")
         if (!isConfirmed) {
             val risk = SafetyGuard.checkRisk("open_deeplink", arguments, uri)
             if (risk.requiresConfirmation) {
@@ -384,6 +397,8 @@ class GetScreenStateTool(
             put("foreground_package", JsonPrimitive(state.foregroundPackage))
             put("foreground_activity", JsonPrimitive(state.foregroundActivity))
             put("elements_count", JsonPrimitive(state.elements.size))
+            put("truncated", JsonPrimitive(state.truncated || state.elements.size > 30))
+            put("total_nodes", JsonPrimitive(if (state.totalNodes > 0) state.totalNodes else state.elements.size))
             put("elements", buildJsonArray {
                 state.elements.take(30).forEachIndexed { idx, elem ->
                     add(buildJsonObject {
@@ -437,19 +452,18 @@ class ClickElementTool(
     override suspend fun execute(arguments: String, context: AgentContext): String {
         val root = json.parseToJsonElement(arguments).jsonObject
 
+        val isConfirmed = context.isGranted("risk_confirmed:click_element")
         val state = phoneController.getScreenState()
         val allText = state.elements.joinToString(" ") { it.text + " " + it.contentDescription }
-        if (SafetyGuard.isSensitive(allText)) {
+        if (!isConfirmed && SafetyGuard.isSensitive(allText)) {
             return """{"status":"paused","is_safety_pause":true,"reason":"检测到敏感密码/支付页面，自动化操作已安全暂停","message":"[SAFETY PAUSE] Detected sensitive password/payment screen. Automated tapping is paused for security. Please complete this step manually on your device."}"""
         }
 
         val targetElement = findMatchedElement(root, state)
         val targetElemText = targetElement?.let { it.text + " " + it.contentDescription }.orEmpty()
-        val evalText = if (targetElemText.isNotBlank()) "$targetElemText $allText" else allText
 
-        val isConfirmed = context.bypassSafetyGuard || context.isGranted("risk_confirmed:click_element") || context.isGranted("risk_confirmed")
         if (!isConfirmed) {
-            val risk = SafetyGuard.checkRisk("click_element", arguments, evalText)
+            val risk = SafetyGuard.checkRisk("click_element", arguments, targetElemText)
             if (risk.requiresConfirmation) {
                 return SafetyGuard.formatConfirmationPayload(risk, toolName = "click_element", arguments = arguments)
             }
@@ -552,8 +566,13 @@ class DoubleTapTool(
         val cropRoi = root["crop_roi"]?.jsonArray?.mapNotNull { it.jsonPrimitive.intOrNull }
             ?.takeIf { it.size == 4 }
 
-        val guardBlocked = SafetyGuard.checkScreenAndRisk("double_tap", arguments, context, phoneController)
-        if (guardBlocked != null) return guardBlocked
+        val isConfirmed = context.isGranted("risk_confirmed:double_tap")
+        if (!isConfirmed) {
+            val risk = SafetyGuard.checkRisk("double_tap", arguments)
+            if (risk.requiresConfirmation) {
+                return SafetyGuard.formatConfirmationPayload(risk, toolName = "double_tap", arguments = arguments)
+            }
+        }
 
         val ok = phoneController.doubleTap(x, y, cropRoi)
         return if (ok) """{"status":"success","action":"double_tap","x":$x,"y":$y}"""
@@ -593,8 +612,13 @@ class LongPressTool(
         val cropRoi = root["crop_roi"]?.jsonArray?.mapNotNull { it.jsonPrimitive.intOrNull }
             ?.takeIf { it.size == 4 }
 
-        val guardBlocked = SafetyGuard.checkScreenAndRisk("long_press", arguments, context, phoneController)
-        if (guardBlocked != null) return guardBlocked
+        val isConfirmed = context.isGranted("risk_confirmed:long_press")
+        if (!isConfirmed) {
+            val risk = SafetyGuard.checkRisk("long_press", arguments)
+            if (risk.requiresConfirmation) {
+                return SafetyGuard.formatConfirmationPayload(risk, toolName = "long_press", arguments = arguments)
+            }
+        }
 
         val ok = phoneController.longPress(x, y, duration, cropRoi)
         return if (ok) """{"status":"success","action":"long_press","x":$x,"y":$y,"duration_ms":$duration}"""
@@ -605,12 +629,12 @@ class LongPressTool(
 class WaitTool : AgentTool {
     override val definition = ToolDefinition(
         name = "wait_seconds",
-        description = "Waits for a given number of seconds (1..10) to allow animations, network loading, or page transitions to settle.",
+        description = "Waits for a given number of seconds (0.1..10.0) to allow animations, network loading, or page transitions to settle.",
         parametersSchema = """
         {
           "type": "object",
           "properties": {
-            "seconds": { "type": "number", "description": "Seconds to wait (between 0.5 and 10.0)" }
+            "seconds": { "type": "number", "description": "Seconds to wait (between 0.1 and 10.0)" }
           },
           "required": ["seconds"]
         }
@@ -620,7 +644,7 @@ class WaitTool : AgentTool {
     override suspend fun execute(arguments: String, context: AgentContext): String {
         val root = json.parseToJsonElement(arguments).jsonObject
         val seconds = root["seconds"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull() ?: 1.0
-        val clamped = seconds.coerceIn(0.5, 10.0)
+        val clamped = seconds.coerceIn(0.1, 10.0)
         kotlinx.coroutines.delay((clamped * 1000).toLong())
         return """{"status":"success","waited_seconds":$clamped}"""
     }

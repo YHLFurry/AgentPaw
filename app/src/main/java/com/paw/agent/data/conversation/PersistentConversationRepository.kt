@@ -133,8 +133,10 @@ class PersistentConversationRepository(
                     cleanConv
                 }.getOrElse { e ->
                     runCatching {
-                        val corruptFile = File(storageDir, "${file.nameWithoutExtension}.corrupt")
+                        val corruptFile = File(storageDir, "${file.nameWithoutExtension}_${System.currentTimeMillis()}.corrupt")
                         file.copyTo(corruptFile, overwrite = true)
+                        file.delete()
+                        cleanOldCorruptFiles(storageDir, maxCount = 5)
                     }
                     null
                 }
@@ -360,6 +362,15 @@ class PersistentConversationRepository(
             current.add(0, conv)
         }
         _historyList.value = current.sortedByDescending { it.updatedAt }
+    }
+
+    private fun cleanOldCorruptFiles(dir: File, maxCount: Int) {
+        val corruptFiles = dir.listFiles { f -> f.name.endsWith(".corrupt") } ?: return
+        if (corruptFiles.size > maxCount) {
+            corruptFiles.sortedByDescending { it.lastModified() }
+                .drop(maxCount)
+                .forEach { it.delete() }
+        }
     }
 
     companion object {

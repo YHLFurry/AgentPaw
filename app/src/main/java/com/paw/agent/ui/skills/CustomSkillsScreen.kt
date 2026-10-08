@@ -414,8 +414,29 @@ private fun SkillEditDialog(
                     Spacer(Modifier.width(12.dp))
                     AppButton(onClick = {
                         val trimmedName = name.trim()
-                        if (trimmedName.isBlank() || !trimmedName.matches(Regex("^[a-zA-Z0-9_]+$"))) {
-                            Toast.makeText(context, "技能标识必须由字母、数字或下划线组成且不能为空", Toast.LENGTH_SHORT).show()
+                        if (trimmedName.length !in 1..64 || !trimmedName.matches(Regex("^[a-zA-Z0-9_]+$"))) {
+                            Toast.makeText(context, "技能标识必须由字母、数字或下划线组成且长度为 1-64 字符", Toast.LENGTH_SHORT).show()
+                            return@AppButton
+                        }
+                        val reservedNames = setOf(
+                            "skill_wechat_quick_search",
+                            "skill_clean_recents_and_home",
+                            "skill_quick_navigation",
+                            "tap_element",
+                            "click_element",
+                            "tap",
+                            "swipe",
+                            "input_text",
+                            "press_key",
+                            "wait_seconds",
+                            "take_screenshot",
+                            "get_screen_state",
+                            "launch_app",
+                            "double_tap",
+                            "long_press",
+                        )
+                        if (isNew && reservedNames.contains(trimmedName)) {
+                            Toast.makeText(context, "该技能标识为系统内置保留名称，请更换", Toast.LENGTH_SHORT).show()
                             return@AppButton
                         }
                         onSave(

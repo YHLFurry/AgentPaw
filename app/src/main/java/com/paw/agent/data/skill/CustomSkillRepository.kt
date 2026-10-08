@@ -50,26 +50,43 @@ class CustomSkillRepository(
 
     private suspend fun loadInitial() = mutex.withLock {
         withContext(Dispatchers.IO) {
-            val list = if (storageFile.exists()) {
-                runCatching {
-                    json.decodeFromString<List<CustomSkillDefinition>>(storageFile.readText())
-                }.getOrElse { e ->
-                    // 备份损坏文件，避免静默丢失
+            try {
+                val list = if (storageFile.exists()) {
                     runCatching {
-                        val corruptFile = File(storageFile.parentFile, "custom_skills_${System.currentTimeMillis()}.corrupt")
-                        storageFile.copyTo(corruptFile, overwrite = true)
+                        json.decodeFromString<List<CustomSkillDefinition>>(storageFile.readText())
+                    }.getOrElse { e ->
+                        // 备份损坏文件，避免静默丢失
+                        runCatching {
+                            val corruptFile = File(storageFile.parentFile, "custom_skills_${System.currentTimeMillis()}.corrupt")
+                            storageFile.copyTo(corruptFile, overwrite = true)
+                            storageFile.delete()
+                            cleanOldCorruptFiles(storageFile.parentFile, maxCount = 3)
+                        }
+                        val presets = defaultPresets()
+                        persistLockedInternal(presets)
+                        presets
                     }
-                    defaultPresets()
+                } else {
+                    val presets = defaultPresets()
+                    persistLockedInternal(presets)
+                    presets
                 }
-            } else {
-                val presets = defaultPresets()
-                persistLockedInternal(presets)
-                presets
+                _skills.value = list
+            } finally {
+                if (!isLoaded.isCompleted) {
+                    isLoaded.complete(Unit)
+                }
             }
-            _skills.value = list
-            if (!isLoaded.isCompleted) {
-                isLoaded.complete(Unit)
-            }
+        }
+    }
+
+    private fun cleanOldCorruptFiles(dir: File?, maxCount: Int) {
+        if (dir == null || !dir.exists()) return
+        val corruptFiles = dir.listFiles { f -> f.name.startsWith("custom_skills_") && f.name.endsWith(".corrupt") } ?: return
+        if (corruptFiles.size > maxCount) {
+            corruptFiles.sortedByDescending { it.lastModified() }
+                .drop(maxCount)
+                .forEach { it.delete() }
         }
     }
 

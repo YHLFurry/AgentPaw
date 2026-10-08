@@ -80,12 +80,14 @@ class CustomExecutableSkill(
 
         var executedCount = 0
 
+        val isSkillConfirmed = context.isGranted("risk_confirmed:$name")
+
         for (step in definition.actions) {
             // 对 step.target 进行模板占位符替换，如 {{keyword}} -> 具体传参
             val interpolatedTarget = interpolate(step.target, argsMap)
 
-            // 安全检查：在可触控操作前核验当前屏幕是否处于敏感支付/密码页面
-            if (step.type != SkillActionType.WAIT) {
+            // 安全检查：在可触控操作前核验当前屏幕是否处于敏感支付/密码页面（若用户已授权则直接放行）
+            if (!isSkillConfirmed && (step.type == SkillActionType.TAP_COORDINATE || step.type == SkillActionType.INPUT_TEXT)) {
                 val state = phoneController.getScreenState()
                 val allText = state.elements.joinToString(" ") { it.text + " " + it.contentDescription }
                 if (com.paw.agent.core.tool.android.SafetyGuard.isSensitive(allText)) {
@@ -104,6 +106,12 @@ class CustomExecutableSkill(
 
                 SkillActionType.TAP_ELEMENT -> {
                     val state = phoneController.getScreenState()
+                    if (!isSkillConfirmed) {
+                        val allText = state.elements.joinToString(" ") { it.text + " " + it.contentDescription }
+                        if (com.paw.agent.core.tool.android.SafetyGuard.isSensitive(allText)) {
+                            return """{"status":"paused","is_safety_pause":true,"reason":"检测到敏感密码/支付页面，自动化技能已安全暂停","message":"[SAFETY PAUSE] Detected sensitive password/payment screen. Automated custom skill is paused for security."}"""
+                        }
+                    }
                     val matched = if (step.exactMatch) {
                         state.elements.firstOrNull { elem ->
                             elem.text.equals(interpolatedTarget, ignoreCase = true) ||
@@ -158,7 +166,7 @@ class CustomExecutableSkill(
 
                 SkillActionType.SHELL_COMMAND -> {
                     val risk = com.paw.agent.core.agent.RiskActionGuard.evaluate("shell_command", interpolatedTarget, "")
-                    val isConfirmed = context.bypassSafetyGuard || context.isGranted("risk_confirmed:$name") || context.isGranted("risk_confirmed")
+                    val isConfirmed = isSkillConfirmed || context.isGranted("risk_confirmed:$name") || context.isGranted("risk_confirmed:shell_command")
                     if (risk.requiresConfirmation && !isConfirmed) {
                         return com.paw.agent.core.tool.android.SafetyGuard.formatConfirmationPayload(risk, toolName = name, arguments = arguments)
                     }

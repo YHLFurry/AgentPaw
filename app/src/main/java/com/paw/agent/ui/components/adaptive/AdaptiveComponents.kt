@@ -3,11 +3,14 @@
 package com.paw.agent.ui.components.adaptive
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -548,14 +551,57 @@ fun AppAlertDialog(
     confirmButton: @Composable () -> Unit,
     dismissButton: @Composable () -> Unit,
 ) {
-    androidx.compose.material3.AlertDialog(
-        onDismissRequest = onDismissRequest,
-        title = title,
-        text = text,
-        confirmButton = confirmButton,
-        dismissButton = dismissButton,
-        containerColor = AppTheme.colors.surface,
-        titleContentColor = AppTheme.colors.onSurface,
-        textContentColor = AppTheme.colors.onSurfaceVariant,
-    )
+    if (AppTheme.mode == UiThemeMode.MIUIX) {
+        androidx.compose.ui.window.Dialog(onDismissRequest = onDismissRequest) {
+            AppSurface(
+                shape = RoundedCornerShape(20.dp),
+                color = AppTheme.colors.surfaceContainer,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 24.dp),
+            ) {
+                Column(
+                    modifier = Modifier.padding(24.dp),
+                ) {
+                    androidx.compose.runtime.CompositionLocalProvider(
+                        androidx.compose.material3.LocalTextStyle provides AppTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.Bold,
+                            color = AppTheme.colors.onSurface,
+                        )
+                    ) {
+                        title()
+                    }
+                    Spacer(Modifier.size(12.dp))
+                    androidx.compose.runtime.CompositionLocalProvider(
+                        androidx.compose.material3.LocalTextStyle provides AppTheme.typography.bodyMedium.copy(
+                            color = AppTheme.colors.onSurfaceVariant,
+                        )
+                    ) {
+                        text()
+                    }
+                    Spacer(Modifier.size(24.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        dismissButton()
+                        Spacer(Modifier.size(8.dp))
+                        confirmButton()
+                    }
+                }
+            }
+        }
+    } else {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = onDismissRequest,
+            title = title,
+            text = text,
+            confirmButton = confirmButton,
+            dismissButton = dismissButton,
+            containerColor = AppTheme.colors.surface,
+            titleContentColor = AppTheme.colors.onSurface,
+            textContentColor = AppTheme.colors.onSurfaceVariant,
+        )
+    }
 }
