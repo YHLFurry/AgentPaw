@@ -14,9 +14,9 @@ import java.io.ByteArrayOutputStream
 import java.io.InputStream
 import java.util.concurrent.TimeUnit
 
-class ShizukuController {
+open class ShizukuController {
 
-    val isAvailable: Boolean
+    open val isAvailable: Boolean
         get() = runCatching {
             // 确保监听已注册（幂等），避免未初始化时 binder 状态未知
             ShizukuInitializer.initialize()
@@ -39,7 +39,7 @@ class ShizukuController {
             newProcessMethod?.invoke(null, cmd, null, null) as? Process
         }.getOrNull()
 
-    suspend fun executeCommand(cmd: String, timeoutMs: Long = 10_000L): String = withContext(Dispatchers.IO) {
+    open suspend fun executeCommand(cmd: String, timeoutMs: Long = 10_000L): String = withContext(Dispatchers.IO) {
         if (!isAvailable) return@withContext "Error: Shizuku is not running or not granted"
         var process: Process? = null
         try {
@@ -80,7 +80,7 @@ class ShizukuController {
         }
     }
 
-    suspend fun captureScreen(timeoutMs: Long = 8_000L): Bitmap? = withContext(Dispatchers.IO) {
+    open suspend fun captureScreen(timeoutMs: Long = 8_000L): Bitmap? = withContext(Dispatchers.IO) {
         if (!isAvailable) return@withContext null
         var process: Process? = null
         try {
@@ -109,25 +109,25 @@ class ShizukuController {
         }
     }
 
-    suspend fun tap(x: Int, y: Int): Boolean = withContext(Dispatchers.IO) {
+    open suspend fun tap(x: Int, y: Int): Boolean = withContext(Dispatchers.IO) {
         if (!isAvailable) return@withContext false
         val result = executeCommand("input tap $x $y")
         !result.startsWith("Error:")
     }
 
-    suspend fun swipe(x1: Int, y1: Int, x2: Int, y2: Int, durationMs: Long): Boolean = withContext(Dispatchers.IO) {
+    open suspend fun swipe(x1: Int, y1: Int, x2: Int, y2: Int, durationMs: Long): Boolean = withContext(Dispatchers.IO) {
         if (!isAvailable) return@withContext false
         val result = executeCommand("input swipe $x1 $y1 $x2 $y2 $durationMs")
         !result.startsWith("Error:")
     }
 
-    suspend fun keyEvent(keyCode: Int): Boolean = withContext(Dispatchers.IO) {
+    open suspend fun keyEvent(keyCode: Int): Boolean = withContext(Dispatchers.IO) {
         if (!isAvailable) return@withContext false
         val result = executeCommand("input keyevent $keyCode")
         !result.startsWith("Error:")
     }
 
-    suspend fun inputText(text: String): Boolean = withContext(Dispatchers.IO) {
+    open suspend fun inputText(text: String): Boolean = withContext(Dispatchers.IO) {
         if (!isAvailable) return@withContext false
         if (text.any { it.code > 127 }) return@withContext false
         val lines = text.split("\n")
@@ -150,12 +150,19 @@ class ShizukuController {
         true
     }
 
-    suspend fun getForegroundPackage(): String = withContext(Dispatchers.IO) {
-        if (!isAvailable) return@withContext ""
+    open suspend fun getForegroundPackage(): String = withContext(Dispatchers.IO) {
+        getForegroundInfo().first
+    }
+
+    open suspend fun getForegroundInfo(): Pair<String, String> = withContext(Dispatchers.IO) {
+        if (!isAvailable) return@withContext Pair("", "")
         val out = executeCommand("dumpsys window | grep -E 'mCurrentFocus|mFocusedApp'")
-        // Extract package name from e.g. "u0 com.tencent.mm/com.tencent.mm.ui.LauncherUI"
+        // Extract package name and activity from e.g. "u0 com.tencent.mm/com.tencent.mm.ui.LauncherUI"
         val regex = Regex("""([a-zA-Z0-9._]+)/([a-zA-Z0-9._]+)""")
-        regex.find(out)?.groupValues?.getOrNull(1).orEmpty()
+        val match = regex.find(out)
+        val pkg = match?.groupValues?.getOrNull(1).orEmpty()
+        val activity = match?.groupValues?.getOrNull(2).orEmpty()
+        Pair(pkg, activity)
     }
 
     private fun readAllBytes(input: InputStream): ByteArray {

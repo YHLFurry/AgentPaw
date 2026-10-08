@@ -43,11 +43,11 @@
 - **自定义 Schema 与模板**：自由配置技能参数的 JSON Schema 与 Prompt 模版。
 - **热注入运行时**：新创建或启用的技能即时热注册进 LLM Function Calling 工具集，无需重启即刻投入使用。
 
-### ⚡ 三级混合执行架构
-- **无障碍服务 (Accessibility)**：官方标准无障碍 API，免 Root 深度解析 UI 树层级，支持精准点击、滑动与节点定位。
-- **Shizuku 模式**：借助 ADB 权限实现高速静默模拟与系统指令执行，性能出众且无需 Root。
-- **ROOT 模式 (`su`)**：针对已 Root 设备提供原汁原味的极速 Root Shell 执行通道与高帧率底层截屏。
-- **混合弹性调度**：`HybridPhoneController` 根据设备授权环境自动降级与择优调度，确保任务从不落空。
+### ⚡ 三级混合执行架构 (ROOT > Shizuku > 无障碍)
+- **ROOT 模式 (`su`)**：第一优先级！针对已 Root 设备直接以纯 Root 模式进行全功能驱动、物理模拟、静默应用拉起与高帧率底层截屏，完全免无障碍服务。
+- **Shizuku 模式**：第二优先级！未 Root 时借助 Shizuku (ADB privileges) 纯 Shizuku 模式执行高速静默模拟与系统指令。
+- **无障碍服务 (Accessibility)**：最终兜底底座！免 Root / 免 Shizuku 环境下深度解析 UI 树层级，支持精准点击、滑动与节点定位。
+- **阶梯式弹性调度**：`HybridPhoneController` 严格按照 `ROOT > Shizuku > 无障碍` 优先级运作，能通过 ROOT 则纯 ROOT 操作，以此类推，最终无障碍兜底，确保任务从不落空。
 
 ### ⌨️ 文字直接键入与键盘保底机制
 - **输入框智能锚定**：优先智能定位当前界面的焦点输入框、可编辑文本节点或聊天框。

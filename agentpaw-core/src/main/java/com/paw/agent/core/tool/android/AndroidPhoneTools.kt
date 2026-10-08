@@ -121,7 +121,7 @@ class TakeScreenshotTool(
             ?.takeIf { it.size == 4 }
 
         val result = phoneController.takeScreenshot(mode, cropRoi)
-            ?: return """{"status":"error","message":"Failed to capture screen. Ensure Accessibility Service or Shizuku is enabled."}"""
+            ?: return """{"status":"error","message":"Failed to capture screen. Ensure Root, Shizuku, or Accessibility Service is enabled."}"""
 
         val screenState = phoneController.getScreenState()
         val allText = screenState.elements.joinToString(" ") { it.text + " " + it.contentDescription }
@@ -184,7 +184,7 @@ class TapTool(
 
         val ok = phoneController.tap(x, y, cropRoi)
         return if (ok) """{"status":"success","action":"tap","x":$x,"y":$y}"""
-        else """{"status":"error","message":"Tap failed. Check accessibility or Shizuku permissions."}"""
+        else """{"status":"error","message":"Tap failed. Check Root, Shizuku, or accessibility permissions."}"""
     }
 }
 
@@ -483,7 +483,7 @@ class ClickElementTool(
         return if (ok) {
             """{"status":"success","action":"click_element","bounds":[${rect.left},${rect.top},${rect.right},${rect.bottom}],"center":[$cx,$cy]}"""
         } else {
-            """{"status":"error","message":"click_element failed. Check accessibility or Shizuku permissions."}"""
+            """{"status":"error","message":"click_element failed. Check Root, Shizuku, or accessibility permissions."}"""
         }
     }
 

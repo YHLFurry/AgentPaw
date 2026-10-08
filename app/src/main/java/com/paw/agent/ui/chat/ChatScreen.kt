@@ -41,6 +41,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -206,19 +207,23 @@ fun ChatScreen(
         val isRootAvailable = remember(permTick.intValue) {
             com.paw.agent.device.DevicePermissionManager.isRootAvailable()
         }
+        val shizukuStatus by com.paw.agent.device.DevicePermissionManager.observeShizukuState()
+            .collectAsStateWithLifecycle()
+        val hasShizukuPermission = shizukuStatus == com.paw.agent.device.shizuku.ShizukuStatus.GRANTED
         val hasOverlayPermission = remember(permTick.intValue) {
             com.paw.agent.device.DevicePermissionManager.canDrawOverlays(context)
         }
         val hasNotificationPermission = remember(permTick.intValue) {
             com.paw.agent.device.DevicePermissionManager.hasNotificationPermission(context)
         }
+        val hasAnyExecutionEngine = isRootAvailable || hasShizukuPermission || isAccessibilityEnabled
 
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding),
         ) {
-            if (!isAccessibilityEnabled) {
+            if (!hasAnyExecutionEngine) {
                 AppCard(
                     onClick = {
                         com.paw.agent.device.DevicePermissionManager.openAccessibilitySettings(context)
@@ -233,7 +238,7 @@ fun ChatScreen(
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         AppText(
-                            text = "⚠ 无障碍服务未开启（核心必要）：Agent 无法点击、滑动或与目标应用交互。",
+                            text = "⚠ 未开启任何执行通道（ROOT > Shizuku > 无障碍）：Agent 无法操作目标应用。",
                             style = AppTheme.typography.bodySmall,
                             modifier = Modifier.weight(1f),
                         )

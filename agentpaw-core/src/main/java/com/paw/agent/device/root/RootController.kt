@@ -20,7 +20,7 @@ import java.util.concurrent.TimeUnit
  * 支持在免无障碍服务、免 Shizuku 的情况下执行最高特权的高速指令、
  * 屏幕截图以及系统级输入模拟。
  */
-class RootController {
+open class RootController {
 
     @Volatile
     private var cachedRootAvailable: Boolean? = null
@@ -29,7 +29,7 @@ class RootController {
      * 检查当前系统是否具有 root 权限并已授予本应用。
      * 具备内存双检锁缓存与快速探测机制。
      */
-    val isAvailable: Boolean
+    open val isAvailable: Boolean
         get() {
             cachedRootAvailable?.let { return it }
             synchronized(this) {
@@ -106,7 +106,7 @@ class RootController {
     /**
      * 在 root 提权环境中执行 shell 命令，具备合并流读取、超时与取消强制销毁机制
      */
-    suspend fun executeCommand(cmd: String, timeoutMs: Long = 10_000L): String = withContext(Dispatchers.IO) {
+    open suspend fun executeCommand(cmd: String, timeoutMs: Long = 10_000L): String = withContext(Dispatchers.IO) {
         var process: Process? = null
         try {
             withTimeout(timeoutMs) {
@@ -149,7 +149,7 @@ class RootController {
     /**
      * 利用 root 权限高速截取全屏快照，先读取完整数据流再等待退出，彻底避免缓冲区死锁
      */
-    suspend fun captureScreen(timeoutMs: Long = 8_000L): Bitmap? = withContext(Dispatchers.IO) {
+    open suspend fun captureScreen(timeoutMs: Long = 8_000L): Bitmap? = withContext(Dispatchers.IO) {
         var process: Process? = null
         try {
             withTimeout(timeoutMs) {
@@ -177,17 +177,17 @@ class RootController {
         }
     }
 
-    suspend fun tap(x: Int, y: Int): Boolean = withContext(Dispatchers.IO) {
+    open suspend fun tap(x: Int, y: Int): Boolean = withContext(Dispatchers.IO) {
         val result = executeCommand("input tap $x $y")
         !result.startsWith("Error:")
     }
 
-    suspend fun swipe(x1: Int, y1: Int, x2: Int, y2: Int, durationMs: Long): Boolean = withContext(Dispatchers.IO) {
+    open suspend fun swipe(x1: Int, y1: Int, x2: Int, y2: Int, durationMs: Long): Boolean = withContext(Dispatchers.IO) {
         val result = executeCommand("input swipe $x1 $y1 $x2 $y2 $durationMs")
         !result.startsWith("Error:")
     }
 
-    suspend fun keyEvent(keyCode: Int): Boolean = withContext(Dispatchers.IO) {
+    open suspend fun keyEvent(keyCode: Int): Boolean = withContext(Dispatchers.IO) {
         val result = executeCommand("input keyevent $keyCode")
         !result.startsWith("Error:")
     }
@@ -196,7 +196,7 @@ class RootController {
      * 安全输入文本：处理单引号与特殊字符转义，遇非 ASCII（中文、表情）整体返回 false 触发保底方案，
      * 避免逐行部分执行后回退产生重复文本输入。
      */
-    suspend fun inputText(text: String): Boolean = withContext(Dispatchers.IO) {
+    open suspend fun inputText(text: String): Boolean = withContext(Dispatchers.IO) {
         if (!isAvailable) return@withContext false
         if (hasNonAscii(text)) return@withContext false
         val lines = text.split("\n")
@@ -219,10 +219,17 @@ class RootController {
         true
     }
 
-    suspend fun getForegroundPackage(): String = withContext(Dispatchers.IO) {
+    open suspend fun getForegroundPackage(): String = withContext(Dispatchers.IO) {
+        getForegroundInfo().first
+    }
+
+    open suspend fun getForegroundInfo(): Pair<String, String> = withContext(Dispatchers.IO) {
         val out = executeCommand("dumpsys window | grep -E 'mCurrentFocus|mFocusedApp'")
         val regex = Regex("""([a-zA-Z0-9._]+)/([a-zA-Z0-9._]+)""")
-        regex.find(out)?.groupValues?.getOrNull(1).orEmpty()
+        val match = regex.find(out)
+        val pkg = match?.groupValues?.getOrNull(1).orEmpty()
+        val activity = match?.groupValues?.getOrNull(2).orEmpty()
+        Pair(pkg, activity)
     }
 
     private fun readAllBytes(input: InputStream): ByteArray {

@@ -547,21 +547,42 @@ fun AgentControlPage(
             }
         }
 
-        SettingsGroupLabel(stringResource(R.string.settings_group_system_permissions))
+        SettingsGroupLabel("系统执行通道与权限 (优先级: ROOT > Shizuku > 无障碍)")
         SettingsCard {
             PermissionRow(
-                title = stringResource(R.string.permission_accessibility),
-                subtitle = stringResource(R.string.permission_accessibility_summary),
-                isGranted = isAccessibilityEnabled,
-                statusText = if (isAccessibilityEnabled) {
-                    stringResource(R.string.permission_granted)
+                title = stringResource(R.string.permission_root),
+                subtitle = stringResource(R.string.permission_root_summary),
+                isGranted = isRootGranted,
+                statusText = if (isRootGranted) {
+                    stringResource(R.string.permission_root_granted)
                 } else {
-                    stringResource(R.string.permission_not_granted)
+                    stringResource(R.string.permission_root_not_granted)
                 },
-                actionText = stringResource(R.string.permission_open_settings),
+                actionText = if (!isRootGranted) {
+                    stringResource(R.string.permission_root_request)
+                } else if (!isAccessibilityEnabled) {
+                    "ROOT 激活无障碍"
+                } else null,
                 onAction = {
-                    com.paw.agent.device.DevicePermissionManager
-                        .openAccessibilitySettings(context)
+                    coroutineScope.launch {
+                        if (!isRootGranted) {
+                            val ok = com.paw.agent.device.DevicePermissionManager.requestOrTestRoot()
+                            permRefreshTick.intValue++
+                            if (ok) {
+                                snackbarHostState.showSnackbar("ROOT 权限授权成功")
+                            } else {
+                                snackbarHostState.showSnackbar("未能获取 ROOT 授权，请检查 Magisk/KernelSU/APatch")
+                            }
+                        } else if (!isAccessibilityEnabled) {
+                            val ok = com.paw.agent.device.DevicePermissionManager.enableAccessibilityViaRoot(context)
+                            permRefreshTick.intValue++
+                            if (ok) {
+                                snackbarHostState.showSnackbar("已通过 ROOT 成功激活无障碍服务")
+                            } else {
+                                snackbarHostState.showSnackbar("ROOT 激活无障碍服务失败")
+                            }
+                        }
+                    }
                 },
             )
 
@@ -603,6 +624,24 @@ fun AgentControlPage(
             SettingsRowDivider()
 
             PermissionRow(
+                title = stringResource(R.string.permission_accessibility),
+                subtitle = stringResource(R.string.permission_accessibility_summary),
+                isGranted = isAccessibilityEnabled,
+                statusText = if (isAccessibilityEnabled) {
+                    stringResource(R.string.permission_granted)
+                } else {
+                    stringResource(R.string.permission_not_granted)
+                },
+                actionText = stringResource(R.string.permission_open_settings),
+                onAction = {
+                    com.paw.agent.device.DevicePermissionManager
+                        .openAccessibilitySettings(context)
+                },
+            )
+
+            SettingsRowDivider()
+
+            PermissionRow(
                 title = stringResource(R.string.permission_overlay),
                 subtitle = stringResource(R.string.permission_overlay_summary),
                 isGranted = hasOverlayPermission,
@@ -614,45 +653,6 @@ fun AgentControlPage(
                 actionText = stringResource(R.string.permission_open_settings),
                 onAction = {
                     com.paw.agent.device.DevicePermissionManager.openOverlaySettings(context)
-                },
-            )
-
-            SettingsRowDivider()
-
-            PermissionRow(
-                title = stringResource(R.string.permission_root),
-                subtitle = stringResource(R.string.permission_root_summary),
-                isGranted = isRootGranted,
-                statusText = if (isRootGranted) {
-                    stringResource(R.string.permission_root_granted)
-                } else {
-                    stringResource(R.string.permission_root_not_granted)
-                },
-                actionText = if (!isRootGranted) {
-                    stringResource(R.string.permission_root_request)
-                } else if (!isAccessibilityEnabled) {
-                    "ROOT 激活无障碍"
-                } else null,
-                onAction = {
-                    coroutineScope.launch {
-                        if (!isRootGranted) {
-                            val ok = com.paw.agent.device.DevicePermissionManager.requestOrTestRoot()
-                            permRefreshTick.intValue++
-                            if (ok) {
-                                snackbarHostState.showSnackbar("ROOT 权限授权成功")
-                            } else {
-                                snackbarHostState.showSnackbar("未能获取 ROOT 授权，请检查 Magisk/KernelSU/APatch")
-                            }
-                        } else if (!isAccessibilityEnabled) {
-                            val ok = com.paw.agent.device.DevicePermissionManager.enableAccessibilityViaRoot(context)
-                            permRefreshTick.intValue++
-                            if (ok) {
-                                snackbarHostState.showSnackbar("已通过 ROOT 成功激活无障碍服务")
-                            } else {
-                                snackbarHostState.showSnackbar("ROOT 激活无障碍服务失败")
-                            }
-                        }
-                    }
                 },
             )
         }

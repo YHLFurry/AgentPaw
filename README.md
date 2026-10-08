@@ -42,11 +42,11 @@ Whether you want to automate repetitive device operations, build custom AI mobil
 - **Visual Skill Studio**: Create, edit, test, and toggle custom skills with user-defined JSON Schema parameters and Prompt templates directly inside the app.
 - **Hot Tool Registration**: Custom skills are automatically registered into the LLM function calling catalog without app restarts.
 
-### ⚡ Triple-Tier Controller Architecture
-- **Accessibility Service**: Standard zero-root perception and touch interaction via Android Accessibility APIs.
-- **Shizuku (ADB privileges)**: High-performance tap, swipe, and shell commands without requiring root.
-- **Native ROOT (`su`)**: Unrestricted root access for instantaneous shell dispatch and low-latency screencaps.
-- **Hybrid Controller**: Automatic fallback between Root, Shizuku, and Accessibility depending on available permissions.
+### ⚡ Triple-Tier Controller Architecture (ROOT > Shizuku > Accessibility)
+- **Native ROOT (`su`)**: Highest priority! Unrestricted root access for instantaneous shell dispatch, touch simulation, silent app launching, and high-framerate screencaps without requiring Accessibility service.
+- **Shizuku (ADB privileges)**: Second priority! High-performance silent simulation and commands via Shizuku when root is unavailable.
+- **Accessibility Service**: Resilient fallback safety net! Standard zero-root perception and touch interaction via Android Accessibility APIs.
+- **Hierarchical Adaptive Dispatch**: `HybridPhoneController` strictly follows `ROOT > Shizuku > Accessibility`. When Root is operational, operations execute purely via Root; if unavailable or failing, Shizuku is used; Accessibility serves as the final fallback.
 
 ### ⌨️ Direct Text Injection with Keyboard Fallback
 - **Intelligent Input Targeting**: Automatically identifies active editable nodes, text boxes, and chat inputs.
@@ -88,10 +88,10 @@ Whether you want to automate repetitive device operations, build custom AI mobil
 
 ### 2. Granting Permissions
 To enable AgentPaw to control your phone, grant the required permissions according to your needs:
-1. **Accessibility Service**: Go to *System Settings → Accessibility → AgentPaw* and enable the service (Required for standard on-screen control).
-2. **Display over other apps**: Enable the floating overlay permission so the stop/resume capsule can display over third-party apps.
-3. **Shizuku (Recommended)**: If you have Shizuku installed, grant permission in the Shizuku Manager for high-speed ADB-level execution and full screenshot capabilities across all supported Android versions.
-4. **Root (Optional)**: For rooted devices, grant `su` access when prompted or in settings.
+1. **Root (Highest Priority)**: For rooted devices, grant `su` access when prompted or in Settings for zero-latency, full native automation without Accessibility dependencies.
+2. **Shizuku (Second Priority)**: If you have Shizuku installed, grant permission in the Shizuku Manager for high-speed ADB-level execution and full screenshot capabilities without root.
+3. **Accessibility Service (Fallback)**: Go to *System Settings → Accessibility → AgentPaw* and enable the service (serves as fallback or zero-root/zero-ADB baseline).
+4. **Display over other apps**: Enable the floating overlay permission so the stop/resume capsule can display over third-party apps.
 
 ### 3. Configuring LLM Provider
 AgentPaw supports any OpenAI-compatible API endpoint:
