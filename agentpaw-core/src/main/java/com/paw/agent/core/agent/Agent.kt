@@ -90,9 +90,9 @@ class Agent(
         var buffer = StringBuilder()
 
         val effectiveMaxRounds: Int? = if (this@Agent.maxToolRounds != DEFAULT_MAX_TOOL_ROUNDS) {
-            if (this@Agent.maxToolRounds <= 0) null else this@Agent.maxToolRounds
+            if (this@Agent.maxToolRounds <= 0) null else this@Agent.maxToolRounds.coerceAtMost(100)
         } else {
-            if (config.maxToolRounds <= 0) null else config.maxToolRounds
+            if (config.maxToolRounds <= 0) null else config.maxToolRounds.coerceAtMost(100)
         }
         var round = 0
         while (true) {
@@ -187,7 +187,7 @@ class Agent(
                 emit(AgentEvent.ToolFinished(result))
                 workingHistory = workingHistory + result.toMessages()
 
-                if (enableAdaptivePacing && !isCancelled()) {
+                if (enableAdaptivePacing && !isCancelled() && !call.name.lowercase().contains("wait")) {
                     val decision = AdaptivePacingEngine.evaluateDelay(call, assistantMessage.content)
                     if (decision.delayMillis > 0) {
                         emit(AgentEvent.AdaptivePaced(call, decision.delayMillis, decision.reason))
@@ -208,7 +208,13 @@ class Agent(
         arguments: String,
         conversationId: String = "conversation",
     ): ToolResult {
-        val context = AgentContext(conversationId, 0) { false }
+        val context = AgentContext(
+            conversationId = conversationId,
+            depth = 0,
+            grantedTokens = setOf("risk_confirmed:$toolName", "risk_confirmed"),
+            bypassSafetyGuard = true,
+            cancelledCheck = { false },
+        )
         val call = ToolCall(
             id = "confirmed_" + java.util.UUID.randomUUID().toString(),
             name = toolName,

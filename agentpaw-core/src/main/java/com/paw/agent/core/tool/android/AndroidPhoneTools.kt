@@ -7,6 +7,10 @@ import com.paw.agent.device.PhoneController
 import com.paw.agent.device.RectBounds
 import com.paw.agent.device.VisionResolutionMode
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
@@ -35,25 +39,44 @@ object SafetyGuard {
         toolName: String = "",
         arguments: String = "",
     ): String {
-        val safeTarget = risk.target.replace("\"", "\\\"")
-        val safeImpact = risk.impact.replace("\"", "\\\"")
-        val safeReason = if (risk.impact.isNotBlank()) safeImpact else "命中高风险防护规则"
-        val escapedArgs = arguments.replace("\\", "\\\\").replace("\"", "\\\"")
-        return """
-        {
-          "status": "requires_confirmation",
-          "requires_confirmation": true,
-          "risk_level": "${risk.level}",
-          "category": "${risk.category}",
-          "action": "${risk.action}",
-          "target": "$safeTarget",
-          "impact": "$safeImpact",
-          "reason": "$safeReason",
-          "tool_name": "$toolName",
-          "arguments": "$escapedArgs",
-          "message": "[安全确认拦截] 检测到高风险操作【${risk.action}】。目标：$safeTarget，影响：$safeImpact。已自动暂停，需要用户显式确认。"
+        val safeReason = if (risk.impact.isNotBlank()) risk.impact else "命中高风险防护规则"
+        val payload = buildJsonObject {
+            put("status", JsonPrimitive("requires_confirmation"))
+            put("requires_confirmation", JsonPrimitive(true))
+            put("risk_level", JsonPrimitive(risk.level.name))
+            put("category", JsonPrimitive(risk.category))
+            put("action", JsonPrimitive(risk.action))
+            put("target", JsonPrimitive(risk.target))
+            put("impact", JsonPrimitive(risk.impact))
+            put("reason", JsonPrimitive(safeReason))
+            put("tool_name", JsonPrimitive(toolName))
+            put("arguments", JsonPrimitive(arguments))
+            put("message", JsonPrimitive("[安全确认拦截] 检测到高风险操作【${risk.action}】。目标：${risk.target}，影响：${risk.impact}。已自动暂停，需要用户显式确认。"))
         }
-        """.trimIndent()
+        return json.encodeToString(JsonObject.serializer(), payload)
+    }
+
+    suspend fun checkScreenAndRisk(
+        toolName: String,
+        arguments: String,
+        context: AgentContext,
+        phoneController: PhoneController,
+        targetTextExtra: String = "",
+    ): String? {
+        val state = phoneController.getScreenState()
+        val allText = state.elements.joinToString(" ") { it.text + " " + it.contentDescription }
+        if (isSensitive(allText)) {
+            return """{"status":"paused","is_safety_pause":true,"reason":"检测到敏感密码/支付页面，自动化操作已安全暂停","message":"[SAFETY PAUSE] Detected sensitive password/payment screen. Automated operation is paused for security. Please complete this step manually on your device."}"""
+        }
+        val isConfirmed = context.bypassSafetyGuard || context.isGranted("risk_confirmed:$toolName") || context.isGranted("risk_confirmed")
+        if (!isConfirmed) {
+            val evalText = if (targetTextExtra.isNotBlank()) "$targetTextExtra $allText" else allText
+            val risk = checkRisk(toolName, arguments, evalText)
+            if (risk.requiresConfirmation) {
+                return formatConfirmationPayload(risk, toolName = toolName, arguments = arguments)
+            }
+        }
+        return null
     }
 }
 
@@ -100,23 +123,26 @@ class TakeScreenshotTool(
         val screenState = phoneController.getScreenState()
         val allText = screenState.elements.joinToString(" ") { it.text + " " + it.contentDescription }
         val isSensitive = SafetyGuard.isSensitive(allText)
-        val safetyAlert = if (isSensitive) """,\n  "safety_alert": "SENSITIVE_PAYMENT_OR_PASSWORD_SCREEN_PAUSED"""" else ""
 
-        // 回显本次截图所用的裁剪区域与真实源分辨率，方便模型在后续 tap/double_tap/
-        // long_press 中传入相同的 crop_roi，使基于裁剪截图推断的坐标正确落回全屏。
-        val cropEcho = if (cropRoi != null) """,\n  "crop_roi": [${cropRoi[0]}, ${cropRoi[1]}, ${cropRoi[2]}, ${cropRoi[3]}]""" else ""
-        val sourceEcho = """,\n  "source_width": ${result.width},\n  "source_height": ${result.height}"""
-
-        return """
-        {
-          "status": "success",
-          "width": ${result.width},
-          "height": ${result.height},
-          "mode": "${result.modeUsed}",
-          "estimated_tokens": ${result.estimatedTokens},
-          "image_base64": "${result.base64Data}"$cropEcho$sourceEcho$safetyAlert
+        val response = buildJsonObject {
+            put("status", JsonPrimitive("success"))
+            put("width", JsonPrimitive(result.width))
+            put("height", JsonPrimitive(result.height))
+            put("mode", JsonPrimitive(result.modeUsed.name))
+            put("estimated_tokens", JsonPrimitive(result.estimatedTokens))
+            put("image_base64", JsonPrimitive(result.base64Data))
+            if (cropRoi != null) {
+                put("crop_roi", buildJsonArray {
+                    cropRoi.forEach { add(JsonPrimitive(it)) }
+                })
+            }
+            put("source_width", JsonPrimitive(result.width))
+            put("source_height", JsonPrimitive(result.height))
+            if (isSensitive) {
+                put("safety_alert", JsonPrimitive("SENSITIVE_PAYMENT_OR_PASSWORD_SCREEN_PAUSED"))
+            }
         }
-        """.trimIndent()
+        return json.encodeToString(JsonObject.serializer(), response)
     }
 }
 
@@ -150,18 +176,8 @@ class TapTool(
         val cropRoi = root["crop_roi"]?.jsonArray?.mapNotNull { it.jsonPrimitive.intOrNull }
             ?.takeIf { it.size == 4 }
 
-        val state = phoneController.getScreenState()
-        val allText = state.elements.joinToString(" ") { it.text + " " + it.contentDescription }
-        if (SafetyGuard.isSensitive(allText)) {
-            return """{"status":"paused","is_safety_pause":true,"reason":"检测到敏感密码/支付页面，自动化操作已安全暂停","message":"[SAFETY PAUSE] Detected sensitive password/payment screen. Automated tapping is paused for security. Please complete this step manually on your device."}"""
-        }
-        val confirmed = root["confirmed"]?.jsonPrimitive?.contentOrNull?.toBoolean() ?: false
-        if (!confirmed) {
-            val risk = SafetyGuard.checkRisk("tap", arguments, allText)
-            if (risk.requiresConfirmation) {
-                return SafetyGuard.formatConfirmationPayload(risk, toolName = "tap", arguments = arguments)
-            }
-        }
+        val guardBlocked = SafetyGuard.checkScreenAndRisk("tap", arguments, context, phoneController)
+        if (guardBlocked != null) return guardBlocked
 
         val ok = phoneController.tap(x, y, cropRoi)
         return if (ok) """{"status":"success","action":"tap","x":$x,"y":$y}"""
@@ -198,6 +214,9 @@ class SwipeTool(
         val ey = root["end_y"]?.jsonPrimitive?.intOrNull ?: return "Error: 'end_y' is required"
         val duration = root["duration_ms"]?.jsonPrimitive?.intOrNull?.toLong() ?: 350L
 
+        val guardBlocked = SafetyGuard.checkScreenAndRisk("swipe", arguments, context, phoneController)
+        if (guardBlocked != null) return guardBlocked
+
         val ok = phoneController.swipe(sx, sy, ex, ey, duration)
         return if (ok) """{"status":"success","action":"swipe","from":[$sx,$sy],"to":[$ex,$ey]}"""
         else """{"status":"error","message":"Swipe failed. Check permissions."}"""
@@ -229,18 +248,8 @@ class InputTextTool(
         val clear = root["clear_before"]?.jsonPrimitive?.contentOrNull?.toBoolean() ?: false
         val enter = root["press_enter"]?.jsonPrimitive?.contentOrNull?.toBoolean() ?: false
 
-        val state = phoneController.getScreenState()
-        val allText = state.elements.joinToString(" ") { it.text + " " + it.contentDescription }
-        if (SafetyGuard.isSensitive(allText)) {
-            return """{"status":"paused","is_safety_pause":true,"reason":"检测到敏感密码/支付页面，自动化操作已安全暂停","message":"[SAFETY PAUSE] Detected sensitive password/payment screen. Automated text input is paused for security. Please complete this step manually on your device."}"""
-        }
-        val confirmed = root["confirmed"]?.jsonPrimitive?.contentOrNull?.toBoolean() ?: false
-        if (!confirmed) {
-            val risk = SafetyGuard.checkRisk("input_text", arguments, allText)
-            if (risk.requiresConfirmation) {
-                return SafetyGuard.formatConfirmationPayload(risk, toolName = "input_text", arguments = arguments)
-            }
-        }
+        val guardBlocked = SafetyGuard.checkScreenAndRisk("input_text", arguments, context, phoneController, targetTextExtra = text)
+        if (guardBlocked != null) return guardBlocked
 
         val ok = phoneController.inputText(text, clear)
         if (ok && enter) {
@@ -278,15 +287,8 @@ class KeyActionTool(
             ?: return "Error: 'action' is required"
 
         if (action == "ENTER") {
-            val state = phoneController.getScreenState()
-            val allText = state.elements.joinToString(" ") { it.text + " " + it.contentDescription }
-            val confirmed = root["confirmed"]?.jsonPrimitive?.contentOrNull?.toBoolean() ?: false
-            if (!confirmed) {
-                val risk = SafetyGuard.checkRisk("key_action", arguments, allText)
-                if (risk.requiresConfirmation) {
-                    return SafetyGuard.formatConfirmationPayload(risk)
-                }
-            }
+            val guardBlocked = SafetyGuard.checkScreenAndRisk("key_action", arguments, context, phoneController)
+            if (guardBlocked != null) return guardBlocked
         }
 
         val ok = when (action) {
@@ -323,6 +325,9 @@ class LaunchAppTool(
         val root = json.parseToJsonElement(arguments).jsonObject
         val appName = root["app_name"]?.jsonPrimitive?.contentOrNull ?: return "Error: 'app_name' is required"
 
+        val guardBlocked = SafetyGuard.checkScreenAndRisk("launch_app", arguments, context, phoneController, targetTextExtra = appName)
+        if (guardBlocked != null) return guardBlocked
+
         val ok = phoneController.launchApp(appName)
         return if (ok) """{"status":"success","launched":"$appName"}"""
         else """{"status":"error","message":"Could not launch app '$appName'. Ensure it is installed."}"""
@@ -349,11 +354,12 @@ class DeepLinkTool(
     override suspend fun execute(arguments: String, context: AgentContext): String {
         val root = json.parseToJsonElement(arguments).jsonObject
         val uri = root["uri"]?.jsonPrimitive?.contentOrNull ?: return "Error: 'uri' is required"
-        val confirmed = root["confirmed"]?.jsonPrimitive?.contentOrNull?.toBoolean() ?: false
-        if (!confirmed) {
-            val risk = SafetyGuard.checkRisk("open_deeplink", arguments, "")
+
+        val isConfirmed = context.bypassSafetyGuard || context.isGranted("risk_confirmed:open_deeplink") || context.isGranted("risk_confirmed")
+        if (!isConfirmed) {
+            val risk = SafetyGuard.checkRisk("open_deeplink", arguments, uri)
             if (risk.requiresConfirmation) {
-                return SafetyGuard.formatConfirmationPayload(risk)
+                return SafetyGuard.formatConfirmationPayload(risk, toolName = "open_deeplink", arguments = arguments)
             }
         }
 
@@ -374,18 +380,34 @@ class GetScreenStateTool(
 
     override suspend fun execute(arguments: String, context: AgentContext): String {
         val state = phoneController.getScreenState()
-        val elementsSummary = state.elements.take(30).mapIndexed { idx, elem ->
-            """{"index":$idx,"text":"${elem.text}","desc":"${elem.contentDescription}","id":"${elem.viewId}","clickable":${elem.isClickable},"bounds":[${elem.bounds.left},${elem.bounds.top},${elem.bounds.right},${elem.bounds.bottom}],"center":[${elem.bounds.centerX},${elem.bounds.centerY}]}"""
-        }.joinToString(",")
-
-        return """
-        {
-          "foreground_package": "${state.foregroundPackage}",
-          "foreground_activity": "${state.foregroundActivity}",
-          "elements_count": ${state.elements.size},
-          "elements": [$elementsSummary]
+        val root = buildJsonObject {
+            put("foreground_package", JsonPrimitive(state.foregroundPackage))
+            put("foreground_activity", JsonPrimitive(state.foregroundActivity))
+            put("elements_count", JsonPrimitive(state.elements.size))
+            put("elements", buildJsonArray {
+                state.elements.take(30).forEachIndexed { idx, elem ->
+                    add(buildJsonObject {
+                        put("index", JsonPrimitive(idx))
+                        put("text", JsonPrimitive(elem.text))
+                        put("desc", JsonPrimitive(elem.contentDescription))
+                        put("id", JsonPrimitive(elem.viewId))
+                        put("clickable", JsonPrimitive(elem.isClickable))
+                        put("bounds", buildJsonArray {
+                            add(JsonPrimitive(elem.bounds.left))
+                            add(JsonPrimitive(elem.bounds.top))
+                            add(JsonPrimitive(elem.bounds.right))
+                            add(JsonPrimitive(elem.bounds.bottom))
+                        })
+                        put("center", buildJsonArray {
+                            add(JsonPrimitive(elem.bounds.centerX))
+                            add(JsonPrimitive(elem.bounds.centerY))
+                        })
+                    })
+                }
+            })
         }
-        """.trimIndent()
+
+        return json.encodeToString(JsonObject.serializer(), root)
     }
 }
 
@@ -420,16 +442,21 @@ class ClickElementTool(
         if (SafetyGuard.isSensitive(allText)) {
             return """{"status":"paused","is_safety_pause":true,"reason":"检测到敏感密码/支付页面，自动化操作已安全暂停","message":"[SAFETY PAUSE] Detected sensitive password/payment screen. Automated tapping is paused for security. Please complete this step manually on your device."}"""
         }
-        val confirmed = root["confirmed"]?.jsonPrimitive?.contentOrNull?.toBoolean() ?: false
-        if (!confirmed) {
-            val risk = SafetyGuard.checkRisk("click_element", arguments, allText)
+
+        val targetElement = findMatchedElement(root, state)
+        val targetElemText = targetElement?.let { it.text + " " + it.contentDescription }.orEmpty()
+        val evalText = if (targetElemText.isNotBlank()) "$targetElemText $allText" else allText
+
+        val isConfirmed = context.bypassSafetyGuard || context.isGranted("risk_confirmed:click_element") || context.isGranted("risk_confirmed")
+        if (!isConfirmed) {
+            val risk = SafetyGuard.checkRisk("click_element", arguments, evalText)
             if (risk.requiresConfirmation) {
                 return SafetyGuard.formatConfirmationPayload(risk, toolName = "click_element", arguments = arguments)
             }
         }
 
         // 1) Resolve the target element's pixel bounds.
-        val rect: RectBounds? = resolveBounds(root, state)
+        val rect: RectBounds? = targetElement?.bounds ?: resolveBounds(root, state)
 
         if (rect == null) {
             return """{"status":"error","message":"Could not resolve a target element. Provide `bounds` (from get_screen_state), a valid `index`, or matching `text`/`view_id`."}"""
@@ -443,6 +470,28 @@ class ClickElementTool(
             """{"status":"success","action":"click_element","bounds":[${rect.left},${rect.top},${rect.right},${rect.bottom}],"center":[$cx,$cy]}"""
         } else {
             """{"status":"error","message":"click_element failed. Check accessibility or Shizuku permissions."}"""
+        }
+    }
+
+    private fun findMatchedElement(
+        root: kotlinx.serialization.json.JsonObject,
+        state: com.paw.agent.device.ScreenStateInfo,
+    ): com.paw.agent.device.UiElementInfo? {
+        val index = root["index"]?.jsonPrimitive?.intOrNull
+        if (index != null && index in state.elements.indices) {
+            return state.elements[index]
+        }
+        val bounds = root["bounds"]?.jsonArray?.mapNotNull { it.jsonPrimitive.intOrNull }?.takeIf { it.size == 4 }
+        if (bounds != null) {
+            val targetBounds = RectBounds(bounds[0], bounds[1], bounds[2], bounds[3])
+            val match = state.elements.firstOrNull { it.bounds == targetBounds }
+            if (match != null) return match
+        }
+        val text = root["text"]?.jsonPrimitive?.contentOrNull
+        val viewId = root["view_id"]?.jsonPrimitive?.contentOrNull
+        return state.elements.firstOrNull { elem ->
+            (viewId != null && elem.viewId == viewId) ||
+                (text != null && ((elem.text + " " + elem.contentDescription).contains(text, ignoreCase = true)))
         }
     }
 
@@ -503,6 +552,9 @@ class DoubleTapTool(
         val cropRoi = root["crop_roi"]?.jsonArray?.mapNotNull { it.jsonPrimitive.intOrNull }
             ?.takeIf { it.size == 4 }
 
+        val guardBlocked = SafetyGuard.checkScreenAndRisk("double_tap", arguments, context, phoneController)
+        if (guardBlocked != null) return guardBlocked
+
         val ok = phoneController.doubleTap(x, y, cropRoi)
         return if (ok) """{"status":"success","action":"double_tap","x":$x,"y":$y}"""
         else """{"status":"error","message":"Double tap failed"}"""
@@ -540,6 +592,9 @@ class LongPressTool(
         val duration = root["duration_ms"]?.jsonPrimitive?.intOrNull?.toLong() ?: 1000L
         val cropRoi = root["crop_roi"]?.jsonArray?.mapNotNull { it.jsonPrimitive.intOrNull }
             ?.takeIf { it.size == 4 }
+
+        val guardBlocked = SafetyGuard.checkScreenAndRisk("long_press", arguments, context, phoneController)
+        if (guardBlocked != null) return guardBlocked
 
         val ok = phoneController.longPress(x, y, duration, cropRoi)
         return if (ok) """{"status":"success","action":"long_press","x":$x,"y":$y,"duration_ms":$duration}"""

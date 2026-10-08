@@ -147,6 +147,7 @@ class OpenAiCompatibleClient(
 
                 // ---- streaming (SSE) ----
                 val source = body.source()
+                var malformedCount = 0
                 while (!source.exhausted()) {
                     val line = source.readUtf8Line() ?: break
                     if (!line.startsWith(SSE_DATA_PREFIX)) continue
@@ -157,7 +158,10 @@ class OpenAiCompatibleClient(
 
                     val chunk = runCatching {
                         json.decodeFromString(ChatCompletionResponse.serializer(), data)
-                    }.getOrElse { throw LlmException.Malformed(it) }
+                    }.getOrElse {
+                        malformedCount++
+                        null
+                    } ?: continue
 
                     chunk.error?.let { throw LlmException.Http(200, it.describe()) }
 
@@ -182,7 +186,11 @@ class OpenAiCompatibleClient(
                 if (toolArgs.isNotEmpty()) {
                     emit(LlmChunk.ToolCalls(toolCalls(toolArgs, toolNames, toolIds)))
                 } else if (!sawContent) {
-                    throw LlmException.EmptyResponse()
+                    if (malformedCount > 0) {
+                        throw LlmException.Malformed(IllegalArgumentException("All $malformedCount SSE chunks failed to parse"))
+                    } else {
+                        throw LlmException.EmptyResponse()
+                    }
                 }
                 emit(LlmChunk.Done(null, null))
             }
@@ -325,16 +333,41 @@ class OpenAiCompatibleClient(
             coerceInputValues = true
         }
 
+        private val IPV4_REGEX = Regex("""^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$""")
+
         fun isLocalOrPrivateAddress(url: String): Boolean {
-            val host = runCatching { java.net.URI(url).host }.getOrNull()?.lowercase() ?: return false
-            if (host == "localhost" || host == "127.0.0.1" || host == "10.0.2.2" || host.endsWith(".local")) {
+            val uri = runCatching { java.net.URI(url) }.getOrNull() ?: return false
+            val rawHost = uri.host?.lowercase() ?: return false
+            val host = rawHost.removePrefix("[").removeSuffix("]")
+
+            if (host == "localhost" || host == "127.0.0.1" || host == "::1" || host == "10.0.2.2") {
                 return true
             }
-            if (host.startsWith("192.168.") || host.startsWith("10.")) return true
-            if (host.startsWith("172.")) {
-                val second = host.substringAfter("172.").substringBefore(".").toIntOrNull()
-                if (second != null && second in 16..31) return true
+            if (host.endsWith(".local") && !host.contains("..")) {
+                return true
             }
+
+            val match = IPV4_REGEX.matchEntire(host)
+            if (match != null) {
+                val (o1Str, o2Str, o3Str, o4Str) = match.destructured
+                val o1 = o1Str.toIntOrNull() ?: return false
+                val o2 = o2Str.toIntOrNull() ?: return false
+                val o3 = o3Str.toIntOrNull() ?: return false
+                val o4 = o4Str.toIntOrNull() ?: return false
+                if (o1 !in 0..255 || o2 !in 0..255 || o3 !in 0..255 || o4 !in 0..255) return false
+
+                // 127.0.0.0/8 (loopback)
+                if (o1 == 127) return true
+                // 10.0.0.0/8
+                if (o1 == 10) return true
+                // 172.16.0.0/12
+                if (o1 == 172 && o2 in 16..31) return true
+                // 192.168.0.0/16
+                if (o1 == 192 && o2 == 168) return true
+                // Link-local 169.254.0.0/16
+                if (o1 == 169 && o2 == 254) return true
+            }
+
             return false
         }
     }

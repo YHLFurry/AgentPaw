@@ -36,10 +36,16 @@ class CustomSkillRepository(
     private val _skills = MutableStateFlow<List<CustomSkillDefinition>>(emptyList())
     val skills: StateFlow<List<CustomSkillDefinition>> = _skills.asStateFlow()
 
+    private val isLoaded = kotlinx.coroutines.CompletableDeferred<Unit>()
+
     init {
         scope.launch {
             loadInitial()
         }
+    }
+
+    suspend fun awaitLoaded() {
+        isLoaded.await()
     }
 
     private suspend fun loadInitial() = mutex.withLock {
@@ -47,13 +53,23 @@ class CustomSkillRepository(
             val list = if (storageFile.exists()) {
                 runCatching {
                     json.decodeFromString<List<CustomSkillDefinition>>(storageFile.readText())
-                }.getOrElse { defaultPresets() }
+                }.getOrElse { e ->
+                    // 备份损坏文件，避免静默丢失
+                    runCatching {
+                        val corruptFile = File(storageFile.parentFile, "custom_skills_${System.currentTimeMillis()}.corrupt")
+                        storageFile.copyTo(corruptFile, overwrite = true)
+                    }
+                    defaultPresets()
+                }
             } else {
                 val presets = defaultPresets()
-                runCatching { storageFile.writeText(json.encodeToString(presets)) }
+                persistLockedInternal(presets)
                 presets
             }
             _skills.value = list
+            if (!isLoaded.isCompleted) {
+                isLoaded.complete(Unit)
+            }
         }
     }
 
@@ -84,8 +100,17 @@ class CustomSkillRepository(
     }
 
     private suspend fun persistLocked(list: List<CustomSkillDefinition>) = withContext(Dispatchers.IO) {
+        persistLockedInternal(list)
+    }
+
+    private fun persistLockedInternal(list: List<CustomSkillDefinition>) {
         runCatching {
-            storageFile.writeText(json.encodeToString(list))
+            val tempFile = File.createTempFile("skills_", ".tmp", storageFile.parentFile)
+            tempFile.writeText(json.encodeToString(list))
+            if (!tempFile.renameTo(storageFile)) {
+                tempFile.copyTo(storageFile, overwrite = true)
+                tempFile.delete()
+            }
         }
     }
 
@@ -97,11 +122,14 @@ class CustomSkillRepository(
         toolRegistry: com.paw.agent.core.agent.ToolRegistry,
         phoneController: PhoneController,
     ) {
-        val activeSkills = _skills.value.filter { it.enabled }
-        activeSkills.forEach { def ->
-            val executable = CustomExecutableSkill(def)
-            skillRegistry.register(executable)
-            toolRegistry.register(SkillToolAdapter(executable, phoneController))
+        scope.launch {
+            awaitLoaded()
+            val activeSkills = _skills.value.filter { it.enabled }
+            activeSkills.forEach { def ->
+                val executable = CustomExecutableSkill(def)
+                skillRegistry.register(executable)
+                toolRegistry.register(SkillToolAdapter(executable, phoneController))
+            }
         }
     }
 

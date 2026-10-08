@@ -164,8 +164,9 @@ class AndroidPhoneToolsTest {
         val riskRes = deepLinkTool.execute("""{"uri": "alipays://platformapi/startapp"}""", context)
         assertTrue(riskRes.contains("requires_confirmation"))
 
-        // Payment deeplink executes when confirmed is true
-        val confirmedRes = deepLinkTool.execute("""{"uri": "alipays://platformapi/startapp", "confirmed": true}""", context)
+        // Payment deeplink executes when confirmed via context grant
+        val confirmedContext = AgentContext("test", grantedTokens = setOf("risk_confirmed:open_deeplink"))
+        val confirmedRes = deepLinkTool.execute("""{"uri": "alipays://platformapi/startapp"}""", confirmedContext)
         assertTrue(confirmedRes.contains("success"))
         assertEquals("alipays://platformapi/startapp", controller.lastDeepLink)
     }

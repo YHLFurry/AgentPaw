@@ -193,7 +193,9 @@ class AgentAccessibilityService : AccessibilityService() {
                     }
                 },
             )
-            deferred.await()
+            kotlinx.coroutines.withTimeoutOrNull(5000L) {
+                deferred.await()
+            }
         } else {
             null
         }
@@ -203,7 +205,14 @@ class AgentAccessibilityService : AccessibilityService() {
         val elements = mutableListOf<UiElementInfo>()
         val root = rootInActiveWindow
         if (root != null) {
-            traverseNode(root, elements)
+            try {
+                traverseNode(root, elements, 0)
+            } finally {
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+                    @Suppress("DEPRECATION")
+                    root.recycle()
+                }
+            }
         }
         return ScreenStateInfo(
             foregroundPackage = currentPackage.get(),
@@ -212,7 +221,9 @@ class AgentAccessibilityService : AccessibilityService() {
         )
     }
 
-    private fun traverseNode(node: AccessibilityNodeInfo, list: MutableList<UiElementInfo>) {
+    private fun traverseNode(node: AccessibilityNodeInfo, list: MutableList<UiElementInfo>, depth: Int = 0) {
+        if (depth > 32 || list.size >= 300) return
+
         val rect = Rect()
         node.getBoundsInScreen(rect)
 
@@ -237,8 +248,16 @@ class AgentAccessibilityService : AccessibilityService() {
         }
 
         for (i in 0 until node.childCount) {
+            if (list.size >= 300) break
             val child = node.getChild(i) ?: continue
-            traverseNode(child, list)
+            try {
+                traverseNode(child, list, depth + 1)
+            } finally {
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+                    @Suppress("DEPRECATION")
+                    child.recycle()
+                }
+            }
         }
     }
 

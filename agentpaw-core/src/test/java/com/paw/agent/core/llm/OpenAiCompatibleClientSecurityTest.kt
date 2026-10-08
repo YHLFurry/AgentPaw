@@ -12,6 +12,8 @@ class OpenAiCompatibleClientSecurityTest {
         assertTrue(OpenAiCompatibleClient.isLocalOrPrivateAddress("http://127.0.0.1:11434/v1"))
         assertTrue(OpenAiCompatibleClient.isLocalOrPrivateAddress("http://10.0.2.2:11434/v1"))
         assertTrue(OpenAiCompatibleClient.isLocalOrPrivateAddress("http://ollama-server.local:11434"))
+        // IPv6 loopback
+        assertTrue(OpenAiCompatibleClient.isLocalOrPrivateAddress("http://[::1]:11434/v1"))
     }
 
     @Test
@@ -32,6 +34,10 @@ class OpenAiCompatibleClientSecurityTest {
         assertFalse(OpenAiCompatibleClient.isLocalOrPrivateAddress("http://api.openai.com/v1"))
         assertFalse(OpenAiCompatibleClient.isLocalOrPrivateAddress("http://example.com/v1"))
         assertFalse(OpenAiCompatibleClient.isLocalOrPrivateAddress("http://8.8.8.8:8080/v1"))
+        // Spoofed domain names that prefix private subnets must be rejected
+        assertFalse(OpenAiCompatibleClient.isLocalOrPrivateAddress("http://192.168.attacker.com/v1"))
+        assertFalse(OpenAiCompatibleClient.isLocalOrPrivateAddress("http://10.evil.tld/v1"))
+        assertFalse(OpenAiCompatibleClient.isLocalOrPrivateAddress("http://172.16.malicious.net/v1"))
         // 172.15 and 172.32 are outside RFC 1918 range
         assertFalse(OpenAiCompatibleClient.isLocalOrPrivateAddress("http://172.15.1.1:11434/v1"))
         assertFalse(OpenAiCompatibleClient.isLocalOrPrivateAddress("http://172.32.1.1:11434/v1"))

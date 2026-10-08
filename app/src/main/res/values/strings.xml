@@ -177,31 +177,31 @@
     <string name="settings_adaptive_pacing_summary">根据操作类型与应用上下文，自动动态调整每步执行节奏与缓冲间隔</string>
     <string name="permission_root">ROOT 超级用户权限</string>
     <string name="permission_root_summary">最高系统级特权：高速免无障碍执行与全功能驱动</string>
-    <string name="permission_root_granted">已获取 Root 提权授权</string>
-    <string name="permission_root_not_granted">未检测到 Root 权限或授权被拒绝</string>
-    <string name="permission_root_request">申请 / 检测 Root</string>
+    <string name="permission_root_granted">Root permission granted</string>
+    <string name="permission_root_not_granted">Root permission not detected or denied</string>
+    <string name="permission_root_request">Request / Check Root</string>
 
     <!-- Task History & Comparison -->
-    <string name="history_title">任务历史记录</string>
-    <string name="history_empty">暂无过往任务记录</string>
-    <string name="history_restore">载入并回溯此任务</string>
-    <string name="history_compare">对比任务</string>
-    <string name="history_compare_title">任务执行对比分析</string>
-    <string name="history_select_to_compare">请选择两条任务进行对比</string>
-    <string name="history_step_count">%1$d 步操作</string>
-    <string name="history_duration">%1$.1f 秒</string>
-    <string name="history_detail_title">任务执行详情</string>
-    <string name="history_delete">删除记录</string>
+    <string name="history_title">Task History</string>
+    <string name="history_empty">No past task records</string>
+    <string name="history_restore">Restore this task</string>
+    <string name="history_compare">Compare Tasks</string>
+    <string name="history_compare_title">Task Execution Comparison</string>
+    <string name="history_select_to_compare">Select two tasks to compare</string>
+    <string name="history_step_count">%1$d steps</string>
+    <string name="history_duration">%1$.1f seconds</string>
+    <string name="history_detail_title">Task Execution Details</string>
+    <string name="history_delete">Delete Record</string>
 
     <!-- Custom Skills -->
-    <string name="skills_title">自定义技能 (Skills)</string>
-    <string name="skills_summary">编排多步复合动作，供 AI 智能识别与调用</string>
-    <string name="skills_create">新建技能</string>
-    <string name="skills_edit">编辑技能</string>
-    <string name="skills_name">技能标识 (例如 skill_my_macro)</string>
-    <string name="skills_display_name">显示名称</string>
-    <string name="skills_description">技能用途描述 (供 AI 理解)</string>
-    <string name="skills_add_step">添加动作步骤</string>
-    <string name="skills_test_run">一键测试执行</string>
-    <string name="skills_empty">暂无自定义技能，点击右上角新建</string>
+    <string name="skills_title">Custom Skills</string>
+    <string name="skills_summary">Compose multi-step actions for AI to invoke</string>
+    <string name="skills_create">New Skill</string>
+    <string name="skills_edit">Edit Skill</string>
+    <string name="skills_name">Skill identifier (e.g. skill_my_macro)</string>
+    <string name="skills_display_name">Display Name</string>
+    <string name="skills_description">Skill Description (for AI comprehension)</string>
+    <string name="skills_add_step">Add Action Step</string>
+    <string name="skills_test_run">Test Run</string>
+    <string name="skills_empty">No custom skills yet, click New to create one</string>
 </resources>
