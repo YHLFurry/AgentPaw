@@ -347,8 +347,21 @@ class AgentAccessibilityService : AccessibilityService() {
 
         val isRunning: Boolean get() = instance != null
 
-        /** 类级别读取用户停止标志（无服务实例时视为未停止） */
+        @Volatile
+        private var globalStopRequested: Boolean = false
+
+        /** 类级别读取用户停止标志（无服务实例时也响应全局停止） */
         val isStopRequested: Boolean
-            get() = instance?.isStopRequested ?: false
+            get() = (instance?.isStopRequested ?: false) || globalStopRequested
+
+        fun requestGlobalStop() {
+            globalStopRequested = true
+            instance?.requestUserStop()
+        }
+
+        fun clearGlobalStop() {
+            globalStopRequested = false
+            instance?.clearUserStop()
+        }
     }
 }

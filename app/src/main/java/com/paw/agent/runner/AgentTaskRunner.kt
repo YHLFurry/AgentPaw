@@ -207,7 +207,7 @@ class AgentTaskRunner(
         )
 
         cancelled = false
-        com.paw.agent.device.accessibility.AgentAccessibilityService.instance?.clearUserStop()
+        com.paw.agent.device.accessibility.AgentAccessibilityService.clearGlobalStop()
         stepCount = 0
         maxSteps = config.maxToolRounds
         AgentExecutionController.markStarted(maxSteps)
@@ -274,7 +274,7 @@ class AgentTaskRunner(
         )
 
         cancelled = false
-        com.paw.agent.device.accessibility.AgentAccessibilityService.instance?.clearUserStop()
+        com.paw.agent.device.accessibility.AgentAccessibilityService.clearGlobalStop()
         stepCount = bp.stoppedAtStep
         maxSteps = bp.maxSteps
         AgentExecutionController.markStarted(maxSteps)
@@ -319,7 +319,7 @@ class AgentTaskRunner(
             cancelled = true
             runJob?.cancel()
             runJob = null
-            com.paw.agent.device.accessibility.AgentAccessibilityService.instance?.requestUserStop()
+            com.paw.agent.device.accessibility.AgentAccessibilityService.requestGlobalStop()
 
             val originalGoal = resolveOriginalGoal()
             val currentConv = conversationRepository.conversation.value

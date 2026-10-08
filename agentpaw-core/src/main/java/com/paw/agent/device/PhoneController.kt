@@ -50,6 +50,13 @@ data class ScreenStateInfo(
     val totalNodes: Int = 0,
 )
 
+enum class ExecutionEngine(val displayName: String) {
+    ROOT("ROOT 特权模式"),
+    SHIZUKU("Shizuku 极速通道"),
+    ACCESSIBILITY("无障碍服务"),
+    NONE("未就绪"),
+}
+
 enum class PhoneControlMode {
     AUTO,
     ROOT,
@@ -68,6 +75,7 @@ interface PhoneController {
     val isAccessibilityEnabled: Boolean
     val isShizukuAvailable: Boolean
     val isRootAvailable: Boolean get() = false
+    val activeExecutionEngine: ExecutionEngine get() = ExecutionEngine.NONE
 
     /**
      * Tap at normalized [0,1000] coordinates. `cropRoi` (when non-null, in the same
