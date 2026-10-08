@@ -4,10 +4,12 @@ import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.withContext
 import rikka.shizuku.Shizuku
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
+import java.util.concurrent.TimeUnit
 
 class ShizukuController {
 
@@ -34,24 +36,40 @@ class ShizukuController {
             newProcessMethod?.invoke(null, cmd, null, null) as? Process
         }.getOrNull()
 
-    suspend fun executeCommand(cmd: String): String = withContext(Dispatchers.IO) {
+    suspend fun executeCommand(cmd: String, timeoutMs: Long = 10_000L): String = withContext(Dispatchers.IO) {
         if (!isAvailable) return@withContext "Error: Shizuku is not running or not granted"
         runCatching {
-            val process = createProcess(arrayOf("sh", "-c", cmd))
+            val process = createProcess(arrayOf("sh", "-c", "$cmd 2>&1"))
                 ?: return@withContext "Error: Shizuku process invocation failed"
+            val completed = runInterruptible {
+                process.waitFor(timeoutMs, TimeUnit.MILLISECONDS)
+            }
+            if (!completed) {
+                process.destroyForcibly()
+                return@withContext "Error: Shizuku command timed out after ${timeoutMs}ms"
+            }
             val output = process.inputStream.bufferedReader().use { it.readText() }
-            process.waitFor()
-            output.trim()
+            if (process.exitValue() != 0 && output.isBlank()) {
+                "Error: exit code ${process.exitValue()}"
+            } else {
+                output.trim()
+            }
         }.getOrElse { "Error: ${it.message}" }
     }
 
-    suspend fun captureScreen(): Bitmap? = withContext(Dispatchers.IO) {
+    suspend fun captureScreen(timeoutMs: Long = 8_000L): Bitmap? = withContext(Dispatchers.IO) {
         if (!isAvailable) return@withContext null
         runCatching {
             val process = createProcess(arrayOf("screencap", "-p")) ?: return@withContext null
-            val bytes = readAllBytes(process.inputStream)
-            process.waitFor()
-            if (bytes.isNotEmpty()) {
+            val bytes = runInterruptible {
+                val finished = process.waitFor(timeoutMs, TimeUnit.MILLISECONDS)
+                if (!finished) {
+                    process.destroyForcibly()
+                    return@runInterruptible null
+                }
+                readAllBytes(process.inputStream)
+            }
+            if (bytes != null && bytes.isNotEmpty()) {
                 BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
             } else {
                 null
@@ -79,15 +97,15 @@ class ShizukuController {
 
     suspend fun inputText(text: String): Boolean = withContext(Dispatchers.IO) {
         if (!isAvailable) return@withContext false
-        if (text.any { it.code > 127 }) {
-            return@withContext false
-        }
         val lines = text.split("\n")
         for (i in lines.indices) {
             val line = lines[i]
             if (line.isNotEmpty()) {
-                val escaped = line.replace("'", "'\\''").replace(" ", "%s")
-                val result = executeCommand("input text '$escaped'")
+                if (!com.paw.agent.device.ShellEscape.isPrintableAscii(line)) {
+                    return@withContext false
+                }
+                val cmd = com.paw.agent.device.ShellEscape.buildInputTextCommand(line)
+                val result = executeCommand(cmd)
                 if (result.startsWith("Error:")) return@withContext false
             }
             if (i < lines.lastIndex) {

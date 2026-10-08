@@ -5,6 +5,7 @@ import android.graphics.BitmapFactory
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import java.io.ByteArrayOutputStream
@@ -29,12 +30,7 @@ class RootController {
      * 具备内存缓存与快速探测机制。
      */
     val isAvailable: Boolean
-        get() {
-            cachedRootAvailable?.let { return it }
-            val available = checkSuDirectly()
-            cachedRootAvailable = available
-            return available
-        }
+        get() = cachedRootAvailable ?: false
 
     /**
      * 主动刷新/测试 Root 权限并重新探测
@@ -45,7 +41,17 @@ class RootController {
         ok
     }
 
-    private fun checkSuDirectly(timeoutMs: Long = 3_000L): Boolean {
+    /**
+     * 异步探测 Root 权限可用性
+     */
+    suspend fun checkAvailability(): Boolean = withContext(Dispatchers.IO) {
+        cachedRootAvailable?.let { return@withContext it }
+        val ok = checkSuDirectly()
+        cachedRootAvailable = ok
+        ok
+    }
+
+    private fun checkSuDirectly(timeoutMs: Long = 800L): Boolean {
         // 先检查常见 su 路径是否存在，避免在完全未 root 的设备上启动阻塞进程
         val suPaths = arrayOf(
             "/system/bin/su",
@@ -63,10 +69,10 @@ class RootController {
         if (!suExists) {
             // 也可能通过 magisk su 放在环境变量 PATH 中
             val whichResult = runCatching {
-                val whichProc = Runtime.getRuntime().exec(arrayOf("sh", "-c", "which su"))
+                val whichProc = ProcessBuilder("sh", "-c", "which su").redirectErrorStream(true).start()
                 val finished = whichProc.waitFor(timeoutMs, TimeUnit.MILLISECONDS)
                 if (!finished) {
-                    whichProc.destroy()
+                    whichProc.destroyForcibly()
                     return false
                 }
                 whichProc.inputStream.bufferedReader().use { it.readText().trim() }
@@ -77,10 +83,10 @@ class RootController {
         }
 
         return runCatching {
-            val process = Runtime.getRuntime().exec(arrayOf("su", "-c", "id"))
+            val process = ProcessBuilder("su", "-c", "id").redirectErrorStream(true).start()
             val finished = process.waitFor(timeoutMs, TimeUnit.MILLISECONDS)
             if (!finished) {
-                process.destroy()
+                process.destroyForcibly()
                 return false
             }
             val output = process.inputStream.bufferedReader().use { it.readText() }
@@ -89,31 +95,32 @@ class RootController {
     }
 
     /**
-     * 在 root 提权环境中执行任意 shell 命令，具备超时与协程取消响应
+     * 在 root 提权环境中执行 shell 命令，具备合并流读取、超时与取消强制销毁机制
      */
-    suspend fun executeCommand(cmd: String, timeoutMs: Long = 10_000L): String = withContext(Dispatchers.IO) {
+    internal suspend fun executeCommand(cmd: String, timeoutMs: Long = 10_000L): String = withContext(Dispatchers.IO) {
         var process: Process? = null
         try {
-            withTimeout(timeoutMs) {
-                val p = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd))
-                process = p
-                val output = p.inputStream.bufferedReader().use { it.readText() }
-                val error = p.errorStream.bufferedReader().use { it.readText() }
-                p.waitFor()
-                if (error.isNotBlank() && output.isBlank()) {
-                    "Error: $error".trim()
-                } else {
-                    output.trim()
-                }
+            val pb = ProcessBuilder("su", "-c", "$cmd 2>&1")
+            val p = pb.start()
+            process = p
+            val completed = runInterruptible {
+                p.waitFor(timeoutMs, TimeUnit.MILLISECONDS)
             }
-        } catch (e: TimeoutCancellationException) {
-            process?.destroy()
-            "Error: Command timed out after ${timeoutMs}ms"
+            if (!completed) {
+                p.destroyForcibly()
+                return@withContext "Error: Command timed out after ${timeoutMs}ms"
+            }
+            val output = p.inputStream.bufferedReader().use { it.readText() }
+            if (p.exitValue() != 0 && output.isBlank()) {
+                "Error: exit code ${p.exitValue()}"
+            } else {
+                output.trim()
+            }
         } catch (e: CancellationException) {
-            process?.destroy()
+            process?.destroyForcibly()
             throw e
         } catch (e: Throwable) {
-            process?.destroy()
+            process?.destroyForcibly()
             "Error: ${e.message}"
         }
     }
@@ -124,25 +131,26 @@ class RootController {
     suspend fun captureScreen(timeoutMs: Long = 8_000L): Bitmap? = withContext(Dispatchers.IO) {
         var process: Process? = null
         try {
-            withTimeout(timeoutMs) {
-                val p = Runtime.getRuntime().exec(arrayOf("su", "-c", "screencap -p"))
-                process = p
-                val bytes = readAllBytes(p.inputStream)
-                p.waitFor()
-                if (bytes.isNotEmpty()) {
-                    BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-                } else {
-                    null
+            val p = Runtime.getRuntime().exec(arrayOf("su", "-c", "screencap -p"))
+            process = p
+            val bytes = runInterruptible {
+                val finished = p.waitFor(timeoutMs, TimeUnit.MILLISECONDS)
+                if (!finished) {
+                    p.destroyForcibly()
+                    return@runInterruptible null
                 }
+                readAllBytes(p.inputStream)
             }
-        } catch (e: TimeoutCancellationException) {
-            process?.destroy()
-            null
+            if (bytes != null && bytes.isNotEmpty()) {
+                BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+            } else {
+                null
+            }
         } catch (e: CancellationException) {
-            process?.destroy()
+            process?.destroyForcibly()
             throw e
         } catch (e: Throwable) {
-            process?.destroy()
+            process?.destroyForcibly()
             null
         }
     }
@@ -166,20 +174,16 @@ class RootController {
      * 安全输入文本：处理单引号与特殊字符转义，遇非 ASCII（中文、表情）返回 false 触发保底方案
      */
     suspend fun inputText(text: String): Boolean = withContext(Dispatchers.IO) {
-        // 1. Android input text 仅支持 ASCII 字符，非 ASCII (如中文、表情) 会被静默丢弃
-        // 若包含非 ASCII 字符，返回 false 交由无障碍/剪贴板软键盘保底机制输入
-        if (text.any { it.code > 127 }) {
-            return@withContext false
-        }
-
-        // 2. 按换行拆分处理，避免多行文本导致命令中断
+        if (!isAvailable) return@withContext false
         val lines = text.split("\n")
         for (i in lines.indices) {
             val line = lines[i]
             if (line.isNotEmpty()) {
-                // 安全转义：将单引号 ' 转义为 '\''，避免 shell 注入与语法崩溃；空格转为 %s
-                val escaped = line.replace("'", "'\\''").replace(" ", "%s")
-                val result = executeCommand("input text '$escaped'")
+                if (!com.paw.agent.device.ShellEscape.isPrintableAscii(line)) {
+                    return@withContext false
+                }
+                val cmd = com.paw.agent.device.ShellEscape.buildInputTextCommand(line)
+                val result = executeCommand(cmd)
                 if (result.startsWith("Error:")) return@withContext false
             }
             if (i < lines.lastIndex) {
@@ -211,16 +215,25 @@ class RootController {
      */
     suspend fun enableAccessibilityViaRoot(packageName: String, serviceClassName: String): Boolean = withContext(Dispatchers.IO) {
         if (!isAvailable) return@withContext false
+        val validIdentifier = Regex("^[a-zA-Z0-9._]+$")
+        if (!packageName.matches(validIdentifier) || !serviceClassName.matches(validIdentifier)) {
+            return@withContext false
+        }
         val comp = "$packageName/$serviceClassName"
         val currentSetting = executeCommand("settings get secure enabled_accessibility_services").trim()
-        val newSetting = if (currentSetting.isBlank() || currentSetting == "null") {
+        val cleanSetting = currentSetting.takeIf { !it.startsWith("Error:") && it != "null" }.orEmpty()
+        val newSetting = if (cleanSetting.isBlank()) {
             comp
-        } else if (!currentSetting.contains(comp)) {
-            "$currentSetting:$comp"
+        } else if (!cleanSetting.contains(comp)) {
+            "$cleanSetting:$comp"
         } else {
-            currentSetting
+            cleanSetting
         }
-        val res1 = executeCommand("settings put secure enabled_accessibility_services $newSetting")
+        // 校验组合字符串合法字符，杜绝命令注入
+        if (!newSetting.all { it.isLetterOrDigit() || it in setOf('.', '_', '/', ':', '-') }) {
+            return@withContext false
+        }
+        val res1 = executeCommand("settings put secure enabled_accessibility_services '$newSetting'")
         val res2 = executeCommand("settings put secure accessibility_enabled 1")
         !res1.startsWith("Error:") && !res2.startsWith("Error:")
     }
@@ -241,7 +254,7 @@ class RootController {
 
     companion object {
         fun escapeForInputText(text: String): String =
-            text.replace("'", "'\\''").replace(" ", "%s")
+            com.paw.agent.device.ShellEscape.escapeForInputText(text)
 
         fun hasNonAscii(text: String): Boolean =
             text.any { it.code > 127 }

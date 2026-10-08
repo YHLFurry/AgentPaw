@@ -53,7 +53,7 @@ class PersistentConversationRepository(
     private val storageDir = (storageDirectory ?: File(context?.filesDir ?: File(System.getProperty("java.io.tmpdir"), "agentpaw-conversations"), "conversations")).apply { mkdirs() }
     private val imagesDir = File(storageDir, "images").apply { mkdirs() }
     private val mutex = Mutex()
-    private val persistChannel = Channel<Conversation>(Channel.UNLIMITED)
+    private val persistChannel = Channel<Conversation>(Channel.CONFLATED)
 
     private val _conversation = MutableStateFlow(
         Conversation(
@@ -131,11 +131,17 @@ class PersistentConversationRepository(
                         saveToDiskLocked(cleanConv)
                     }
                     cleanConv
-                }.getOrNull()
+                }.getOrElse { e ->
+                    runCatching {
+                        val corruptFile = File(storageDir, "${file.nameWithoutExtension}.corrupt")
+                        file.copyTo(corruptFile, overwrite = true)
+                    }
+                    null
+                }
             }.sortedByDescending { it.updatedAt }
 
             if (loaded.isNotEmpty()) {
-                _historyList.value = loaded
+                _historyList.value = loaded.take(MAX_HISTORY_ITEMS)
                 // 默认将最新的一条作为当前会话；但若用户在加载期间已发送了新消息，则予以保留绝不覆盖
                 val latest = loaded.first()
                 _conversation.update { current ->
@@ -358,6 +364,7 @@ class PersistentConversationRepository(
 
     companion object {
         const val TITLE_MAX_CHARS = 40
+        const val MAX_HISTORY_ITEMS = 100
 
         /**
          * 提取任务执行元数据与统计指标，用于回溯和对比

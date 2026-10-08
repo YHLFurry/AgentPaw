@@ -60,10 +60,14 @@ class DataStoreSettingsRepository(
 
     override suspend fun updateLlm(transform: (LlmConfig) -> LlmConfig) {
         context.dataStore.edit { prefs ->
-            val updated = transform(prefs.toLlmConfig())
+            val currentConfig = prefs.toLlmConfig()
+            val updated = transform(currentConfig)
             prefs[Keys.PROVIDER] = updated.provider.name
             prefs[Keys.BASE_URL] = updated.baseUrl
-            prefs[Keys.API_KEY] = com.paw.agent.data.security.KeystoreSecretStorage.encrypt(updated.apiKey)
+            // 避免未变更时重复加密产生套娃
+            if (updated.apiKey != currentConfig.apiKey || !prefs.contains(Keys.API_KEY)) {
+                prefs[Keys.API_KEY] = com.paw.agent.data.security.KeystoreSecretStorage.encrypt(updated.apiKey)
+            }
             prefs[Keys.MODEL] = updated.model
             prefs[Keys.TEMPERATURE] = updated.temperature
             prefs[Keys.TOP_P] = updated.topP
@@ -125,7 +129,7 @@ class DataStoreSettingsRepository(
         return LlmConfig(
             provider = provider,
             baseUrl = this[Keys.BASE_URL] ?: provider.defaultBaseUrl,
-            apiKey = com.paw.agent.data.security.KeystoreSecretStorage.decrypt(this[Keys.API_KEY].orEmpty()),
+            apiKey = com.paw.agent.data.security.KeystoreSecretStorage.decrypt(this[Keys.API_KEY].orEmpty()).orEmpty(),
             model = this[Keys.MODEL] ?: provider.defaultModel,
             temperature = this[Keys.TEMPERATURE] ?: 0.7f,
             topP = this[Keys.TOP_P] ?: 1.0f,

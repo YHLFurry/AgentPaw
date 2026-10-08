@@ -539,3 +539,23 @@ fun AppSnackbarHost(state: AppSnackbarHostState, modifier: Modifier = Modifier) 
 
 /** Shared shape for the round send/stop button in the chat composer. */
 val AppCircleShape: Shape = CircleShape
+
+@Composable
+fun AppAlertDialog(
+    onDismissRequest: () -> Unit,
+    title: @Composable () -> Unit,
+    text: @Composable () -> Unit,
+    confirmButton: @Composable () -> Unit,
+    dismissButton: @Composable () -> Unit,
+) {
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismissRequest,
+        title = title,
+        text = text,
+        confirmButton = confirmButton,
+        dismissButton = dismissButton,
+        containerColor = AppTheme.colors.surface,
+        titleContentColor = AppTheme.colors.onSurface,
+        textContentColor = AppTheme.colors.onSurfaceVariant,
+    )
+}

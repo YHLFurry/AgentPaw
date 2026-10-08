@@ -40,6 +40,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import com.paw.agent.AppContainer
 import com.paw.agent.R
 import com.paw.agent.core.agent.AgentContext
@@ -172,12 +174,16 @@ fun CustomSkillsScreen(
                         onTestRun = {
                             scope.launch {
                                 Toast.makeText(context, "正在测试执行: ${skill.displayName}...", Toast.LENGTH_SHORT).show()
-                                val executable = CustomExecutableSkill(skill)
-                                val result = executable.execute(
-                                    arguments = "{}",
-                                    phoneController = container.phoneController,
-                                    context = AgentContext("test_context", 0),
-                                )
+                                val result = withContext(Dispatchers.IO) {
+                                    runCatching {
+                                        val executable = CustomExecutableSkill(skill)
+                                        executable.execute(
+                                            arguments = "{}",
+                                            phoneController = container.phoneController,
+                                            context = AgentContext("test_context", 0),
+                                        )
+                                    }.getOrElse { "Error: ${it.message ?: "未知异常"}" }
+                                }
                                 Toast.makeText(context, "执行完成: $result", Toast.LENGTH_LONG).show()
                             }
                         },
@@ -306,6 +312,7 @@ private fun SkillEditDialog(
     var displayName by remember { mutableStateOf(initial.displayName) }
     var description by remember { mutableStateOf(initial.description) }
     val steps = remember { mutableStateListOf(*initial.actions.toTypedArray()) }
+    val context = LocalContext.current
 
     androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
         AppSurface(
@@ -406,10 +413,15 @@ private fun SkillEditDialog(
                     }
                     Spacer(Modifier.width(12.dp))
                     AppButton(onClick = {
+                        val trimmedName = name.trim()
+                        if (trimmedName.isBlank() || !trimmedName.matches(Regex("^[a-zA-Z0-9_]+$"))) {
+                            Toast.makeText(context, "技能标识必须由字母、数字或下划线组成且不能为空", Toast.LENGTH_SHORT).show()
+                            return@AppButton
+                        }
                         onSave(
                             initial.copy(
-                                name = name.trim(),
-                                displayName = displayName.trim(),
+                                name = trimmedName,
+                                displayName = displayName.trim().ifBlank { trimmedName },
                                 description = description.trim(),
                                 actions = steps.toList(),
                             ),
@@ -453,26 +465,25 @@ private fun StepItemEditor(
 
             Spacer(Modifier.height(6.dp))
 
-            // 动作类型选择
-            Row(
+            // 动作类型选择：横向支持所有 8 种技能动作
+            androidx.compose.foundation.lazy.LazyRow(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                SkillActionType.entries.take(4).forEach { actionType ->
+                items(SkillActionType.entries.size) { idx ->
+                    val actionType = SkillActionType.entries[idx]
                     val isSelected = step.type == actionType
                     AppSurface(
                         shape = RoundedCornerShape(8.dp),
                         color = if (isSelected) AppTheme.colors.primaryContainer else AppTheme.colors.surface,
                         modifier = Modifier
-                            .weight(1f)
                             .clickable { onChange(step.copy(type = actionType)) }
-                            .padding(vertical = 4.dp),
+                            .padding(horizontal = 8.dp, vertical = 6.dp),
                     ) {
                         AppText(
-                            text = actionType.name.take(6),
+                            text = actionType.name,
                             style = AppTheme.typography.labelSmall,
                             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                            modifier = Modifier.fillMaxWidth(),
                         )
                     }
                 }
@@ -480,13 +491,40 @@ private fun StepItemEditor(
 
             Spacer(Modifier.height(6.dp))
 
-            AppTextField(
-                value = step.target,
-                onValueChange = { onChange(step.copy(target = it)) },
-                label = "参数 / 目标 (支持 {{keyword}} 变量)",
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-            )
+            if (step.type == SkillActionType.TAP_COORDINATE) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    AppTextField(
+                        value = step.x.toString(),
+                        onValueChange = { onChange(step.copy(x = it.toIntOrNull() ?: step.x)) },
+                        label = "X (0..1000)",
+                        modifier = Modifier.weight(1f),
+                    )
+                    AppTextField(
+                        value = step.y.toString(),
+                        onValueChange = { onChange(step.copy(y = it.toIntOrNull() ?: step.y)) },
+                        label = "Y (0..1000)",
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            } else if (step.type == SkillActionType.WAIT) {
+                AppTextField(
+                    value = step.waitMillis.toString(),
+                    onValueChange = { onChange(step.copy(waitMillis = it.toLongOrNull() ?: step.waitMillis)) },
+                    label = "等待时长 (毫秒)",
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            } else {
+                AppTextField(
+                    value = step.target,
+                    onValueChange = { onChange(step.copy(target = it)) },
+                    label = "参数 / 目标 (支持 {{keyword}} 变量)",
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
         }
     }
 }

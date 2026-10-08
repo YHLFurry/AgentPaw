@@ -237,6 +237,7 @@ class AgentTaskRunner(
     }
 
     fun resumeBreakpoint(customInstruction: String? = null, config: LlmConfig? = null) {
+        if (_isGenerating.value) return
         val bp = _activeBreakpoint.value ?: return
         val effectiveConfig = config ?: lastLlmConfig
         sessionOriginalGoal = bp.originalGoal
@@ -455,6 +456,7 @@ class AgentTaskRunner(
             is AgentEvent.Completed -> {
                 clearTaskRunning()
                 persistBreakpoint(null)
+                _isGenerating.value = false
                 val currentId = activeAssistantId
                 if (currentId != null) {
                     conversationRepository.updateMessage(currentId) {
@@ -477,6 +479,7 @@ class AgentTaskRunner(
 
             is AgentEvent.Failed -> {
                 clearTaskRunning()
+                _isGenerating.value = false
                 val currentId = activeAssistantId
                 if (currentId != null) {
                     conversationRepository.updateMessage(currentId) {
@@ -493,6 +496,7 @@ class AgentTaskRunner(
 
             is AgentEvent.Cancelled -> {
                 clearTaskRunning()
+                _isGenerating.value = false
                 val currentId = activeAssistantId
                 if (currentId != null) {
                     conversationRepository.updateMessage(currentId) {
@@ -586,8 +590,6 @@ class AgentTaskRunner(
                 )
             }
         }
-
-        _isGenerating.value = true
     }
 
     private fun triggerSafetyPauseBreakpoint(

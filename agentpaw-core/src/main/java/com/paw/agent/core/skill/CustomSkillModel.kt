@@ -84,6 +84,15 @@ class CustomExecutableSkill(
             // 对 step.target 进行模板占位符替换，如 {{keyword}} -> 具体传参
             val interpolatedTarget = interpolate(step.target, argsMap)
 
+            // 安全检查：在可触控操作前核验当前屏幕是否处于敏感支付/密码页面
+            if (step.type != SkillActionType.WAIT) {
+                val state = phoneController.getScreenState()
+                val allText = state.elements.joinToString(" ") { it.text + " " + it.contentDescription }
+                if (com.paw.agent.core.tool.android.SafetyGuard.isSensitive(allText)) {
+                    return """{"status":"paused","is_safety_pause":true,"reason":"检测到敏感密码/支付页面，自动化技能已安全暂停","message":"[SAFETY PAUSE] Detected sensitive password/payment screen. Automated custom skill is paused for security."}"""
+                }
+            }
+
             when (step.type) {
                 SkillActionType.LAUNCH_APP -> {
                     phoneController.launchApp(interpolatedTarget)
@@ -140,14 +149,19 @@ class CustomExecutableSkill(
                 }
 
                 SkillActionType.WAIT -> {
-                    val waitTime = interpolatedTarget.toLongOrNull() ?: step.waitMillis
+                    val rawWait = interpolatedTarget.toLongOrNull() ?: step.waitMillis
+                    val waitTime = rawWait.coerceIn(0L, 30_000L)
                     if (waitTime > 0) {
                         delay(waitTime)
                     }
                 }
 
                 SkillActionType.SHELL_COMMAND -> {
-                    // 若是 HybridPhoneController 且支持 Root，可直接执行
+                    val risk = com.paw.agent.core.agent.RiskActionGuard.evaluate("shell_command", interpolatedTarget, "")
+                    val isConfirmed = context.bypassSafetyGuard || context.isGranted("risk_confirmed:$name") || context.isGranted("risk_confirmed")
+                    if (risk.requiresConfirmation && !isConfirmed) {
+                        return com.paw.agent.core.tool.android.SafetyGuard.formatConfirmationPayload(risk, toolName = name, arguments = arguments)
+                    }
                     if (phoneController is com.paw.agent.device.HybridPhoneController && phoneController.isRootAvailable) {
                         phoneController.rootController.executeCommand(interpolatedTarget)
                     }
@@ -156,11 +170,16 @@ class CustomExecutableSkill(
 
             executedCount++
             if (step.type != SkillActionType.WAIT && step.waitMillis > 0) {
-                delay(step.waitMillis)
+                delay(step.waitMillis.coerceIn(0L, 10_000L))
             }
         }
 
-        return """{"status":"success","skill":"$name","executed_steps":$executedCount}"""
+        val resultObj = kotlinx.serialization.json.buildJsonObject {
+            put("status", kotlinx.serialization.json.JsonPrimitive("success"))
+            put("skill", kotlinx.serialization.json.JsonPrimitive(name))
+            put("executed_steps", kotlinx.serialization.json.JsonPrimitive(executedCount))
+        }
+        return json.encodeToString(kotlinx.serialization.json.JsonObject.serializer(), resultObj)
     }
 
     private fun interpolate(template: String, args: Map<String, String>): String {

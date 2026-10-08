@@ -199,7 +199,7 @@ fun HistoryScreen(
 
                 if (pendingDeleteConvId != null) {
                     val targetId = pendingDeleteConvId!!
-                    androidx.compose.material3.AlertDialog(
+                    com.paw.agent.ui.components.adaptive.AppAlertDialog(
                         onDismissRequest = { pendingDeleteConvId = null },
                         title = { AppText("确认删除历史记录？", style = AppTheme.typography.titleMedium) },
                         text = {

@@ -30,24 +30,13 @@ data class RiskDecision(
  */
 object RiskActionGuard {
 
-    private val PAYMENT_KEYWORDS = listOf(
-        "支付", "付款", "转账", "买单", "立即支付", "确认付款", "确认支付", "去支付", "提交订单",
-        "立即购买", "密码支付", "指纹支付", "pay", "payment", "checkout", "transfer",
-    )
+    private val PAYMENT_REGEX = Regex("""(?i)\b(pay|payment|checkout|transfer)\b|支付|付款|转账|买单|立即支付|确认付款|确认支付|去支付|提交订单|立即购买|密码支付|指纹支付""")
 
-    private val DESTRUCTION_KEYWORDS = listOf(
-        "删除", "清空", "销毁", "永久删除", "注销账号", "解除绑定", "格式化", "恢复出厂", "卸载",
-        "delete", "remove", "destroy", "wipe", "uninstall",
-    )
+    private val DESTRUCTION_REGEX = Regex("""(?i)\b(delete|remove|destroy|wipe|uninstall|format)\b|删除|清空|销毁|永久删除|注销账号|解除绑定|格式化|恢复出厂|卸载""")
 
-    private val AUTHORIZATION_KEYWORDS = listOf(
-        "允许", "始终允许", "授予权限", "同意并授权", "激活设备管理器", "获取root", "提权",
-        "grant", "authorize", "permission",
-    )
+    private val AUTHORIZATION_REGEX = Regex("""(?i)\b(grant|authorize|permission|root|superuser)\b|允许|始终允许|授予权限|同意并授权|激活设备管理器|获取root|提权""")
 
-    private val SUBMIT_KEYWORDS = listOf(
-        "发送", "确定提交", "发布", "立即发布", "发朋友圈", "确认发送", "send", "submit", "post",
-    )
+    private val SUBMIT_REGEX = Regex("""(?i)\b(send|submit|post)\b|发送|确定提交|发布|立即发布|发朋友圈|确认发送""")
 
     private val PAYMENT_SCHEMES = listOf(
         "alipays://", "alipayqr://", "weixin://dl/businessWeb", "upay://", "unionpay://",
@@ -63,6 +52,19 @@ object RiskActionGuard {
     ): RiskDecision {
         val lowerArgs = arguments.lowercase()
         val lowerScreen = screenContextText.lowercase()
+
+        // 0. Shell 命令执行风险分析 (CRITICAL)
+        if (toolName.equals("shell_command", ignoreCase = true)) {
+            return RiskDecision(
+                isRisk = true,
+                level = RiskLevel.CRITICAL,
+                category = "ROOT_SHELL",
+                action = "执行系统级 Shell 命令",
+                target = arguments.take(80),
+                impact = "将以特权执行底层系统命令，可能修改系统配置或文件数据",
+                requiresConfirmation = true,
+            )
+        }
 
         // 1. DeepLink 风险分析
         if (toolName == "open_deeplink") {
@@ -82,7 +84,7 @@ object RiskActionGuard {
         // 2. 文本输入风险分析
         if (toolName == "input_text") {
             val isEnter = lowerArgs.contains("\"press_enter\":true") || lowerArgs.contains("\"press_enter\": true")
-            val containsPayment = PAYMENT_KEYWORDS.any { lowerScreen.contains(it) }
+            val containsPayment = PAYMENT_REGEX.containsMatchIn(lowerScreen)
             if (containsPayment) {
                 return RiskDecision(
                     isRisk = true,
@@ -95,7 +97,7 @@ object RiskActionGuard {
                 )
             }
 
-            if (isEnter && SUBMIT_KEYWORDS.any { lowerScreen.contains(it) }) {
+            if (isEnter && SUBMIT_REGEX.containsMatchIn(lowerScreen)) {
                 return RiskDecision(
                     isRisk = true,
                     level = RiskLevel.MODERATE,
@@ -108,24 +110,25 @@ object RiskActionGuard {
             }
         }
 
-        // 3. 点击或手势动作风险分析
-        if (toolName == "click_element" || toolName == "tap" || toolName == "double_tap") {
-            // 匹配元素文本或当前屏幕焦点
-            if (PAYMENT_KEYWORDS.any { lowerArgs.contains(it) || lowerScreen.contains(it) }) {
-                val matched = PAYMENT_KEYWORDS.firstOrNull { lowerArgs.contains(it) || lowerScreen.contains(it) } ?: "支付"
+        // 3. 点击或手势动作风险分析 (涵盖 click_element, tap, double_tap, long_press, swipe)
+        if (toolName in setOf("click_element", "tap", "double_tap", "long_press", "swipe")) {
+            // 支付风险（入参或屏幕文本命中）
+            if (PAYMENT_REGEX.containsMatchIn(lowerArgs) || PAYMENT_REGEX.containsMatchIn(lowerScreen)) {
+                val matched = PAYMENT_REGEX.find(lowerArgs)?.value ?: PAYMENT_REGEX.find(lowerScreen)?.value ?: "支付"
                 return RiskDecision(
                     isRisk = true,
                     level = RiskLevel.CRITICAL,
                     category = "PAYMENT_CLICK",
                     action = "点击确认支付/扣款相关按钮",
-                    target = "按钮/控件: $matched",
+                    target = "控件/屏幕: $matched",
                     impact = "将产生实际资金支出或扣款",
                     requiresConfirmation = true,
                 )
             }
 
-            if (DESTRUCTION_KEYWORDS.any { lowerArgs.contains(it) }) {
-                val matched = DESTRUCTION_KEYWORDS.firstOrNull { lowerArgs.contains(it) } ?: "删除"
+            // 删除/破坏性风险
+            if (DESTRUCTION_REGEX.containsMatchIn(lowerArgs)) {
+                val matched = DESTRUCTION_REGEX.find(lowerArgs)?.value ?: "删除"
                 return RiskDecision(
                     isRisk = true,
                     level = RiskLevel.HIGH,
@@ -135,10 +138,22 @@ object RiskActionGuard {
                     impact = "将永久删除数据或破坏既有资产",
                     requiresConfirmation = true,
                 )
+            } else if (DESTRUCTION_REGEX.containsMatchIn(lowerScreen)) {
+                val matched = DESTRUCTION_REGEX.find(lowerScreen)?.value ?: "删除"
+                return RiskDecision(
+                    isRisk = true,
+                    level = RiskLevel.MODERATE,
+                    category = "DELETE",
+                    action = "在可能包含删除操作的界面进行交互",
+                    target = "屏幕上下文: $matched",
+                    impact = "界面包含删除或销毁选项，需谨慎操作",
+                    requiresConfirmation = true,
+                )
             }
 
-            if (AUTHORIZATION_KEYWORDS.any { lowerArgs.contains(it) }) {
-                val matched = AUTHORIZATION_KEYWORDS.firstOrNull { lowerArgs.contains(it) } ?: "授权"
+            // 权限授权风险
+            if (AUTHORIZATION_REGEX.containsMatchIn(lowerArgs)) {
+                val matched = AUTHORIZATION_REGEX.find(lowerArgs)?.value ?: "授权"
                 return RiskDecision(
                     isRisk = true,
                     level = RiskLevel.HIGH,
@@ -148,10 +163,22 @@ object RiskActionGuard {
                     impact = "将授予应用高危系统特权",
                     requiresConfirmation = true,
                 )
+            } else if (AUTHORIZATION_REGEX.containsMatchIn(lowerScreen)) {
+                val matched = AUTHORIZATION_REGEX.find(lowerScreen)?.value ?: "授权"
+                return RiskDecision(
+                    isRisk = true,
+                    level = RiskLevel.MODERATE,
+                    category = "AUTHORIZATION",
+                    action = "在可能包含系统授权的界面进行交互",
+                    target = "屏幕上下文: $matched",
+                    impact = "界面包含系统敏感授权或权限请求",
+                    requiresConfirmation = true,
+                )
             }
 
-            if (SUBMIT_KEYWORDS.any { lowerArgs.contains(it) }) {
-                val matched = SUBMIT_KEYWORDS.firstOrNull { lowerArgs.contains(it) } ?: "发送"
+            // 提交/发送风险
+            if (SUBMIT_REGEX.containsMatchIn(lowerArgs)) {
+                val matched = SUBMIT_REGEX.find(lowerArgs)?.value ?: "发送"
                 return RiskDecision(
                     isRisk = true,
                     level = RiskLevel.MODERATE,
@@ -161,12 +188,23 @@ object RiskActionGuard {
                     impact = "将发送公开或私密消息/表单",
                     requiresConfirmation = true,
                 )
+            } else if (SUBMIT_REGEX.containsMatchIn(lowerScreen) && (toolName == "click_element" || toolName == "tap")) {
+                val matched = SUBMIT_REGEX.find(lowerScreen)?.value ?: "发送"
+                return RiskDecision(
+                    isRisk = true,
+                    level = RiskLevel.MODERATE,
+                    category = "SEND_OR_SUBMIT",
+                    action = "在可能包含提交/发送的界面点击",
+                    target = "屏幕上下文: $matched",
+                    impact = "可能触发消息发布或表单提交",
+                    requiresConfirmation = true,
+                )
             }
         }
 
         // 4. 回车键执行分析
         if (toolName == "key_action" && lowerArgs.contains("enter")) {
-            if (PAYMENT_KEYWORDS.any { lowerScreen.contains(it) }) {
+            if (PAYMENT_REGEX.containsMatchIn(lowerScreen)) {
                 return RiskDecision(
                     isRisk = true,
                     level = RiskLevel.CRITICAL,

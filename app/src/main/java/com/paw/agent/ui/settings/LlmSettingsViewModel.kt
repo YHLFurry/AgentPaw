@@ -72,6 +72,8 @@ class LlmSettingsViewModel(
     private val _uiState = MutableStateFlow(LlmSettingsUiState())
     val uiState: StateFlow<LlmSettingsUiState> = _uiState.asStateFlow()
 
+    private var seededFromRepository = false
+
     init {
         viewModelScope.launch {
             settingsRepository.settings.collect { settings ->
@@ -82,8 +84,9 @@ class LlmSettingsViewModel(
                     rootModeEnabled = settings.rootModeEnabled,
                     adaptivePacingEnabled = settings.adaptivePacingEnabled,
                 )
-                // Only seed the LLM form once; later edits must not be clobbered.
-                if (!_uiState.value.savedAt.let { it != null }) {
+                // Only seed the LLM form once; later edits must not be clobbered by unrelated setting changes.
+                if (!seededFromRepository) {
+                    seededFromRepository = true
                     _uiState.value = _uiState.value.copy(
                         provider = llm.provider,
                         baseUrl = llm.baseUrl,
@@ -92,7 +95,7 @@ class LlmSettingsViewModel(
                         temperature = llm.temperature,
                         topP = llm.topP,
                         maxTokens = llm.maxTokens,
-                        maxToolRounds = llm.maxToolRounds,
+                        maxToolRounds = llm.maxToolRounds.coerceIn(1, 50),
                         visionResolutionMode = llm.visionResolutionMode,
                         stream = llm.stream,
                         systemPrompt = llm.systemPrompt,
@@ -149,11 +152,11 @@ class LlmSettingsViewModel(
     }
 
     fun onTemperatureChange(value: Float) {
-        _uiState.value = _uiState.value.copy(temperature = value)
+        _uiState.value = _uiState.value.copy(temperature = value.coerceIn(0.0f, 2.0f))
     }
 
     fun onTopPChange(value: Float) {
-        _uiState.value = _uiState.value.copy(topP = value)
+        _uiState.value = _uiState.value.copy(topP = value.coerceIn(0.0f, 1.0f))
     }
 
     fun onMaxTokensChange(value: Int) {
@@ -161,7 +164,7 @@ class LlmSettingsViewModel(
     }
 
     fun onMaxToolRoundsChange(value: Int) {
-        _uiState.value = _uiState.value.copy(maxToolRounds = value.coerceAtLeast(0))
+        _uiState.value = _uiState.value.copy(maxToolRounds = value.coerceIn(1, 50))
     }
 
     fun onVisionResolutionModeChange(value: String) {

@@ -61,6 +61,7 @@ class ChatViewModelTest {
     @After
     fun tearDown() {
         AgentExecutionController.unregisterStopCallback()
+        AgentExecutionController.unregisterResumeCallback()
         Dispatchers.resetMain()
     }
 

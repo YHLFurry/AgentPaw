@@ -27,16 +27,12 @@ object KeystoreSecretStorage {
     private const val GCM_TAG_LENGTH_BITS = 128
     private const val ENCRYPTED_PREFIX = "enc:gcm:"
 
-    // JVM 单元测试环境下的保底对称密钥 (32 bytes = 256 bits)
-    private val JVM_FALLBACK_KEY = SecretKeySpec(
-        byteArrayOf(
-            0x2A, 0x4D, 0x72, 0x1E, 0x5C, 0x3B, 0x6F, 0x0A,
-            0x41, 0x52, 0x63, 0x74, 0x30, 0x39, 0x22, 0x11,
-            0x7A, 0x3B, 0x5C, 0x7D, 0x1E, 0x2F, 0x4A, 0x5B,
-            0x6C, 0x7D, 0x0E, 0x1F, 0x2A, 0x3B, 0x4C, 0x5D,
-        ),
-        "AES",
-    )
+    // JVM 单元测试环境下的动态生成临时测试密钥 (进程隔离，无静态硬编码)
+    private val jvmTestKey: SecretKey by lazy {
+        val keyGen = KeyGenerator.getInstance("AES")
+        keyGen.init(256)
+        keyGen.generateKey()
+    }
 
     private fun getOrCreateKey(): SecretKey {
         return runCatching {
@@ -56,9 +52,9 @@ object KeystoreSecretStorage {
             }
             keyStore.getKey(KEY_ALIAS, null) as SecretKey
         }.getOrElse { e ->
-            // 仅在桌面 JVM 单元测试环境下允许使用保底测试密钥，在真实 Android 运行环境下强校验硬件 Keystore
+            // 仅在桌面 JVM 单元测试环境下允许使用动态临时测试密钥，在真实 Android 运行环境下强校验硬件 Keystore
             if (isJvmTestEnvironment()) {
-                JVM_FALLBACK_KEY
+                jvmTestKey
             } else {
                 throw SecurityException("AndroidKeyStore unavailable or master key cannot be initialized", e)
             }
@@ -96,11 +92,11 @@ object KeystoreSecretStorage {
 
     /**
      * 将密文字符串解密为明文。
-     * 具备自动迁移感知：若输入非加密格式（旧版明文存储），则直接返回原值，
-     * 待下次存入时自动升级加密。
+     * 具备自动迁移感知：若输入非加密格式（旧版明文存储），则直接返回原值；
+     * 若为加密格式但解密失败，返回 null（严禁返回密文导致二次加密套娃或对外泄露密文）。
      */
-    fun decrypt(storedText: String): String {
-        if (storedText.isBlank()) return storedText
+    fun decrypt(storedText: String): String? {
+        if (storedText.isBlank()) return ""
         if (!storedText.startsWith(ENCRYPTED_PREFIX)) {
             // 兼容旧版本明文迁移
             return storedText
@@ -109,7 +105,7 @@ object KeystoreSecretStorage {
         return runCatching {
             val rawBase64 = storedText.removePrefix(ENCRYPTED_PREFIX)
             val combined = Base64.decode(rawBase64, Base64.NO_WRAP)
-            if (combined.size <= GCM_IV_LENGTH) return storedText
+            if (combined.size <= GCM_IV_LENGTH) return null
 
             val iv = combined.copyOfRange(0, GCM_IV_LENGTH)
             val cipherBytes = combined.copyOfRange(GCM_IV_LENGTH, combined.size)
@@ -121,6 +117,6 @@ object KeystoreSecretStorage {
 
             val plainBytes = cipher.doFinal(cipherBytes)
             String(plainBytes, Charsets.UTF_8)
-        }.getOrDefault(storedText)
+        }.getOrNull()
     }
 }
