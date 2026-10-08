@@ -211,8 +211,7 @@ class Agent(
         val context = AgentContext(
             conversationId = conversationId,
             depth = 0,
-            grantedTokens = setOf("risk_confirmed:$toolName", "risk_confirmed"),
-            bypassSafetyGuard = true,
+            grantedTokens = setOf("risk_confirmed:$toolName"),
             cancelledCheck = { false },
         )
         val call = ToolCall(

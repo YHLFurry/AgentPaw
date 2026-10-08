@@ -273,4 +273,26 @@ class PersistentConversationRepositoryTest {
         val imageFilesAfter = imagesDir.listFiles() ?: emptyArray()
         assertEquals("Image files belonging to cleared conversation should be deleted", 0, imageFilesAfter.size)
     }
+
+    @Test
+    fun `corrupt json file is backed up, deleted, and capped`() = runTest {
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        val testScope = TestScope(testDispatcher)
+        val dir = tempFolder.newFolder("test_corrupt_files")
+
+        // Create corrupt files
+        val badJsonFile = File(dir, "corrupt-conv.json")
+        badJsonFile.writeText("{ this is definitely not valid json")
+
+        val repo = PersistentConversationRepository(
+            scope = testScope,
+            storageDirectory = dir,
+            ioDispatcher = testDispatcher,
+        )
+        testScope.advanceUntilIdle()
+
+        assertFalse("Original corrupt json file should be deleted", badJsonFile.exists())
+        val corruptBackups = dir.listFiles { f -> f.name.startsWith("corrupt-conv") && f.name.endsWith(".corrupt") } ?: emptyArray()
+        assertEquals("Should create 1 corrupt backup", 1, corruptBackups.size)
+    }
 }

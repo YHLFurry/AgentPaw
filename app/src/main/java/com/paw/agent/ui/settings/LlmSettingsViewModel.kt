@@ -99,6 +99,7 @@ class LlmSettingsViewModel(
                         visionResolutionMode = llm.visionResolutionMode,
                         stream = llm.stream,
                         systemPrompt = llm.systemPrompt,
+                        apiKeyError = if (settings.apiKeyDecryptionFailed) "系统密钥解密失败（如修改了锁屏或指纹），请重新输入 API Key" else null,
                     )
                 }
             }

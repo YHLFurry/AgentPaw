@@ -46,6 +46,8 @@ data class ScreenStateInfo(
     val foregroundPackage: String = "",
     val foregroundActivity: String = "",
     val elements: List<UiElementInfo> = emptyList(),
+    val truncated: Boolean = false,
+    val totalNodes: Int = 0,
 )
 
 enum class PhoneControlMode {

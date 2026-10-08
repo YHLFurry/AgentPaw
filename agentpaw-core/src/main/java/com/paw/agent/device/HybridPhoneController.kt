@@ -13,7 +13,7 @@ import kotlin.math.roundToInt
 class HybridPhoneController(
     private val context: Context,
     private val shizukuController: ShizukuController = ShizukuController(),
-    internal val rootController: com.paw.agent.device.root.RootController = com.paw.agent.device.root.RootController(),
+    val rootController: com.paw.agent.device.root.RootController = com.paw.agent.device.root.RootController(),
     private val screenshotProcessor: AdaptiveScreenshotProcessor = AdaptiveScreenshotProcessor(),
 ) : PhoneController {
 
@@ -60,7 +60,7 @@ class HybridPhoneController(
     /** 归一化坐标映射所用的真实屏幕宽度（优先用最近一次截图源尺寸，并检查屏幕旋转是否失效）。 */
     private fun refWidth(): Int {
         val currentOrientation = context.resources.configuration.orientation
-        if (currentOrientation != lastScreenshotOrientation) {
+        if (lastScreenshotOrientation != 0 && currentOrientation != lastScreenshotOrientation) {
             lastScreenshotWidth = 0
             lastScreenshotHeight = 0
         }
@@ -70,7 +70,7 @@ class HybridPhoneController(
     /** 归一化坐标映射所用的真实屏幕高度（优先用最近一次截图源尺寸，并检查屏幕旋转是否失效）。 */
     private fun refHeight(): Int {
         val currentOrientation = context.resources.configuration.orientation
-        if (currentOrientation != lastScreenshotOrientation) {
+        if (lastScreenshotOrientation != 0 && currentOrientation != lastScreenshotOrientation) {
             lastScreenshotWidth = 0
             lastScreenshotHeight = 0
         }
@@ -465,9 +465,10 @@ class HybridPhoneController(
             }
         ) ?: return null
 
-        // 记录本次截图的真实源分辨率，作为后续 tap 归一化反向映射的基准。
+        // 记录本次截图的真实源分辨率与方向，作为后续 tap 归一化反向映射的基准。
         lastScreenshotWidth = rawBitmap.width
         lastScreenshotHeight = rawBitmap.height
+        lastScreenshotOrientation = context.resources.configuration.orientation
 
         return try {
             screenshotProcessor.processScreenshot(rawBitmap, mode, cropRoi)

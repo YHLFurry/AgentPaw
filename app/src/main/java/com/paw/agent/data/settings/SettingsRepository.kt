@@ -20,6 +20,8 @@ data class AppSettings(
     val rootModeEnabled: Boolean = false,
     /** AI 智能识别步间等待时间与自适应节奏 */
     val adaptivePacingEnabled: Boolean = true,
+    /** Keystore 解密失败标志，用于提示用户重新输入凭据 */
+    val apiKeyDecryptionFailed: Boolean = false,
 ) {
     companion object {
         val Default = AppSettings()

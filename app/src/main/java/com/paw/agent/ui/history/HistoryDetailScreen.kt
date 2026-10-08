@@ -134,7 +134,7 @@ fun HistoryDetailScreen(
                     .padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                itemsIndexed(conv.messages, key = { index, message -> "${message.id}_$index" }) { _, message ->
+                items(conv.messages, key = { it.id }) { message ->
                     MessageBubble(message = message)
                 }
             }
