@@ -16,7 +16,7 @@
   <img src="https://img.shields.io/badge/平台-Android_8.0+_(API_26+)-3DDC84?logo=android&logoColor=white" alt="Platform" />
   <img src="https://img.shields.io/badge/语言-Kotlin_2.2.21-7F52FF?logo=kotlin&logoColor=white" alt="Kotlin" />
   <img src="https://img.shields.io/badge/界面-Material_3_&_Miuix-4285F4?logo=jetpackcompose&logoColor=white" alt="UI" />
-  <img src="https://img.shields.io/badge/单元测试-139_全部通过-brightgreen" alt="Tests" />
+  <img src="https://img.shields.io/badge/单元测试-174_全部通过-brightgreen" alt="Tests" />
   <img src="https://img.shields.io/badge/开源协议-Apache_2.0-blue.svg" alt="License" />
 </p>
 

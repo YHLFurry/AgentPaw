@@ -30,8 +30,8 @@ object SafetyGuard {
         return sensitiveKeywords.any { lower.contains(it) }
     }
 
-    fun checkRisk(toolName: String, arguments: String, screenText: String = ""): com.paw.agent.core.agent.RiskDecision {
-        return com.paw.agent.core.agent.RiskActionGuard.evaluate(toolName, arguments, screenText)
+    fun checkRisk(toolName: String, arguments: String, screenText: String = "", targetElementText: String = ""): com.paw.agent.core.agent.RiskDecision {
+        return com.paw.agent.core.agent.RiskActionGuard.evaluate(toolName, arguments, screenText, targetElementText)
     }
 
     fun formatConfirmationPayload(
@@ -75,7 +75,7 @@ object SafetyGuard {
         }
 
         val evalText = if (targetTextExtra.isNotBlank()) "$targetTextExtra $allText" else allText
-        val risk = checkRisk(toolName, arguments, evalText)
+        val risk = checkRisk(toolName, arguments, evalText, targetElementText = targetTextExtra)
         if (risk.requiresConfirmation) {
             return formatConfirmationPayload(risk, toolName = toolName, arguments = arguments)
         }
@@ -126,6 +126,11 @@ class TakeScreenshotTool(
         val screenState = phoneController.getScreenState()
         val allText = screenState.elements.joinToString(" ") { it.text + " " + it.contentDescription }
         val isSensitive = SafetyGuard.isSensitive(allText)
+
+        // 严禁将包含密码/支付凭据的敏感屏幕截图回传至云端大模型，必须阻断并转为安全暂停
+        if (isSensitive && !context.isGranted("risk_confirmed:take_screenshot")) {
+            return """{"status":"paused","is_safety_pause":true,"reason":"检测到敏感密码/支付页面，屏幕截图已脱敏拦截","message":"[SAFETY PAUSE] Detected sensitive password/payment screen. Automated screenshot transmission is blocked for security. Please complete this step manually on your device."}"""
+        }
 
         val response = buildJsonObject {
             put("status", JsonPrimitive("success"))
@@ -263,8 +268,15 @@ class InputTextTool(
         if (ok && enter) {
             phoneController.pressEnter()
         }
-        return if (ok) """{"status":"success","typed":"$text"}"""
-        else """{"status":"error","message":"Input text failed. Make sure an input field is focused."}"""
+        return if (ok) {
+            val responseObj = buildJsonObject {
+                put("status", JsonPrimitive("success"))
+                put("typed", JsonPrimitive(text))
+            }
+            json.encodeToString(JsonObject.serializer(), responseObj)
+        } else {
+            """{"status":"error","message":"Input text failed. Make sure an input field is focused."}"""
+        }
     }
 }
 
@@ -364,9 +376,19 @@ class DeepLinkTool(
         """.trimIndent(),
     )
 
+    private val FORBIDDEN_DEEPLINK_SCHEMES = setOf(
+        "file", "content", "intent", "package", "javascript", "data", "jar", "android.resource",
+    )
+
     override suspend fun execute(arguments: String, context: AgentContext): String {
         val root = json.parseToJsonElement(arguments).jsonObject
         val uri = root["uri"]?.jsonPrimitive?.contentOrNull ?: return "Error: 'uri' is required"
+
+        val lowerUri = uri.trim().lowercase()
+        val scheme = lowerUri.substringBefore("://").substringBefore(":")
+        if (scheme in FORBIDDEN_DEEPLINK_SCHEMES || lowerUri.startsWith("intent:") || lowerUri.startsWith("file:") || lowerUri.startsWith("content:")) {
+            return """{"status":"error","message":"Security violation: scheme '$scheme' is strictly forbidden for deeplinks to prevent unauthorized file or component access."}"""
+        }
 
         val isConfirmed = context.isGranted("risk_confirmed:open_deeplink")
         if (!isConfirmed) {
@@ -463,7 +485,9 @@ class ClickElementTool(
         val targetElemText = targetElement?.let { it.text + " " + it.contentDescription }.orEmpty()
 
         if (!isConfirmed) {
-            val risk = SafetyGuard.checkRisk("click_element", arguments, targetElemText)
+            // 确保全屏文本 allText 以及目标节点文本 targetElemText 均纳入风险评估，杜绝通过纯坐标绕过支付与删除风控
+            val evalText = if (targetElemText.isNotBlank()) "$targetElemText $allText" else allText
+            val risk = SafetyGuard.checkRisk("click_element", arguments, evalText, targetElementText = targetElemText)
             if (risk.requiresConfirmation) {
                 return SafetyGuard.formatConfirmationPayload(risk, toolName = "click_element", arguments = arguments)
             }

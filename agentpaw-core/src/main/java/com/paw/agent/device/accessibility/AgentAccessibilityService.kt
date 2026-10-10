@@ -139,10 +139,24 @@ class AgentAccessibilityService : AccessibilityService() {
         if (clipboard != null) {
             clipboard.setPrimaryClip(android.content.ClipData.newPlainText("agent_paw_direct", text))
             val pasteOk = targetNode.performAction(AccessibilityNodeInfo.ACTION_PASTE)
+            clearClipboardSafely()
             if (pasteOk) return@withContext true
         }
 
         false
+    }
+
+    private fun clearClipboardSafely() {
+        runCatching {
+            val clipboard = getSystemService(android.content.Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
+            if (clipboard != null) {
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                    clipboard.clearPrimaryClip()
+                } else {
+                    clipboard.setPrimaryClip(android.content.ClipData.newPlainText("", ""))
+                }
+            }
+        }
     }
 
     /**
@@ -162,10 +176,13 @@ class AgentAccessibilityService : AccessibilityService() {
         val clipboard = getSystemService(android.content.Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
         if (clipboard != null) {
             clipboard.setPrimaryClip(android.content.ClipData.newPlainText("agent_paw_keyboard_fallback", text))
-            return@withContext targetNode.performAction(AccessibilityNodeInfo.ACTION_PASTE)
+            val ok = targetNode.performAction(AccessibilityNodeInfo.ACTION_PASTE)
+            clearClipboardSafely()
+            return@withContext ok
         }
         false
     }
+
 
     fun actionBack(): Boolean = performGlobalAction(GLOBAL_ACTION_BACK)
     fun actionHome(): Boolean = performGlobalAction(GLOBAL_ACTION_HOME)
