@@ -346,6 +346,15 @@ class OpenAiCompatibleClient(
             if (host.endsWith(".local") && !host.contains("..")) {
                 return true
             }
+            // IPv6 Unique Local Address (fc00::/7) 或 Link-Local (fe80::/10)
+            if (host.contains(":")) {
+                if (host == "::1") return true
+                val normalizedIpv6 = host.split("%").first()
+                if (normalizedIpv6.startsWith("fc") || normalizedIpv6.startsWith("fd") || normalizedIpv6.startsWith("fe80")) {
+                    return true
+                }
+            }
+
 
             val match = IPV4_REGEX.matchEntire(host)
             if (match != null) {

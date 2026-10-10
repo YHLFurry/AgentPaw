@@ -101,16 +101,24 @@ class CustomExecutableSkill(
                 }
 
                 SkillActionType.TAP_COORDINATE -> {
+                    if (!isSkillConfirmed) {
+                        val guardBlocked = com.paw.agent.core.tool.android.SafetyGuard.checkScreenAndRisk("tap", arguments, context, phoneController)
+                        if (guardBlocked != null) return guardBlocked
+                    }
                     phoneController.tap(step.x, step.y)
                 }
 
                 SkillActionType.TAP_ELEMENT -> {
                     val state = phoneController.getScreenState()
                     if (!isSkillConfirmed) {
-                        val allText = state.elements.joinToString(" ") { it.text + " " + it.contentDescription }
-                        if (com.paw.agent.core.tool.android.SafetyGuard.isSensitive(allText)) {
-                            return """{"status":"paused","is_safety_pause":true,"reason":"检测到敏感密码/支付页面，自动化技能已安全暂停","message":"[SAFETY PAUSE] Detected sensitive password/payment screen. Automated custom skill is paused for security."}"""
-                        }
+                        val guardBlocked = com.paw.agent.core.tool.android.SafetyGuard.checkScreenAndRisk(
+                            "click_element",
+                            arguments,
+                            context,
+                            phoneController,
+                            targetTextExtra = interpolatedTarget,
+                        )
+                        if (guardBlocked != null) return guardBlocked
                     }
                     val matched = if (step.exactMatch) {
                         state.elements.firstOrNull { elem ->
@@ -136,8 +144,19 @@ class CustomExecutableSkill(
                 }
 
                 SkillActionType.INPUT_TEXT -> {
+                    if (!isSkillConfirmed) {
+                        val guardBlocked = com.paw.agent.core.tool.android.SafetyGuard.checkScreenAndRisk(
+                            "input_text",
+                            arguments,
+                            context,
+                            phoneController,
+                            targetTextExtra = interpolatedTarget,
+                        )
+                        if (guardBlocked != null) return guardBlocked
+                    }
                     phoneController.inputText(interpolatedTarget, clearBeforeInput = false)
                 }
+
 
                 SkillActionType.SWIPE -> {
                     // 默认下拉/上滑
