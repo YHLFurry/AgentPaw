@@ -13,6 +13,8 @@ import com.paw.agent.device.ScreenshotResult
 import com.paw.agent.device.UiElementInfo
 import com.paw.agent.device.VisionResolutionMode
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -380,6 +382,61 @@ class AndroidPhoneToolsTest {
         val res = skill.execute("""{"target_text": "目标商品ABC", "max_swipes": 3}""", ctrl, context)
         assertTrue(res.contains("found_and_tapped"))
         assertEquals(Pair(100f, 110f), ctrl.lastTapAtPixel)
+    }
+
+    @Test
+    fun `take_screenshot pauses on sensitive screen without exposing image_base64`() = runTest {
+        val sensitiveController = object : PhoneController by controller {
+            override suspend fun getScreenState(): ScreenStateInfo = ScreenStateInfo(
+                foregroundPackage = "com.eg.android.AlipayGphone",
+                elements = listOf(UiElementInfo(text = "请输入支付密码")),
+            )
+        }
+        val tool = TakeScreenshotTool(sensitiveController)
+        val res = tool.execute("{}", context)
+        assertTrue(res.contains("SAFETY PAUSE"))
+        assertTrue(res.contains("\"is_safety_pause\":true") || res.contains("\"is_safety_pause\": true"))
+        org.junit.Assert.assertFalse("Sensitive screenshot result must not leak image_base64", res.contains("fake_base64"))
+    }
+
+    @Test
+    fun `open_deep_link rejects forbidden schemes like file, content, and intent`() = runTest {
+        val tool = DeepLinkTool(controller)
+        val fileRes = tool.execute("""{"uri": "file:///data/data/com.paw.agent/databases/secret.db"}""", context)
+        assertTrue(fileRes.contains("forbidden") || fileRes.contains("Security violation"))
+        
+        val intentRes = tool.execute("""{"uri": "intent://com.example/#Intent;scheme=bad;end"}""", context)
+        assertTrue(intentRes.contains("forbidden") || intentRes.contains("Security violation"))
+
+        val contentRes = tool.execute("""{"uri": "content://contacts/people"}""", context)
+        assertTrue(contentRes.contains("forbidden") || contentRes.contains("Security violation"))
+    }
+
+    @Test
+    fun `click_element with explicit bounds intercepts payment action when screen contains payment texts`() = runTest {
+        val sensitiveController = object : PhoneController by controller {
+            override suspend fun getScreenState(): ScreenStateInfo = ScreenStateInfo(
+                foregroundPackage = "com.shopping.app",
+                elements = listOf(UiElementInfo(text = "立即支付 99.00 元", bounds = RectBounds(10, 20, 100, 200))),
+            )
+        }
+        val tool = ClickElementTool(sensitiveController)
+        val res = tool.execute("""{"bounds": [10, 20, 100, 200]}""", context)
+        assertTrue(res.contains("requires_confirmation") || res.contains("安全确认拦截"))
+    }
+
+    @Test
+    fun `input_text safely handles quotes and special characters producing valid json`() = runTest {
+        val tool = InputTextTool(controller)
+        val trickyText = """Hello "world" \n \t with 'quotes' and {braces}"""
+        val res = tool.execute(kotlinx.serialization.json.buildJsonObject {
+            put("text", kotlinx.serialization.json.JsonPrimitive(trickyText))
+        }.toString(), context)
+        assertTrue(res.contains("success"))
+        assertEquals(trickyText, controller.lastInput)
+        // Verify valid JSON parsing of output
+        val parsed = kotlinx.serialization.json.Json.parseToJsonElement(res)
+        assertEquals("success", parsed.jsonObject["status"]?.jsonPrimitive?.content)
     }
 }
 

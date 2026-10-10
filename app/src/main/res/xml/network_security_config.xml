@@ -1,6 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
-    <!-- 允许本地回环地址与局域网开发设备 (Ollama / LocalAI / vLLM 等) 明文 HTTP 通信 -->
-    <!-- 客户端在应用层 (OpenAiCompatibleClient.isLocalOrPrivateAddress) 严格校验：公网 API 端点强制要求 HTTPS，非私有 IP 明文请求直接拒绝 -->
-    <base-config cleartextTrafficPermitted="true" />
+    <!-- 默认全局禁止明文 HTTP 通信，遵循纵深防御安全原则 -->
+    <base-config cleartextTrafficPermitted="false" />
+    <!-- 仅针对本地回环与模拟器开发地址放行明文 HTTP (Ollama / LocalAI / vLLM 本地调试) -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">localhost</domain>
+        <domain includeSubdomains="true">127.0.0.1</domain>
+        <domain includeSubdomains="true">10.0.2.2</domain>
+        <domain includeSubdomains="true">local</domain>
+    </domain-config>
 </network-security-config>

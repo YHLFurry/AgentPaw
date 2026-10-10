@@ -183,7 +183,7 @@ class AgentTaskRunner(
         _isGenerating.value = true
 
         // 启动真正的前台服务，保证后台运行优先级与通知栏可见
-        context?.let { AgentFloatingService.start(it) }
+        context?.let { runCatching { AgentFloatingService.start(it) } }
 
         conversationRepository.addMessage(
             Message(
@@ -247,7 +247,7 @@ class AgentTaskRunner(
         markTaskRunning(bp.originalGoal)
         _isGenerating.value = true
 
-        context?.let { AgentFloatingService.start(it) }
+        context?.let { runCatching { AgentFloatingService.start(it) } }
 
         val resumePrompt = bp.buildResumePrompt(customInstruction)
         val userDisplayText = if (customInstruction.isNullOrBlank()) "▶ 继续执行剩余操作" else "▶ 继续：$customInstruction"
@@ -673,6 +673,7 @@ class AgentTaskRunner(
      * 记录执行结果，并从下一操作步骤继续推进，杜绝重复拦截或依赖模型自行补充参数。
      */
     fun confirmAndExecuteRiskAction(config: LlmConfig? = null) {
+        if (_isGenerating.value) return
         val bp = _activeBreakpoint.value ?: return
         val risk = bp.riskConfirmation ?: run {
             resumeBreakpoint(config = config)
@@ -693,45 +694,54 @@ class AgentTaskRunner(
 
         val effectiveConfig = config ?: lastLlmConfig
         _isGenerating.value = true
-        context?.let { AgentFloatingService.start(it) }
+        context?.let { runCatching { AgentFloatingService.start(it) } }
 
         scope.launch {
-            val toolResult = agent.executeDirectTool(risk.toolName, confirmedArgs)
+            try {
+                val toolResult = agent.executeDirectTool(risk.toolName, confirmedArgs)
 
-            val toolResultMsgId = UUID.randomUUID().toString()
-            val briefContent = "✔ 已显式授权执行: ${risk.action} (${risk.target})"
-            conversationRepository.addMessage(
-                Message(
-                    id = toolResultMsgId,
-                    role = MessageRole.TOOL,
-                    content = briefContent,
-                    toolCallId = toolResultMsgId,
-                    status = if (toolResult.isError) MessageStatus.FAILED else MessageStatus.COMPLETE,
-                    createdAt = System.currentTimeMillis(),
-                ),
-            )
+                val toolResultMsgId = UUID.randomUUID().toString()
+                val briefContent = "✔ 已显式授权执行: ${risk.action} (${risk.target})"
+                conversationRepository.addMessage(
+                    Message(
+                        id = toolResultMsgId,
+                        role = MessageRole.TOOL,
+                        content = briefContent,
+                        toolCallId = toolResultMsgId,
+                        status = if (toolResult.isError) MessageStatus.FAILED else MessageStatus.COMPLETE,
+                        createdAt = System.currentTimeMillis(),
+                    ),
+                )
 
-            val completedSnapshot = StepSnapshot(
-                stepIndex = bp.stoppedAtStep,
-                toolName = risk.toolName,
-                arguments = confirmedArgs,
-                resultSummary = "用户已显式确认并授权执行完成",
-                isError = toolResult.isError,
-            )
-            val updatedBp = bp.copy(
-                stoppedAtStep = bp.stoppedAtStep + 1,
-                completedSteps = bp.completedSteps + completedSnapshot,
-                interruptedStep = null,
-                riskConfirmation = risk.copy(isConfirmed = true),
-            )
+                val completedSnapshot = StepSnapshot(
+                    stepIndex = bp.stoppedAtStep,
+                    toolName = risk.toolName,
+                    arguments = confirmedArgs,
+                    resultSummary = "用户已显式确认并授权执行完成",
+                    isError = toolResult.isError,
+                )
+                val updatedBp = bp.copy(
+                    stoppedAtStep = bp.stoppedAtStep + 1,
+                    completedSteps = bp.completedSteps + completedSnapshot,
+                    interruptedStep = null,
+                    riskConfirmation = risk.copy(isConfirmed = true),
+                )
 
-            _activeBreakpoint.value = updatedBp
-            persistBreakpoint(updatedBp)
+                _activeBreakpoint.value = updatedBp
+                persistBreakpoint(updatedBp)
 
-            resumeBreakpoint(
-                customInstruction = "【系统确认】：用户已显式确认并授权执行完成 [${risk.action}: ${risk.target}]，请直接根据最新屏幕状态推进后续步骤。",
-                config = effectiveConfig,
-            )
+                // 显式复位 _isGenerating，使得 resumeBreakpoint 可以正常通过门禁启动后续 LLM 循环
+                _isGenerating.value = false
+
+                resumeBreakpoint(
+                    customInstruction = "【系统确认】：用户已显式确认并授权执行完成 [${risk.action}: ${risk.target}]，请直接根据最新屏幕状态推进后续步骤。",
+                    config = effectiveConfig,
+                )
+            } catch (t: Throwable) {
+                _isGenerating.value = false
+                AgentExecutionController.markFailed(t.message ?: "授权执行失败")
+            }
         }
     }
 }
+

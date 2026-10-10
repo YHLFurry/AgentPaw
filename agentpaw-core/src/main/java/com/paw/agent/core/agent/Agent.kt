@@ -283,14 +283,18 @@ class Agent(
                                         val url = when {
                                             img.startsWith("data:") || img.startsWith("http://") || img.startsWith("https://") -> img
                                             img.startsWith("file://") || File(img).exists() -> {
-                                                val f = File(img.removePrefix("file://"))
-                                                if (f.exists()) {
+                                                val f = File(img.removePrefix("file://")).canonicalFile
+                                                val validExts = setOf("jpg", "jpeg", "png", "webp", "bmp")
+                                                val ext = f.extension.lowercase()
+                                                // 严格校验必须为常规图片文件且大小合理，杜绝目录穿越越权读取非图片私有敏感文件
+                                                if (f.exists() && f.isFile && ext in validExts && f.length() <= 10 * 1024 * 1024) {
                                                     val b64 = Base64.getEncoder().encodeToString(f.readBytes())
                                                     "data:image/jpeg;base64,$b64"
                                                 } else null
                                             }
                                             else -> "data:image/jpeg;base64,$img"
                                         }
+
                                         if (url != null) {
                                             add(
                                                 com.paw.agent.core.llm.dto.ContentPart.ImagePart(

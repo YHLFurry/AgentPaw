@@ -318,9 +318,15 @@ class HybridPhoneController(
         val clipOk = setClipboardText(text)
         if (!clipOk) return false
         val res1 = rootController.executeCommand("input keyevent 279")
-        if (!res1.startsWith("Error:")) return true
-        val res2 = rootController.executeCommand("input keyevent --meta 113 50")
-        return !res2.startsWith("Error:")
+        val ok = if (!res1.startsWith("Error:")) {
+            true
+        } else {
+            val res2 = rootController.executeCommand("input keyevent --meta 113 50")
+            !res2.startsWith("Error:")
+        }
+        kotlinx.coroutines.delay(100)
+        clearClipboardText()
+        return ok
     }
 
     private suspend fun inputViaShizuku(text: String, clearBeforeInput: Boolean): Boolean {
@@ -338,9 +344,15 @@ class HybridPhoneController(
         val clipOk = setClipboardText(text)
         if (!clipOk) return false
         val res1 = shizukuController.executeCommand("input keyevent 279")
-        if (!res1.startsWith("Error:")) return true
-        val res2 = shizukuController.executeCommand("input keyevent --meta 113 50")
-        return !res2.startsWith("Error:")
+        val ok = if (!res1.startsWith("Error:")) {
+            true
+        } else {
+            val res2 = shizukuController.executeCommand("input keyevent --meta 113 50")
+            !res2.startsWith("Error:")
+        }
+        kotlinx.coroutines.delay(100)
+        clearClipboardText()
+        return ok
     }
 
     private suspend fun setClipboardText(text: String): Boolean = withContext(Dispatchers.Main) {
@@ -353,6 +365,19 @@ class HybridPhoneController(
                 false
             }
         }.getOrDefault(false)
+    }
+
+    private suspend fun clearClipboardText(): Unit = withContext(Dispatchers.Main) {
+        runCatching {
+            val clipboard = context?.getSystemService(Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
+            if (clipboard != null) {
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                    clipboard.clearPrimaryClip()
+                } else {
+                    clipboard.setPrimaryClip(android.content.ClipData.newPlainText("", ""))
+                }
+            }
+        }
     }
 
     override suspend fun pressBack(): Boolean {
@@ -407,6 +432,15 @@ class HybridPhoneController(
         if (isAccessibilityAllowed) {
             val service = AgentAccessibilityService.instance
             if (service != null) {
+                // 优先检查是否有处于焦点状态的可编辑节点，并尝试触发原生 ACTION_IME_ENTER
+                val handledByNode = runCatching {
+                    val focus = service.rootInActiveWindow?.findFocus(android.view.accessibility.AccessibilityNodeInfo.FOCUS_INPUT)
+                    if (focus != null && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                        focus.performAction(android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id)
+                    } else false
+                }.getOrDefault(false)
+                if (handledByNode) return true
+
                 val enterX = refWidth() * 0.92f
                 val enterY = refHeight() * 0.94f
                 return service.clickAt(enterX, enterY)
@@ -531,9 +565,19 @@ class HybridPhoneController(
             .firstOrNull()?.packageName
     }
 
+    private val FORBIDDEN_DEEPLINK_SCHEMES = setOf(
+        "file", "content", "intent", "package", "javascript", "data", "jar", "android.resource",
+    )
+
     override suspend fun openDeepLink(uri: String): Boolean = withContext(Dispatchers.IO) {
         val safeUri = uri.trim()
         if (safeUri.isBlank()) return@withContext false
+
+        val lower = safeUri.lowercase()
+        val scheme = lower.substringBefore("://").substringBefore(":")
+        if (scheme in FORBIDDEN_DEEPLINK_SCHEMES || lower.startsWith("intent:") || lower.startsWith("file:") || lower.startsWith("content:")) {
+            return@withContext false
+        }
 
         // 1. Root 优先执行
         if (isRootAllowed) {
