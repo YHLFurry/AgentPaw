@@ -116,7 +116,9 @@ class PersistentConversationRepository(
     private suspend fun loadAllFromDisk() = mutex.withLock {
         withContext(ioDispatcher) {
             val files = storageDir.listFiles { _, name -> name.endsWith(".json") } ?: emptyArray()
-            val loaded = files.mapNotNull { file ->
+            // 先按文件最后修改时间倒序排列并截取上限，避免全量反序列化数百上千历史导致冷启动卡顿与内存膨胀
+            val candidateFiles = files.sortedByDescending { it.lastModified() }.take(MAX_HISTORY_ITEMS)
+            val loaded = candidateFiles.mapNotNull { file ->
                 runCatching {
                     val conv = json.decodeFromString<Conversation>(file.readText())
                     var modified = false
@@ -176,15 +178,13 @@ class PersistentConversationRepository(
     }
 
     /**
-     * 回溯并载入历史任务记录，使其成为当前主活跃会话
+     * 回溯并载入历史任务记录，使其成为当前主活跃会话。
+     * 同步立即可见更新内存状态，避免界面跳转时出现闪烁或时序竞态。
      */
-    fun loadConversation(id: String) {
-        scope.launch {
-            mutex.withLock {
-                val target = _historyList.value.firstOrNull { it.id == id } ?: return@withLock
-                _conversation.value = target
-            }
-        }
+    override fun loadConversation(id: String): Boolean {
+        val target = _historyList.value.firstOrNull { it.id == id } ?: return false
+        _conversation.value = target
+        return true
     }
 
     /**

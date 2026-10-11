@@ -35,7 +35,9 @@ class MainActivity : ComponentActivity() {
 
             androidx.compose.runtime.LaunchedEffect(executionState.isRunning) {
                 if (executionState.isRunning) {
-                    com.paw.agent.ui.floating.AgentFloatingService.start(context)
+                    runCatching {
+                        com.paw.agent.ui.floating.AgentFloatingService.start(context)
+                    }
                 }
             }
 

@@ -1,6 +1,7 @@
 package com.paw.agent.core.search
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -47,13 +48,44 @@ class DuckDuckGoSearchBackend(
                     .header("User-Agent", USER_AGENT)
                     .build()
 
-                httpClient.newCall(request).execute().use { response ->
-                    val body = response.body?.string().orEmpty()
-                    if (!response.isSuccessful) {
-                        error("DuckDuckGo returned HTTP ${response.code}")
+                var lastException: Throwable? = null
+                for (attempt in 1..2) {
+                    try {
+                        val response = httpClient.newCall(request).execute()
+                        response.use { resp ->
+                            val body = resp.body?.string().orEmpty()
+                            if (resp.isSuccessful) {
+                                return@withContext Result.success(parse(query, body, limit))
+                            }
+                            if (resp.code == 429 || resp.code == 403) {
+                                if (attempt == 2) {
+                                    return@withContext Result.success(
+                                        SearchResponse(
+                                            query = query,
+                                            results = listOf(
+                                                SearchResult(
+                                                    title = "Search Notice",
+                                                    snippet = "DuckDuckGo search service is temporarily rate-limited or unavailable (HTTP ${resp.code}).",
+                                                    url = "",
+                                                ),
+                                            ),
+                                            abstract = "Search rate-limited (HTTP ${resp.code}).",
+                                        ),
+                                    )
+                                }
+                            } else {
+                                error("DuckDuckGo returned HTTP ${resp.code}")
+                            }
+                        }
+                    } catch (e: Exception) {
+                        lastException = e
+                        if (attempt == 2) throw e
                     }
-                    parse(query, body, limit)
+                    if (attempt < 2) {
+                        kotlinx.coroutines.delay(500)
+                    }
                 }
+                throw lastException ?: IllegalStateException("Search failed after retry")
             }
         }
 

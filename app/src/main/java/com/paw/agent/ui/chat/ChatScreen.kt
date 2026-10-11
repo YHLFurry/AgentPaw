@@ -400,6 +400,7 @@ fun ChatScreen(
                         configured = configReady,
                         modifier = Modifier.align(Alignment.Center),
                         onOpenSettings = onOpenSettings,
+                        onSuggestionClick = { onDraftChange(it) },
                     )
                 } else {
                     LazyColumn(
@@ -662,6 +663,7 @@ private fun Composer(
                     modifier = Modifier.weight(1f),
                     placeholder = when {
                         !isInitialized -> "正在恢复会话历史..."
+                        !configReady -> stringResource(R.string.chat_composer_hint_unconfigured)
                         activeBreakpoint != null -> "输入补充指示继续，或点击上方[继续执行]"
                         else -> stringResource(R.string.chat_input_hint)
                     },
@@ -680,15 +682,15 @@ private fun Composer(
                     },
                     enabled = (enabled && isInitialized) || !configReady,
                     shape = CircleShape,
-                    color = if (isGenerating) {
-                        AppTheme.colors.errorContainer
-                    } else {
-                        AppTheme.colors.primary
+                    color = when {
+                        isGenerating -> AppTheme.colors.errorContainer
+                        !configReady -> AppTheme.colors.tertiaryContainer
+                        else -> AppTheme.colors.primary
                     },
-                    contentColor = if (isGenerating) {
-                        AppTheme.colors.onErrorContainer
-                    } else {
-                        AppTheme.colors.onPrimary
+                    contentColor = when {
+                        isGenerating -> AppTheme.colors.onErrorContainer
+                        !configReady -> AppTheme.colors.onTertiaryContainer
+                        else -> AppTheme.colors.onPrimary
                     },
                 ) {
                     Box(
@@ -696,13 +698,17 @@ private fun Composer(
                         contentAlignment = Alignment.Center,
                     ) {
                         AppIcon(
-                            imageVector = if (isGenerating) {
-                                Icons.Filled.Stop
-                            } else {
-                                Icons.AutoMirrored.Filled.Send
+                            imageVector = when {
+                                isGenerating -> Icons.Filled.Stop
+                                !configReady -> Icons.Outlined.Settings
+                                else -> Icons.AutoMirrored.Filled.Send
                             },
                             contentDescription = stringResource(
-                                if (isGenerating) R.string.chat_stop else R.string.chat_send,
+                                when {
+                                    isGenerating -> R.string.chat_stop
+                                    !configReady -> R.string.chat_open_settings
+                                    else -> R.string.chat_send
+                                },
                             ),
                         )
                     }

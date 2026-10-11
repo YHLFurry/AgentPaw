@@ -186,9 +186,13 @@ fun HistoryScreen(
                                 }
                             },
                             onRestore = {
-                                container.conversationRepository.loadConversation(conv.id)
-                                Toast.makeText(context, "已载入此任务历史上下文！", Toast.LENGTH_SHORT).show()
-                                onRestoreToChat()
+                                val ok = container.restoreConversation(conv.id)
+                                if (ok) {
+                                    Toast.makeText(context, "已载入此任务历史上下文！", Toast.LENGTH_SHORT).show()
+                                    onRestoreToChat()
+                                } else {
+                                    Toast.makeText(context, "加载历史记录失败", Toast.LENGTH_SHORT).show()
+                                }
                             },
                             onDelete = {
                                 pendingDeleteConvId = conv.id
