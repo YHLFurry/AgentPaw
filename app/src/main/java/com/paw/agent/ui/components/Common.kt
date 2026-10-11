@@ -17,6 +17,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -24,41 +28,47 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.paw.agent.R
+import com.paw.agent.ui.components.adaptive.AppIcon
 import com.paw.agent.ui.components.adaptive.AppSurface
 import com.paw.agent.ui.components.adaptive.AppText
 import com.paw.agent.ui.theme.AppTheme
 
 /**
- * The empty-state shown before the first message: the paw mark, a headline, and
- * a shortcut into LLM settings when the app is not configured yet.
+ * The empty-state shown before the first message: the paw mark, a headline,
+ * a shortcut into LLM settings when not configured, and quick starter suggestion chips when ready.
  */
 @Composable
 fun EmptyChatState(
     configured: Boolean,
     modifier: Modifier = Modifier,
     onOpenSettings: () -> Unit,
+    onSuggestionClick: (String) -> Unit = {},
 ) {
     Column(
-        modifier = modifier.fillMaxWidth().padding(horizontal = 32.dp),
+        modifier = modifier.fillMaxWidth().padding(horizontal = 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        PawMark(size = 88.dp)
-        Spacer(Modifier.height(24.dp))
+        PawMark(size = 84.dp)
+        Spacer(Modifier.height(20.dp))
         AppText(
-            text = stringResource(R.string.chat_empty_title),
+            text = if (configured) stringResource(R.string.chat_empty_title_configured) else stringResource(R.string.chat_empty_title),
             style = AppTheme.typography.headlineSmall,
             color = AppTheme.colors.onSurface,
+            fontWeight = FontWeight.SemiBold,
         )
         Spacer(Modifier.height(8.dp))
         AppText(
-            text = stringResource(R.string.chat_empty_subtitle),
+            text = if (configured) stringResource(R.string.chat_empty_subtitle_configured) else stringResource(R.string.chat_empty_subtitle),
             style = AppTheme.typography.bodyMedium,
             color = AppTheme.colors.onSurfaceVariant,
+            textAlign = TextAlign.Center,
         )
         if (!configured) {
             Spacer(Modifier.height(24.dp))
@@ -68,11 +78,62 @@ fun EmptyChatState(
                 color = AppTheme.colors.primaryContainer,
                 contentColor = AppTheme.colors.onPrimaryContainer,
             ) {
-                AppText(
-                    text = stringResource(R.string.chat_open_settings),
-                    style = AppTheme.typography.labelLarge,
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.padding(horizontal = 24.dp, vertical = 14.dp),
-                )
+                ) {
+                    AppIcon(
+                        imageVector = Icons.Outlined.Settings,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    AppText(
+                        text = stringResource(R.string.chat_open_settings),
+                        style = AppTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Medium,
+                    )
+                }
+            }
+        } else {
+            Spacer(Modifier.height(24.dp))
+            val suggestions = listOf(
+                "返回手机桌面" to "返回桌面",
+                "打开系统设置" to "打开系统设置",
+                "联网搜索最新资讯" to "联网搜索最新科技新闻",
+            )
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                suggestions.forEach { (label, prompt) ->
+                    AppSurface(
+                        onClick = { onSuggestionClick(prompt) },
+                        shape = RoundedCornerShape(16.dp),
+                        color = AppTheme.colors.surfaceContainer,
+                        contentColor = AppTheme.colors.onSurface,
+                        modifier = Modifier.fillMaxWidth(0.88f),
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                        ) {
+                            AppIcon(
+                                imageVector = Icons.Outlined.AutoAwesome,
+                                contentDescription = null,
+                                tint = AppTheme.colors.primary,
+                                modifier = Modifier.size(16.dp),
+                            )
+                            Spacer(Modifier.width(10.dp))
+                            AppText(
+                                text = label,
+                                style = AppTheme.typography.bodyMedium,
+                                color = AppTheme.colors.onSurface,
+                            )
+                        }
+                    }
+                }
             }
         }
     }

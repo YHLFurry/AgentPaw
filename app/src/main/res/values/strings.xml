@@ -15,6 +15,9 @@
     <string name="chat_clear">Clear conversation</string>
     <string name="chat_empty_title">Paw at your service</string>
     <string name="chat_empty_subtitle">Configure an LLM in settings, then start a conversation.</string>
+    <string name="chat_empty_title_configured">Paw is ready</string>
+    <string name="chat_empty_subtitle_configured">Send an instruction anytime to automate tasks on your phone.</string>
+    <string name="chat_composer_hint_unconfigured">Configure model service first. Tap settings on the right…</string>
     <string name="chat_open_settings">Open LLM settings</string>
     <string name="chat_thinking">Thinking…</string>
     <string name="chat_retry">Retry</string>
@@ -142,6 +145,8 @@
 
     <string name="permission_shizuku">Shizuku fast lane</string>
     <string name="permission_overlay">Overlay permission</string>
+    <string name="permission_notification">Notification permission</string>
+    <string name="permission_notification_summary">Shows background execution progress and one-tap stop in the notification shade</string>
     <string name="permission_granted">Granted</string>
     <string name="permission_not_granted">Not enabled</string>
     <string name="permission_open_settings">Open settings</string>

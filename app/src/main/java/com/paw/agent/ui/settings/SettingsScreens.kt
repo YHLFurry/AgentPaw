@@ -477,6 +477,14 @@ fun AgentControlPage(
     val hasOverlayPermission = remember(permRefreshTick.intValue) {
         com.paw.agent.device.DevicePermissionManager.canDrawOverlays(context)
     }
+    val hasNotificationPermission = remember(permRefreshTick.intValue) {
+        com.paw.agent.device.DevicePermissionManager.hasNotificationPermission(context)
+    }
+    val notificationPermissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.RequestPermission(),
+    ) { _ ->
+        permRefreshTick.intValue++
+    }
     val coroutineScope = androidx.compose.runtime.rememberCoroutineScope()
     val isRootGranted = remember(permRefreshTick.intValue) {
         com.paw.agent.device.DevicePermissionManager.isRootAvailable()
@@ -653,6 +661,27 @@ fun AgentControlPage(
                 actionText = stringResource(R.string.permission_open_settings),
                 onAction = {
                     com.paw.agent.device.DevicePermissionManager.openOverlaySettings(context)
+                },
+            )
+
+            SettingsRowDivider()
+
+            PermissionRow(
+                title = stringResource(R.string.permission_notification),
+                subtitle = stringResource(R.string.permission_notification_summary),
+                isGranted = hasNotificationPermission,
+                statusText = if (hasNotificationPermission) {
+                    stringResource(R.string.permission_granted)
+                } else {
+                    stringResource(R.string.permission_not_granted)
+                },
+                actionText = stringResource(R.string.permission_open_settings),
+                onAction = {
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                        notificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                    } else {
+                        com.paw.agent.device.DevicePermissionManager.openNotificationSettings(context)
+                    }
                 },
             )
         }

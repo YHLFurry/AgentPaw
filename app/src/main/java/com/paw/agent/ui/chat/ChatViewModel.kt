@@ -126,6 +126,12 @@ class ChatViewModel(
         conversationRepository.clear()
     }
 
+    fun restoreConversation(id: String): Boolean {
+        taskRunner.stop()
+        taskRunner.dismissBreakpoint()
+        return conversationRepository.loadConversation(id)
+    }
+
     class Factory(
         private val agent: Agent,
         private val conversationRepository: ConversationRepository,

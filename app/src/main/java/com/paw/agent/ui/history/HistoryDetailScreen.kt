@@ -9,11 +9,11 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -72,9 +72,11 @@ fun HistoryDetailScreen(
                 actions = {
                     if (conv != null) {
                         AppIconButton(onClick = {
-                            container.conversationRepository.loadConversation(conv.id)
-                            Toast.makeText(context, "已载入此任务历史上下文！", Toast.LENGTH_SHORT).show()
-                            onRestoreToChat()
+                            val ok = container.restoreConversation(conv.id)
+                            if (ok) {
+                                Toast.makeText(context, "已载入此任务历史上下文！", Toast.LENGTH_SHORT).show()
+                                onRestoreToChat()
+                            }
                         }) {
                             AppIcon(
                                 imageVector = Icons.Default.History,
@@ -90,16 +92,19 @@ fun HistoryDetailScreen(
             if (conv != null) {
                 AppCard(
                     cornerRadius = 16.dp,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .navigationBarsPadding()
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
                 ) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(16.dp),
+                            .padding(14.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Column {
+                        Column(modifier = Modifier.weight(1f)) {
                             val stats = remember(conv) {
                                 PersistentConversationRepository.computeStats(conv)
                             }
@@ -109,10 +114,13 @@ fun HistoryDetailScreen(
                                 color = AppTheme.colors.onSurfaceVariant,
                             )
                         }
+                        Spacer(Modifier.width(8.dp))
                         AppButton(onClick = {
-                            container.conversationRepository.loadConversation(conv.id)
-                            Toast.makeText(context, "已成功回溯此任务上下文！", Toast.LENGTH_SHORT).show()
-                            onRestoreToChat()
+                            val ok = container.restoreConversation(conv.id)
+                            if (ok) {
+                                Toast.makeText(context, "已成功回溯此任务上下文！", Toast.LENGTH_SHORT).show()
+                                onRestoreToChat()
+                            }
                         }) {
                             AppText("回溯并继续任务")
                         }
@@ -134,7 +142,12 @@ fun HistoryDetailScreen(
                     .padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                items(conv.messages, key = { it.id }) { message ->
+                // 不以 message.id 单独作为 key，使用带 index 的安全组合 key，
+                // 防止极端情况下同轮次或衍生 tool-call id 重复导致页面崩溃闪退
+                itemsIndexed(
+                    items = conv.messages,
+                    key = { index, message -> "${message.id}_$index" },
+                ) { _, message ->
                     MessageBubble(message = message)
                 }
             }

@@ -1,6 +1,11 @@
 package com.paw.agent.core.search
 
 import kotlinx.coroutines.test.runTest
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Protocol
+import okhttp3.Response
+import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -103,5 +108,75 @@ class DuckDuckGoSearchBackendTest {
         val response = backend.parse("x", body, limit = 2)
 
         assertEquals(2, response.results.size)
+    }
+
+    @Test
+    fun `search retries on rate limit HTTP 429 and returns fallback notice gracefully`() = runTest {
+        var callCount = 0
+        val mockClient = OkHttpClient.Builder()
+            .addInterceptor { chain ->
+                callCount++
+                Response.Builder()
+                    .request(chain.request())
+                    .protocol(Protocol.HTTP_1_1)
+                    .code(429)
+                    .message("Too Many Requests")
+                    .body("rate limit exceeded".toResponseBody("text/plain".toMediaType()))
+                    .build()
+            }
+            .build()
+
+        val backendWithMock = DuckDuckGoSearchBackend(httpClient = mockClient)
+        val result = backendWithMock.search("test query")
+
+        assertTrue(result.isSuccess)
+        val response = result.getOrThrow()
+        assertEquals(2, callCount)
+        assertTrue(response.results.any { it.title == "Search Notice" && it.snippet.contains("429") })
+    }
+
+    @Test
+    fun `search retries and recovers when subsequent attempt succeeds`() = runTest {
+        var callCount = 0
+        val validJson = """
+            {
+              "Heading": "Kotlin",
+              "AbstractText": "Kotlin language.",
+              "AbstractURL": "https://kotlinlang.org",
+              "RelatedTopics": [],
+              "Results": []
+            }
+        """.trimIndent()
+
+        val mockClient = OkHttpClient.Builder()
+            .addInterceptor { chain ->
+                callCount++
+                if (callCount == 1) {
+                    Response.Builder()
+                        .request(chain.request())
+                        .protocol(Protocol.HTTP_1_1)
+                        .code(429)
+                        .message("Too Many Requests")
+                        .body("rate limit".toResponseBody("text/plain".toMediaType()))
+                        .build()
+                } else {
+                    Response.Builder()
+                        .request(chain.request())
+                        .protocol(Protocol.HTTP_1_1)
+                        .code(200)
+                        .message("OK")
+                        .body(validJson.toResponseBody("application/json".toMediaType()))
+                        .build()
+                }
+            }
+            .build()
+
+        val backendWithMock = DuckDuckGoSearchBackend(httpClient = mockClient)
+        val result = backendWithMock.search("Kotlin")
+
+        assertTrue(result.isSuccess)
+        val response = result.getOrThrow()
+        assertEquals(2, callCount)
+        assertEquals("Kotlin", response.results.first().title)
     }
 }

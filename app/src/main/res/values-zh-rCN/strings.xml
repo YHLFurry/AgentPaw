@@ -13,6 +13,9 @@
     <string name="chat_clear">清空对话</string>
     <string name="chat_empty_title">爪印待命</string>
     <string name="chat_empty_subtitle">先在设置里配置 LLM，然后开始对话。</string>
+    <string name="chat_empty_title_configured">爪印已就绪</string>
+    <string name="chat_empty_subtitle_configured">随时向 AgentPaw 发送指令，为您操控手机执行任务。</string>
+    <string name="chat_composer_hint_unconfigured">请先配置模型服务，点击右侧前往设置…</string>
     <string name="chat_open_settings">前往 LLM 设置</string>
     <string name="chat_thinking">思考中…</string>
     <string name="chat_retry">重试</string>
@@ -134,6 +137,8 @@
     <string name="permission_shizuku_request">申请授权</string>
     <string name="permission_overlay">前台控制悬浮胶囊 (Overlay)</string>
     <string name="permission_overlay_summary">操作其他 App 时展示实时状态胶囊与随时一键停止打断</string>
+    <string name="permission_notification">系统通知栏运行状态与控制</string>
+    <string name="permission_notification_summary">跨应用执行时在系统通知栏显示实时操作进度与一键停止</string>
     <string name="permission_granted">已授权</string>
     <string name="permission_not_granted">未开启</string>
     <string name="permission_open_settings">去设置开启</string>

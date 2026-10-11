@@ -39,16 +39,29 @@
 
 | 任务 ID | 优先级 | 任务分类 | 任务内容与缺陷描述 | 状态 | 依赖与验收标准 |
 |---|---|---|---|---|---|
-| **TASK-101** | `P2` | 文档一致性 | 同步更新 `README.md` 与 `README_CN.md` 中的单元测试总数 Badge（由 139 更新为 169） | `TODO` | 文档与当前实际 169 项单测保持精确一致 |
-| **TASK-102** | `P2` | 鲁棒性与异常防护 | `AgentTaskRunner` 启动 `AgentFloatingService` 在 Android 14+ 后台场景下的异常防御包裹 | `TODO` | 防范 `ForegroundServiceStartNotAllowedException`，提供优雅降级日志 |
-| **TASK-103** | `P2` | 网络与搜索优化 | `DuckDuckGoSearchBackend` 增加网络重试与超时降级机制，应对爬取反爬限流 | `TODO` | 在网页抓取受限时返回结构化友好提示而非空崩 |
-| **TASK-104** | `P3` | 性能与内存优化 | `PersistentConversationRepository` 会话列表实现分页/按需加载，避免海量历史全量进内存 | `TODO` | 支持加载前 50 条最近会话，后续滚动分页 |
+| **TASK-101** | `P2` | 文档一致性 | 同步更新 `README.md` 与 `README_CN.md` 中的单元测试总数 Badge（精确更新至 177 项全部通过） | `VERIFIED` | 双语文档与当前 177 项单元测试保持精确一致 |
+| **TASK-102** | `P2` | 鲁棒性与异常防护 | `AgentFloatingService.start` 与 `MainActivity` 增加 Android 14+ 前台服务异常防御包裹 | `VERIFIED` | `runCatching` 拦截 `ForegroundServiceStartNotAllowedException`，提供降级日志 |
+| **TASK-103** | `P2` | 网络与搜索优化 | `DuckDuckGoSearchBackend` 增加网络重试与 HTTP 403/429 限流友好降级提示机制 | `VERIFIED` | 2 次尝试重试机制，限流返回友好通告，`DuckDuckGoSearchBackendTest` 验证通过 |
+| **TASK-104** | `P3` | 性能与内存优化 | `PersistentConversationRepository` 冷启动会话历史按文件修改时间截取上限 (`MAX_HISTORY_ITEMS`) | `VERIFIED` | `PersistentConversationRepositoryTest` 验证超量历史安全截取 |
 | **TASK-105** | `P3` | 路线图新特性 | 探索端侧轻量视觉目标检测（UI Element Detector）减少大模型截屏频次 | `TODO` | 预研端侧 TFLite / ONNX 方案接入架构 |
 | **TASK-106** | `P3` | 路线图新特性 | 任务操作流一键导出诊断包（包含脱敏日志与步骤截图链） | `TODO` | 生成标准 zip 诊断归档包便于复盘 |
 
 ---
 
-## 三、 只读审计安全缺陷加固清单 (Audit Remediation Items)
+## 三、 真实用户体验与交互缺陷修复清单 (User Experience & Interaction Remediations)
+
+| 问题 ID | 优先级 | 类别 | 缺陷与体验问题说明 | 状态 | 修复文件与验证证据 |
+|---|---|---|---|---|---|
+| **ISSUE-UX-001** | `P1 (高)` | 稳定性 / 崩溃 | 历史详情页消息列表由于空/重复工具调用 ID 导致 Compose `IllegalArgumentException: Key was already used` 崩溃 | `VERIFIED` | [`HistoryDetailScreen.kt`](file:///d:/Projects/AgentPaw/app/src/main/java/com/paw/agent/ui/history/HistoryDetailScreen.kt)，`itemsIndexed` 组合键 `"${message.id}_$index"` |
+| **ISSUE-UX-002** | `P2 (中)` | UI / 交互 | 历史详情页底部操作栏与全面屏系统手势导览条重叠遮挡 | `VERIFIED` | [`HistoryDetailScreen.kt`](file:///d:/Projects/AgentPaw/app/src/main/java/com/paw/agent/ui/history/HistoryDetailScreen.kt)，增加 `.navigationBarsPadding()` |
+| **ISSUE-UX-003** | `P1 (高)` | 核心业务流 | 会话历史回溯恢复（Restore）时的并发竞态与残留断点污染问题 | `VERIFIED` | [`PersistentConversationRepository.kt`](file:///d:/Projects/AgentPaw/app/src/main/java/com/paw/agent/data/conversation/PersistentConversationRepository.kt) 同步更新，`AgentPawApplication.kt` 联动重置断点，单测验证通过 |
+| **ISSUE-UX-004** | `P2 (中)` | 权限 / 功能 | 设置页“自动化控制通道”缺失 Android 13+ (API 33+) 通知权限开关与状态感知 | `VERIFIED` | [`SettingsScreens.kt`](file:///d:/Projects/AgentPaw/app/src/main/java/com/paw/agent/ui/settings/SettingsScreens.kt)，添加 `PermissionRow` 与动态权限请求器 |
+| **ISSUE-UX-005** | `P2 (中)` | 引导 / 易用性 | 首页对话空状态歧义引导与引导卡片缺失（已配置 API Key 时仍显示未配置警告） | `VERIFIED` | [`Common.kt`](file:///d:/Projects/AgentPaw/app/src/main/java/com/paw/agent/ui/components/Common.kt)，支持快捷启航建议卡片与区分欢迎文案 |
+| **ISSUE-UX-006** | `P2 (中)` | 引导 / 易用性 | 输入栏在未配置 API Key 状态下误导为可发送，无直达配置指引 | `VERIFIED` | [`ChatScreen.kt`](file:///d:/Projects/AgentPaw/app/src/main/java/com/paw/agent/ui/chat/ChatScreen.kt)，动态占位提示、设置图标引导色与快捷点击直达 |
+
+---
+
+## 四、 只读审计安全缺陷加固清单 (Audit Remediation Items)
 
 | 任务 ID | 优先级 | 模块 | 缺陷与风险说明 | 状态 | 涉及文件与验收标准 |
 |---|---|---|---|---|---|

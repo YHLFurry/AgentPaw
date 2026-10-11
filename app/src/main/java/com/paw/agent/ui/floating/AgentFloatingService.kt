@@ -382,17 +382,25 @@ class AgentFloatingService : Service() {
         private const val STATUS_TEXT_ID = 10001
 
         fun start(context: Context) {
-            val intent = Intent(context, AgentFloatingService::class.java)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
+            runCatching {
+                val intent = Intent(context, AgentFloatingService::class.java)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(intent)
+                } else {
+                    context.startService(intent)
+                }
+            }.onFailure { e ->
+                android.util.Log.w("AgentFloatingService", "Failed to start foreground service: ${e.message}", e)
             }
         }
 
         fun stop(context: Context) {
-            val intent = Intent(context, AgentFloatingService::class.java)
-            context.stopService(intent)
+            runCatching {
+                val intent = Intent(context, AgentFloatingService::class.java)
+                context.stopService(intent)
+            }.onFailure { e ->
+                android.util.Log.w("AgentFloatingService", "Failed to stop service: ${e.message}", e)
+            }
         }
     }
 }

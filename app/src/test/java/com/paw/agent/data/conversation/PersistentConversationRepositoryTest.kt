@@ -295,4 +295,67 @@ class PersistentConversationRepositoryTest {
         val corruptBackups = dir.listFiles { f -> f.name.startsWith("corrupt-conv") && f.name.endsWith(".corrupt") } ?: emptyArray()
         assertEquals("Should create 1 corrupt backup", 1, corruptBackups.size)
     }
+
+    @Test
+    fun `loadConversation restores targeted historical conversation into active state`() = runTest {
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        val testScope = TestScope(testDispatcher)
+        val dir = tempFolder.newFolder("test_load_conv")
+
+        val repo = PersistentConversationRepository(
+            scope = testScope,
+            storageDirectory = dir,
+            ioDispatcher = testDispatcher,
+        )
+        testScope.advanceUntilIdle()
+
+        val firstId = repo.conversation.value.id
+        repo.addMessage(Message(id = "m1", role = MessageRole.USER, content = "第一条会话消息"))
+        testScope.advanceUntilIdle()
+
+        val secondId = repo.newConversation()
+        testScope.advanceUntilIdle()
+        repo.addMessage(Message(id = "m2", role = MessageRole.USER, content = "第二条会话消息"))
+        testScope.advanceUntilIdle()
+
+        assertEquals(secondId, repo.conversation.value.id)
+
+        // Restore first conversation
+        val restored = repo.loadConversation(firstId)
+        assertTrue(restored)
+        assertEquals(firstId, repo.conversation.value.id)
+        assertEquals("第一条会话消息", repo.conversation.value.messages.first().content)
+
+        // Non-existent id returns false and doesn't mutate current conversation
+        val failed = repo.loadConversation("non-existent-id-12345")
+        assertFalse(failed)
+        assertEquals(firstId, repo.conversation.value.id)
+    }
+
+    @Test
+    fun `cold start history loading is capped by MAX_HISTORY_ITEMS`() = runTest {
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        val testScope = TestScope(testDispatcher)
+        val dir = tempFolder.newFolder("test_history_cap")
+
+        // Pre-create 120 conversation JSON files on disk
+        val now = System.currentTimeMillis()
+        for (i in 1..120) {
+            val convFile = File(dir, "conv_$i.json")
+            convFile.writeText(
+                """{"id":"conv_$i","title":"Task $i","createdAt":${now + i},"updatedAt":${now + i},"messages":[]}"""
+            )
+            convFile.setLastModified(now + i)
+        }
+
+        val repo = PersistentConversationRepository(
+            scope = testScope,
+            storageDirectory = dir,
+            ioDispatcher = testDispatcher,
+        )
+        testScope.advanceUntilIdle()
+
+        assertEquals(PersistentConversationRepository.MAX_HISTORY_ITEMS, repo.historyList.value.size)
+        assertEquals(100, repo.historyList.value.size)
+    }
 }

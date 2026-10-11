@@ -121,6 +121,17 @@ class AppContainer(application: Application) {
             settingsRepository = settingsRepository,
         )
     }
+
+    /**
+     * 安全回溯历史会话并切回主交互流：
+     * 自动停止当前任何进行中任务，清除残留的断点状态机与浮窗，
+     * 避免旧任务的断点卡片或执行状态污染新载入的任务。
+     */
+    fun restoreConversation(id: String): Boolean {
+        agentTaskRunner.stop()
+        agentTaskRunner.dismissBreakpoint()
+        return conversationRepository.loadConversation(id)
+    }
 }
 
 class AgentPawApplication : Application() {
