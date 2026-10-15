@@ -29,7 +29,7 @@
 | **本地网络与 LLM** | OkHttp 4.12.0 + SSE 流式协议 | 标准 OpenAI 兼容协议，支持文本 + 结构化多模态 `image_url` |
 | **凭据安全** | Android Keystore | 硬件隔离 AES-256-GCM 加密，严禁 API Key 明文落盘 |
 | **特权与执行** | 混合三通道引擎 | ROOT (`su`) > Shizuku Binder (API 13.1.5) > 无障碍服务 (`AccessibilityService`) |
-| **自动化测试** | JUnit 4 + Coroutines Test | 169 项全量自动化单元测试（147 核心 + 22 应用） |
+| **自动化测试** | JUnit 4 + Coroutines Test | 全量自动化单元测试（核心 + 应用模块，JVM 实跑验证） |
 
 ---
 

@@ -16,7 +16,7 @@
   <img src="https://img.shields.io/badge/平台-Android_8.0+_(API_26+)-3DDC84?logo=android&logoColor=white" alt="Platform" />
   <img src="https://img.shields.io/badge/语言-Kotlin_2.2.21-7F52FF?logo=kotlin&logoColor=white" alt="Kotlin" />
   <img src="https://img.shields.io/badge/界面-Material_3_&_Miuix-4285F4?logo=jetpackcompose&logoColor=white" alt="UI" />
-  <img src="https://img.shields.io/badge/单元测试-177_全部通过-brightgreen" alt="Tests" />
+  <img src="https://img.shields.io/badge/单元测试-195_全部通过-brightgreen" alt="Tests" />
   <img src="https://img.shields.io/badge/开源协议-Apache_2.0-blue.svg" alt="License" />
 </p>
 
@@ -163,7 +163,7 @@ cd AgentPaw
 `app/build/outputs/apk/debug/app-debug.apk`
 
 ### 自动化测试覆盖
-工程包含 **139** 个自动化单元测试（核心模块 122 项 + UI 模块 17 项），在 JVM 环境毫秒级完成回归验证：
+工程包含全量自动化单元测试（核心模块 + UI 模块），在 JVM 环境毫秒级完成回归验证：
 - `ResumeIntentDetectorTest`：覆盖完整断点意图识别、带补充修正条件意图解析、断点防重提示词构建。
 - `AgentTest`：多轮工具调用、用户中途取消、工具执行失败回退与流式事件响应。
 - `InterpreterTest`：沙箱环境变量隔离、防路径穿越穿透（如 `../../..`）、复杂管道流与数学运算。

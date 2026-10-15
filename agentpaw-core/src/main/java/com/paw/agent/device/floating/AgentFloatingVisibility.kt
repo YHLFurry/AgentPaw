@@ -44,6 +44,28 @@ object AgentForegroundDecider {
 }
 
 /**
+ * 悬浮窗服务的生命周期策略（纯逻辑，可 JVM 单测）。
+ */
+object AgentFloatingServicePolicy {
+
+    /**
+     * 任务结束（非暂停）后，悬浮窗服务是否应当自动自毁。
+     *
+     * 背景缺陷（ISSUE-203）：服务在收到「未运行且未暂停」状态后会
+     * `delay(1500)` 再 `stopSelf()`，而 `Flow.collect` 在同一协程内
+     * **顺序处理**状态发射——若这 1.5 秒内用户已发起新任务（isRunning=true
+     * 的发射排在队列里等待），不重新校验状态就会把新任务的悬浮胶囊与
+     * 前台通知一起销毁，直到系统按 START_STICKY 重启（时机不确定，
+     * 且后台重启前台服务在 Android 14+ 可能被系统策略拒绝）。
+     *
+     * 因此延迟结束后必须重新读取最新状态：仅当仍处于「未运行且未暂停」
+     * 才允许自毁。
+     */
+    fun shouldAutoStopAfterFinish(isRunning: Boolean, isPaused: Boolean): Boolean =
+        !isRunning && !isPaused
+}
+
+/**
  * 宿主 APP Activity 生命周期计数器（纯逻辑，可 JVM 单测）。
  *
  * 由 [AgentAppVisibilityMonitor] 通过 `ActivityLifecycleCallbacks` 驱动。

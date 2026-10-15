@@ -236,4 +236,46 @@ class AgentFloatingVisibilityTest {
         sm.onHostAppForegroundChanged(false)
         assertTrue(sm.isVisible)
     }
+
+    // ---------- 悬浮窗服务自毁策略（ISSUE-203） ----------
+
+    @Test
+    fun `service auto-stops only when truly finished`() {
+        // 任务正常结束：允许自毁
+        assertTrue(
+            AgentFloatingServicePolicy.shouldAutoStopAfterFinish(
+                isRunning = false,
+                isPaused = false,
+            )
+        )
+    }
+
+    @Test
+    fun `service survives when a new task started during the grace delay`() {
+        // 竞态场景（ISSUE-203）：1.5s 宽限期内用户已发起新任务，
+        // 不得自毁，否则新任务的浮窗与前台通知会被一起杀死
+        assertFalse(
+            AgentFloatingServicePolicy.shouldAutoStopAfterFinish(
+                isRunning = true,
+                isPaused = false,
+            )
+        )
+    }
+
+    @Test
+    fun `service survives when a breakpoint pause arrives during the grace delay`() {
+        // 宽限期内进入断点暂停：保留服务，让用户有点击恢复的入口
+        assertFalse(
+            AgentFloatingServicePolicy.shouldAutoStopAfterFinish(
+                isRunning = false,
+                isPaused = true,
+            )
+        )
+        assertFalse(
+            AgentFloatingServicePolicy.shouldAutoStopAfterFinish(
+                isRunning = true,
+                isPaused = true,
+            )
+        )
+    }
 }

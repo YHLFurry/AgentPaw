@@ -38,11 +38,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -199,13 +202,23 @@ fun ChatScreen(
         androidx.lifecycle.compose.LifecycleEventEffect(
             androidx.lifecycle.Lifecycle.Event.ON_RESUME,
         ) {
-            permTick.intValue++
+            // 回到前台时重新探测 Root 授权状态（ISSUE-202）：
+            // 用户可能在系统/Magisk 里刚完成授权，而 Root 探测缓存不会自动过期。
+            // 先刷新再 bump，让下方 produceState 读取到最新结果。
+            coroutineScope.launch {
+                com.paw.agent.device.DevicePermissionManager.refreshRootAvailability()
+                permTick.intValue++
+            }
         }
         val isAccessibilityEnabled = remember(permTick.intValue) {
             com.paw.agent.device.DevicePermissionManager.isAccessibilityServiceEnabled(context)
         }
-        val isRootAvailable = remember(permTick.intValue) {
-            com.paw.agent.device.DevicePermissionManager.isRootAvailable()
+        // Root 探测可能启动 su 进程并等待（最坏约 1.6s），放 IO 线程执行，
+        // 避免阻塞界面合成；刷新由 ON_RESUME 与 Root 模式开关触发。
+        val isRootAvailable by produceState(initialValue = false, permTick.intValue) {
+            value = withContext(Dispatchers.IO) {
+                com.paw.agent.device.DevicePermissionManager.isRootAvailable()
+            }
         }
         val shizukuStatus by com.paw.agent.device.DevicePermissionManager.observeShizukuState()
             .collectAsStateWithLifecycle()

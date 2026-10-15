@@ -28,6 +28,12 @@ open class RootController {
     /**
      * 检查当前系统是否具有 root 权限并已授予本应用。
      * 具备内存双检锁缓存与快速探测机制。
+     *
+     * 注意：缓存结果**不会自动过期**——Root 授权可在应用生命周期内任意变化
+     * （用户在 Magisk/KernelSU 授权或撤销）。调用方应在授权可能变化的时机
+     * （回到前台、开启 Root 模式、设置页手动测试）主动调用
+     * [refreshAvailability] / [checkAvailability] 刷新，否则会沿用陈旧结果
+     * 导致 ROOT 通道静默失效（ISSUE-202）。
      */
     open val isAvailable: Boolean
         get() {
@@ -59,7 +65,11 @@ open class RootController {
         ok
     }
 
-    private fun checkSuDirectly(timeoutMs: Long = 800L): Boolean {
+    /**
+     * 直接探测 su 提权可用性。protected open 以便测试注入替身，
+     * 验证「缓存可被主动刷新」这一真实语义（ISSUE-202）。
+     */
+    protected open fun checkSuDirectly(timeoutMs: Long = 800L): Boolean {
         // 先检查常见 su 路径是否存在，避免在完全未 root 的设备上启动阻塞进程
         val suPaths = arrayOf(
             "/system/bin/su",

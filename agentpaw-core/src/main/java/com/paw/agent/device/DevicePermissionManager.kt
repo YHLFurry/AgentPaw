@@ -132,17 +132,53 @@ object DevicePermissionManager {
         }
     }
 
-    val rootController by lazy { com.paw.agent.device.root.RootController() }
+    /**
+     * 全进程唯一的 RootController 实例。
+     *
+     * [HybridPhoneController] 默认也使用这同一个实例，保证「设置页刷新 Root 状态」
+     * 与「任务执行通道读取 Root 状态」看到的永远是同一份事实（ISSUE-202：
+     * 此前两者各持一个实例，设置页刷新的是另一个对象，执行通道的缓存
+     * 可能长期停留在陈旧的 false，导致用户已授权 Root 却静默走降级通道）。
+     */
+    var rootController: com.paw.agent.device.root.RootController =
+        com.paw.agent.device.root.RootController()
+        private set
 
     /**
-     * 检测 ROOT 权限是否可用
+     * 仅供单元测试注入替身，验证共享实例接线与缓存刷新语义。
+     * 生产代码不得调用。
+     */
+    @androidx.annotation.VisibleForTesting(otherwise = androidx.annotation.VisibleForTesting.PRIVATE)
+    fun installRootControllerForTesting(controller: com.paw.agent.device.root.RootController) {
+        rootController = controller
+    }
+
+    /** 恢复真实 RootController（测试清理用，生产代码不得调用）。 */
+    @androidx.annotation.VisibleForTesting(otherwise = androidx.annotation.VisibleForTesting.PRIVATE)
+    fun resetRootControllerForTesting() {
+        rootController = com.paw.agent.device.root.RootController()
+    }
+
+    /**
+     * 检测 ROOT 权限是否可用（读取缓存，不阻塞探测）。
      */
     fun isRootAvailable(): Boolean = rootController.isAvailable
 
     /**
-     * 刷新并测试 ROOT 权限
+     * 重新探测 Root 授权状态并刷新缓存（IO 调度，可安全从主线程协程调用）。
+     *
+     * Root 授权可能随时变化：用户在 Magisk 完成授权、撤销授权、或重启后
+     * 首次探测超时。缓存不会自动过期，因此需要在以下时机主动刷新：
+     * 回到 APP 前台、用户在设置里开启 Root 模式、设置页手动测试。
      */
-    suspend fun requestOrTestRoot(): Boolean = rootController.refreshAvailability()
+    suspend fun refreshRootAvailability(): Boolean =
+        rootController.refreshAvailability()
+
+    /**
+     * 设置页「测试 ROOT」按钮：刷新并测试 ROOT 权限。
+     * 与 [refreshRootAvailability] 等价，保留原名以兼容既有调用方。
+     */
+    suspend fun requestOrTestRoot(): Boolean = refreshRootAvailability()
 
     /**
      * 通过 ROOT 权限为本应用一键静默激活无障碍服务
