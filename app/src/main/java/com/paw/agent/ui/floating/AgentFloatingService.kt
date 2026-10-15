@@ -42,6 +42,7 @@ class AgentFloatingService : Service() {
     private lateinit var windowManager: WindowManager
     private var floatingView: View? = null
     private var params: WindowManager.LayoutParams? = null
+    private var actionButton: Button? = null
 
     private val serviceScope = CoroutineScope(Dispatchers.Main + Job())
     private var stateCollectJob: Job? = null
@@ -200,7 +201,7 @@ class AgentFloatingService : Service() {
         container.addView(statusText)
 
         // 停止/恢复按钮
-        val actionButton = Button(this).apply {
+        val actionBtn = Button(this).apply {
             id = View.generateViewId()
             text = "⏹ 停止"
             textSize = 11f
@@ -221,17 +222,18 @@ class AgentFloatingService : Service() {
                 }
             }
         }
-        container.addView(actionButton)
+        actionButton = actionBtn
+        container.addView(actionBtn)
 
         fun applyExpandedState() {
             if (isExpanded) {
                 statusText.visibility = View.VISIBLE
-                actionButton.visibility = View.VISIBLE
+                actionBtn.visibility = View.VISIBLE
                 toggleButton.text = "收起 ◀"
                 container.setPadding(dpToPx(12), dpToPx(6), dpToPx(8), dpToPx(6))
             } else {
                 statusText.visibility = View.GONE
-                actionButton.visibility = View.GONE
+                actionBtn.visibility = View.GONE
                 toggleButton.text = "🐾 展开 ▶"
                 container.setPadding(dpToPx(10), dpToPx(6), dpToPx(10), dpToPx(6))
             }
@@ -278,15 +280,24 @@ class AgentFloatingService : Service() {
                     }
                     MotionEvent.ACTION_UP -> {
                         if (!isMoved) {
-                            if (!isExpanded) {
-                                isExpanded = true
-                                applyExpandedState()
-                            } else {
-                                // 点击非按钮区域，唤起 MainActivity
-                                val appIntent = Intent(this@AgentFloatingService, MainActivity::class.java).apply {
-                                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                            // 暂停态下文案提示「点击继续」，点胶囊主体必须兑现同一语义
+                            // （修复前点主体打开的是 MainActivity，与提示自相矛盾，ISSUE-204）
+                            val paused = AgentExecutionController.state.value.isPaused
+                            when {
+                                paused && isExpanded -> {
+                                    AgentExecutionController.requestResume()
                                 }
-                                startActivity(appIntent)
+                                !isExpanded -> {
+                                    isExpanded = true
+                                    applyExpandedState()
+                                }
+                                else -> {
+                                    // 点击非按钮区域，唤起 MainActivity
+                                    val appIntent = Intent(this@AgentFloatingService, MainActivity::class.java).apply {
+                                        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                                    }
+                                    startActivity(appIntent)
+                                }
                             }
                         }
                         return true
@@ -347,16 +358,28 @@ class AgentFloatingService : Service() {
 
                 // 同步更新通知栏与浮窗状态
                 if (state.isRunning) {
+                    actionButton?.text = "⏹ 停止"
                     updateNotification("$stepPrefix$briefAction")
                 } else if (state.isPaused) {
+                    // 暂停态：按钮与文案统一为「继续」语义（ISSUE-204）
+                    actionButton?.text = "▶ 继续"
                     updateNotification("⏸ 任务已在断点处暂停，点击可恢复")
                     val tv = floatingView?.findViewById<TextView>(STATUS_TEXT_ID)
                     tv?.text = "⏸ [第${state.currentStep}步断点暂停] 点击继续"
                 } else {
+                    actionButton?.text = "⏹ 停止"
                     updateNotification(state.currentAction.ifBlank { "任务已结束" })
                     // 任务彻底结束（非断点暂停），延时 1.5 秒自动收起销毁浮窗
                     delay(1500)
-                    stopSelf()
+                    // 竞态防护（ISSUE-203）：collect 顺序处理状态发射，延迟期间
+                    // 用户可能已发起新任务。必须重新读取最新状态，仅当仍处于
+                    // 「未运行且未暂停」才自毁，否则会杀死新任务的浮窗与通知。
+                    val latest = AgentExecutionController.state.value
+                    if (com.paw.agent.device.floating.AgentFloatingServicePolicy
+                            .shouldAutoStopAfterFinish(latest.isRunning, latest.isPaused)
+                    ) {
+                        stopSelf()
+                    }
                 }
             }
         }
@@ -370,6 +393,7 @@ class AgentFloatingService : Service() {
             runCatching { windowManager.removeView(it) }
         }
         floatingView = null
+        actionButton = null
     }
 
     private fun dpToPx(dp: Int): Int {

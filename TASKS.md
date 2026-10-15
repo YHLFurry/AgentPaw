@@ -1,7 +1,7 @@
 # AgentPaw 任务管理与进度清单 (TASKS)
 
 > 本文档用于跟踪 AgentPaw 的核心研发任务、待办事项、修复计划及实际验证状态。
-> 更新时间：2026-10-10
+> 更新时间：2026-10-15
 
 ---
 
@@ -76,4 +76,20 @@
 | **TASK-SEC-009** | `P2 (中)` | `core/agent` | `Agent.kt` 本地图片读取增加安全路径沙箱与后缀白名单校验，禁止跨目录读取任意敏感文件 | `VERIFIED` | [`Agent.kt`](file:///d:/Projects/AgentPaw/agentpaw-core/src/main/java/com/paw/agent/core/agent/Agent.kt) 仅限合法图像扩展名与 10MB 限额 |
 | **TASK-SEC-010** | `P2 (中)` | `core/llm` | `OpenAiCompatibleClient.isLocalOrPrivateAddress` 补充 IPv6 私有地址 (ULA/Link-Local) 及防伪造校验 | `VERIFIED` | [`OpenAiCompatibleClientSecurityTest.kt`](file:///d:/Projects/AgentPaw/agentpaw-core/src/test/java/com/paw/agent/core/llm/OpenAiCompatibleClientSecurityTest.kt) 验证通过 |
 | **TASK-SEC-011** | `P2 (中)` | `core/device` | `HybridPhoneController.pressEnter` 无障碍通道增加原生焦点节点 `ACTION_IME_ENTER` 触发 | `VERIFIED` | [`HybridPhoneController.kt`](file:///d:/Projects/AgentPaw/agentpaw-core/src/main/java/com/paw/agent/device/HybridPhoneController.kt) 编译通过与单元测试通过 |
+
+---
+
+## 五、 2026-10-15 真实用户视角巡检修复轮次（详见 docs/ISSUES.md）
+
+> 本轮方法：先写会变红的测试 → 确认失败 → 实施修复 → 确认通过 → 全量回归。
+> 每个缺陷均记录了「修复前回退验证」证据（测试确实能变红）。
+
+| 任务 ID | 优先级 | 模块 | 缺陷与修复内容 | 状态 | 修复文件与验证证据 |
+|---|---|---|---|---|---|
+| **TASK-201** | `P1 (高)` | `core/device` | **ISSUE-201**：`launchApp`/`openDeepLink` 遗漏 `userStopRequested()` 停止守卫，用户点停止后 Agent 仍会拉起应用/DeepLink | `VERIFIED` | [`HybridPhoneController.kt`](file:///d:/Projects/AgentPaw/agentpaw-core/src/main/java/com/paw/agent/device/HybridPhoneController.kt) 两方法入口补门禁；新增 [`HybridPhoneControllerStopGuardTest.kt`](file:///d:/Projects/AgentPaw/agentpaw-core/src/test/java/com/paw/agent/device/HybridPhoneControllerStopGuardTest.kt) 5 项：**修复前 4 项红 / 修复后 5 项全绿** |
+| **TASK-202** | `P1 (高)` | `core/device` + `app/ui` | **ISSUE-202**：RootController 探测缓存永不失效且 `HybridPhoneController` 与 `DevicePermissionManager` 各持一个实例，设置页刷新触达不到执行通道，用户已授权 Root 仍静默降级 | `VERIFIED` | [`RootController.kt`](file:///d:/Projects/AgentPaw/agentpaw-core/src/main/java/com/paw/agent/device/root/RootController.kt)（探测方法 protected open 化）、[`DevicePermissionManager.kt`](file:///d:/Projects/AgentPaw/agentpaw-core/src/main/java/com/paw/agent/device/DevicePermissionManager.kt)（共享单实例 + `refreshRootAvailability()`）、[`HybridPhoneController.kt`](file:///d:/Projects/AgentPaw/agentpaw-core/src/main/java/com/paw/agent/device/HybridPhoneController.kt)（默认实例改为共享）、[`AgentPawApp.kt`](file:///d:/Projects/AgentPaw/app/src/main/java/com/paw/agent/ui/navigation/AgentPawApp.kt)（开启 Root 模式时刷新）、[`ChatScreen.kt`](file:///d:/Projects/AgentPaw/app/src/main/java/com/paw/agent/ui/chat/ChatScreen.kt)（ON_RESUME 异步刷新 + 首探移 IO 线程）；新增 [`RootControllerSharingTest.kt`](file:///d:/Projects/AgentPaw/agentpaw-core/src/test/java/com/paw/agent/device/RootControllerSharingTest.kt) 4 项：**回退旧接线后 4 项全红 / 修复后全绿**；真机授权翻转验证待设备 |
+| **TASK-203** | `P2 (中)` | `app/floating` + `core/device` | **ISSUE-203**：悬浮窗服务收到「任务结束」后无条件 `delay(1500)+stopSelf()`，collect 顺序处理发射导致宽限期内发起的新任务浮窗/前台通知被提前销毁 | `VERIFIED` | [`AgentFloatingService.kt`](file:///d:/Projects/AgentPaw/app/src/main/java/com/paw/agent/ui/floating/AgentFloatingService.kt)（延迟后重新校验状态）、[`AgentFloatingVisibility.kt`](file:///d:/Projects/AgentPaw/agentpaw-core/src/main/java/com/paw/agent/device/floating/AgentFloatingVisibility.kt)（新增纯策略 `AgentFloatingServicePolicy.shouldAutoStopAfterFinish`）；[`AgentFloatingVisibilityTest.kt`](file:///d:/Projects/AgentPaw/agentpaw-core/src/test/java/com/paw/agent/device/floating/AgentFloatingVisibilityTest.kt) 补 3 项策略测试全绿 |
+| **TASK-204** | `P2 (中)` | `app/floating` | **ISSUE-204**：断点暂停态悬浮胶囊按钮仍显示「⏹ 停止」，文案提示「点击继续」但点胶囊主体却打开 MainActivity，交互自相矛盾 | `VERIFIED` | [`AgentFloatingService.kt`](file:///d:/Projects/AgentPaw/app/src/main/java/com/paw/agent/ui/floating/AgentFloatingService.kt)：暂停态按钮文案切换「▶ 继续」、点胶囊主体兑现恢复语义；编译通过，真机点击验证待设备 |
+| **TASK-205** | `P3 (低)` | `core/tools` | **ISSUE-205**：`launch_app`/`open_deeplink` 返回 JSON 用字符串插值拼接，LLM 入参含引号/反斜杠时产出损坏 JSON | `VERIFIED` | [`AndroidPhoneTools.kt`](file:///d:/Projects/AgentPaw/agentpaw-core/src/main/java/com/paw/agent/core/tool/android/AndroidPhoneTools.kt) 改 `buildJsonObject` 结构化序列化；新增 [`AndroidPhoneToolsJsonSafetyTest.kt`](file:///d:/Projects/AgentPaw/agentpaw-core/src/test/java/com/paw/agent/core/tool/android/AndroidPhoneToolsJsonSafetyTest.kt) 5 项：**回退插值后引号用例红 / 修复后全绿** |
+| **TASK-206** | `P3 (低)` | 文档 | **ISSUE-006**：README 测试数 Badge 写 177，实跑为 178 | `VERIFIED` | `testDebugUnitTest` 实跑 25 个测试类 XML 合计 `tests=178 failures=0`；README 双语文档已同步 |
 

@@ -354,8 +354,21 @@ class LaunchAppTool(
         }
 
         val ok = phoneController.launchApp(appName)
-        return if (ok) """{"status":"success","launched":"$appName"}"""
-        else """{"status":"error","message":"Could not launch app '$appName'. Ensure it is installed."}"""
+        return if (ok) {
+            // 结构化序列化：appName 可能包含引号/反斜杠等字符，
+            // 字符串插值会产出损坏的 JSON（ISSUE-205）
+            val response = buildJsonObject {
+                put("status", JsonPrimitive("success"))
+                put("launched", JsonPrimitive(appName))
+            }
+            json.encodeToString(JsonObject.serializer(), response)
+        } else {
+            val response = buildJsonObject {
+                put("status", JsonPrimitive("error"))
+                put("message", JsonPrimitive("Could not launch app '$appName'. Ensure it is installed."))
+            }
+            json.encodeToString(JsonObject.serializer(), response)
+        }
     }
 }
 
@@ -399,8 +412,21 @@ class DeepLinkTool(
         }
 
         val ok = phoneController.openDeepLink(uri)
-        return if (ok) """{"status":"success","opened":"$uri"}"""
-        else """{"status":"error","message":"Could not open deeplink URI '$uri'"}"""
+        return if (ok) {
+            // 结构化序列化：uri 可能包含引号/反斜杠等字符，
+            // 字符串插值会产出损坏的 JSON（ISSUE-205）
+            val response = buildJsonObject {
+                put("status", JsonPrimitive("success"))
+                put("opened", JsonPrimitive(uri))
+            }
+            json.encodeToString(JsonObject.serializer(), response)
+        } else {
+            val response = buildJsonObject {
+                put("status", JsonPrimitive("error"))
+                put("message", JsonPrimitive("Could not open deeplink URI '$uri'"))
+            }
+            json.encodeToString(JsonObject.serializer(), response)
+        }
     }
 }
 

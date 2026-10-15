@@ -16,7 +16,7 @@
   <img src="https://img.shields.io/badge/Platform-Android_8.0+_(API_26+)-3DDC84?logo=android&logoColor=white" alt="Platform" />
   <img src="https://img.shields.io/badge/Kotlin-2.2.21-7F52FF?logo=kotlin&logoColor=white" alt="Kotlin" />
   <img src="https://img.shields.io/badge/Jetpack_Compose-Material_3_&_Miuix-4285F4?logo=jetpackcompose&logoColor=white" alt="UI" />
-  <img src="https://img.shields.io/badge/Tests-177_Passed-brightgreen" alt="Tests" />
+  <img src="https://img.shields.io/badge/Tests-195_Passed-brightgreen" alt="Tests" />
   <img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License" />
 </p>
 
@@ -152,7 +152,7 @@ cd AgentPaw
 # Compile Debug APK
 ./gradlew :app:assembleDebug
 
-# Run all 139 unit tests across all modules
+# Run all unit tests across all modules
 ./gradlew testDebugUnitTest
 ```
 
@@ -160,7 +160,7 @@ The compiled APK will be located at:
 `app/build/outputs/apk/debug/app-debug.apk`
 
 ### Test Coverage Highlights
-All **139** unit tests (122 core + 17 app) pass out-of-the-box on the JVM without requiring an emulator:
+All unit tests (core + app modules) pass out-of-the-box on the JVM without requiring an emulator:
 - `ResumeIntentDetectorTest`: Breakpoint intent parsing, follow-up instructions, resume prompt generation.
 - `AgentTest`: Multi-round loop, cancellation, tool recovery, and event emission.
 - `InterpreterTest`: Sandboxed shell execution, security path boundaries, pipelines, and arithmetic logic.

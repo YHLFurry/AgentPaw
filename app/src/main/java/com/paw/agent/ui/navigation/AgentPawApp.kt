@@ -73,6 +73,12 @@ fun AgentPawApp(
         } else {
             com.paw.agent.device.PhoneControlMode.AUTO
         }
+        // 开启 Root 模式时主动重新探测授权状态（ISSUE-202）：
+        // Root 授权可能在本进程启动后才完成，缓存不会自动过期，
+        // 不刷新会让用户已授权的 ROOT 通道静默失效。
+        if (settings.rootModeEnabled) {
+            com.paw.agent.device.DevicePermissionManager.refreshRootAvailability()
+        }
     }
 
     val chatViewModel: ChatViewModel = viewModel(

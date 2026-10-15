@@ -13,7 +13,9 @@ import kotlin.math.roundToInt
 class HybridPhoneController(
     private val context: Context? = null,
     val shizukuController: ShizukuController = ShizukuController(),
-    val rootController: com.paw.agent.device.root.RootController = com.paw.agent.device.root.RootController(),
+    // 与 DevicePermissionManager 共享同一 Root 实例：设置页/前台恢复刷新的
+    // Root 授权状态会立即反映到执行通道，杜绝双实例缓存背离（ISSUE-202）。
+    val rootController: com.paw.agent.device.root.RootController = DevicePermissionManager.rootController,
     private val screenshotProcessor: AdaptiveScreenshotProcessor = AdaptiveScreenshotProcessor(),
 ) : PhoneController {
 
@@ -450,6 +452,8 @@ class HybridPhoneController(
     }
 
     override suspend fun launchApp(packageNameOrName: String): Boolean = withContext(Dispatchers.IO) {
+        // 与 tap/swipe/inputText 等全部交互方法一致：用户请求停止后不得再变更设备状态
+        if (userStopRequested()) return@withContext false
         val pm = context?.packageManager
         val query = packageNameOrName.trim().lowercase()
 
@@ -572,6 +576,8 @@ class HybridPhoneController(
     override suspend fun openDeepLink(uri: String): Boolean = withContext(Dispatchers.IO) {
         val safeUri = uri.trim()
         if (safeUri.isBlank()) return@withContext false
+        // 与 tap/swipe/inputText 等全部交互方法一致：用户请求停止后不得再变更设备状态
+        if (userStopRequested()) return@withContext false
 
         val lower = safeUri.lowercase()
         val scheme = lower.substringBefore("://").substringBefore(":")
