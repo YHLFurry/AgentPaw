@@ -133,6 +133,33 @@
 
 ---
 
+## ISSUE-207：无障碍模式 Agent 点击仅靠手势盲打，缺乏节点级精度细节
+
+- **优先级**：P1（高）
+- **类别**：核心业务流 / 点击精度
+- **模块**：`agentpaw-core` / `device` / `accessibility`
+- **证据**：
+  - 修复前 `AgentAccessibilityService.clickAt` 只有一条路径：`dispatchGesture` 按坐标盲打，无坐标钳制、无失败重试；
+  - `HybridPhoneController` 的 `tap` / `tapAtPixel` / `longPress` 无障碍分支直接 `service.clickAt(x, y)`——即使 `click_element` 已经从无障碍树拿到了精确 bounds，最终仍退化为「按几何中心手势盲打」，白丢了树信息；
+  - `pressEnter` 无障碍兜底固定盲点 `refWidth*0.92 / refHeight*0.94`（右下角），不识别真实「发送」按钮位置。
+- **失手场景（真机高频）**：
+  1. 目标被 Toast / 弹窗 / 输入法部分遮挡，几何中心已不在可点区域；
+  2. 可点击区域只是节点边界的子集（行容器只有左侧图标可点）；
+  3. 图标级小目标（< 24dp）或滚动中刚发生位移的列表项；
+  4. 截图源尺寸与当前屏幕不一致（旋转/多屏）时越界坐标被 `dispatchGesture` 直接拒收；
+  5. 部分 ROM 对极短注入手势偶发吞击、系统忙时立即返回 false；
+  6. 聊天类 App 的「发送」按钮不是 EditorAction，IME 动作失败后盲点右下角 Miss。
+- **修复方案**（节点锚定优先，手势兜底）：
+  1. 新增纯逻辑 `AccessibilityClickResolver`：取包含坐标的**最深层可见节点**（面积最小，平级取绘制更靠上者），再沿父链找第一个**可点击/可长按祖先**——命中判定交还 framework，零坐标误差；半开区间命中避免相邻按钮双命中；父链成环防御；
+  2. `AgentAccessibilityService` 新增 `clickNodeAt` / `longPressNodeAt`（对命中节点执行 `ACTION_CLICK` / `ACTION_LONG_CLICK`）、`clickSubmitActionNode`（回车兜底改认底部操作带「发送/提交/确认」语义节点，且有焦点输入节点才启用）；
+  3. 全部手势路径（click/doubleClick/longPress/swipe）先按真实显示边界（`maximumWindowMetrics` / `getRealSize`）钳制坐标，再派发；瞬时失败（系统忙/被抢占）单次重试，重试窗口仍受停止门禁保护；
+  4. `HybridPhoneController` 无障碍分支改为「节点锚定点击优先、手势注入兜底」，双击刻意保持手势（`OnDoubleTapListener` 由触摸驱动，连点 `ACTION_CLICK` 不触发）；
+  5. 类改 `open` + `accessibilityTapAt` / `accessibilityLongPressAt` protected open 接缝，使优先级链可在 JVM 单测中验证。
+- **验收标准**：新增 23 项单测（解析器 14 项场景 + 控制器接缝 9 项优先级链）；全量回归 0 失败；Root/Shizuku 链路行为不回退（既有优先级测试全绿）。
+- **状态**：已修复并验证（见 TASKS.md TASK-207；真机点击精度提升待设备实测）。
+
+---
+
 ## 修复后回归检查记录
 
 | 检查项 | 命令 | 结果 |
