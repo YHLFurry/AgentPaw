@@ -93,3 +93,16 @@
 | **TASK-205** | `P3 (低)` | `core/tools` | **ISSUE-205**：`launch_app`/`open_deeplink` 返回 JSON 用字符串插值拼接，LLM 入参含引号/反斜杠时产出损坏 JSON | `VERIFIED` | [`AndroidPhoneTools.kt`](file:///d:/Projects/AgentPaw/agentpaw-core/src/main/java/com/paw/agent/core/tool/android/AndroidPhoneTools.kt) 改 `buildJsonObject` 结构化序列化；新增 [`AndroidPhoneToolsJsonSafetyTest.kt`](file:///d:/Projects/AgentPaw/agentpaw-core/src/test/java/com/paw/agent/core/tool/android/AndroidPhoneToolsJsonSafetyTest.kt) 5 项：**回退插值后引号用例红 / 修复后全绿** |
 | **TASK-206** | `P3 (低)` | 文档 | **ISSUE-006**：README 测试数 Badge 写 177，实跑为 178 | `VERIFIED` | `testDebugUnitTest` 实跑 25 个测试类 XML 合计 `tests=178 failures=0`；README 双语文档已同步 |
 
+
+---
+
+## 六、 Agent 点击精度强化轮次（无障碍模式重点，详见 docs/ISSUES.md ISSUE-207）
+
+> 本轮方法：先写会变红的测试 → 确认失败 → 实施修复 → 确认通过 → 全量回归。
+> 背景：无障碍模式下所有点击最终都退化为「按坐标手势盲打」，即使 `click_element`
+> 已从无障碍树拿到精确 bounds；遮挡、小目标、滚动位移、越界坐标、ROM 吞短手势
+> 都会造成失手。
+
+| 任务 ID | 优先级 | 模块 | 缺陷与修复内容 | 状态 | 修复文件与验证证据 |
+|---|---|---|---|---|---|
+| **TASK-207** | `P1 (高)` | `core/device` + `core/accessibility` | **ISSUE-207**：无障碍点击接入「节点锚定优先、手势兜底」——新增纯逻辑命中解析器（最深可见节点 + 父链可点击祖先）、服务侧 `clickNodeAt`/`longPressNodeAt`/`clickSubmitActionNode`、坐标按真实显示边界钳制、手势瞬时失败单次重试；`pressEnter` 兜底从盲点右下角升级为「IME 动作 → 底部提交节点 → 盲点」三级降级 | `VERIFIED` | 新增 [`AccessibilityClickResolver.kt`](file:///d:/Projects/AgentPaw/agentpaw-core/src/main/java/com/paw/agent/device/accessibility/AccessibilityClickResolver.kt)；改造 [`AgentAccessibilityService.kt`](file:///d:/Projects/AgentPaw/agentpaw-core/src/main/java/com/paw/agent/device/accessibility/AgentAccessibilityService.kt) 与 [`HybridPhoneController.kt`](file:///d:/Projects/AgentPaw/agentpaw-core/src/main/java/com/paw/agent/device/HybridPhoneController.kt)（类改 open + 两个 protected open 接缝）；新增 [`AccessibilityClickResolverTest.kt`](file:///d:/Projects/AgentPaw/agentpaw-core/src/test/java/com/paw/agent/device/accessibility/AccessibilityClickResolverTest.kt) 14 项 + [`HybridPhoneControllerAccessibilityClickTest.kt`](file:///d:/Projects/AgentPaw/agentpaw-core/src/test/java/com/paw/agent/device/HybridPhoneControllerAccessibilityClickTest.kt) 9 项：**修复前接缝不存在（编译红）/ 修复后 23 项全绿**；`:agentpaw-core:testDebugUnitTest` 26 类 194 项 0 失败（基线 171），`:app:assembleDebug` 通过；真机精度提升待设备实测 |

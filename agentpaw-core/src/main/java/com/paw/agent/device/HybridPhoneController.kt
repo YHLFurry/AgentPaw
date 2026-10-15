@@ -10,7 +10,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 
-class HybridPhoneController(
+open class HybridPhoneController(
     private val context: Context? = null,
     val shizukuController: ShizukuController = ShizukuController(),
     // 与 DevicePermissionManager 共享同一 Root 实例：设置页/前台恢复刷新的
@@ -130,6 +130,34 @@ class HybridPhoneController(
         kotlinx.coroutines.delay(100)
     }
 
+    /**
+     * 无障碍通道点击（[tap] / [tapAtPixel] 共用）。
+     *
+     * 精度策略：**节点锚定点击优先，手势注入兜底**——
+     * 1. `clickNodeAt`：把坐标解析为最深层可见节点并沿父链找可点击祖先，
+     *    直接执行 ACTION_CLICK。命中判定由 framework 完成，不受「边界中心被
+     *    遮挡 / 可点区域小于边界 / 图标级小目标 / 滚动位移」影响，是树可见
+     *    区域（常规原生 UI）的最精准路径；
+     * 2. `clickAt`：手势注入盲打，覆盖 WebView / 游戏 / SurfaceView 等
+     *    树信息缺失的自定义渲染区域。
+     *
+     * protected open 便于单元测试注入替身，验证 Root > Shizuku > 无障碍
+     * 优先级链与「节点优先、手势兜底」的接线（服务实例在 JVM 单测中不可用）。
+     */
+    protected open suspend fun accessibilityTapAt(x: Float, y: Float): Boolean {
+        val service = AgentAccessibilityService.instance ?: return false
+        return service.clickNodeAt(x, y) || service.clickAt(x, y)
+    }
+
+    /**
+     * 无障碍通道长按：树显式声明 isLongClickable 时走 ACTION_LONG_CLICK，
+     * 否则回退手势长按（应用自绘长按不向无障碍树声明，手势才保真）。
+     */
+    protected open suspend fun accessibilityLongPressAt(x: Float, y: Float, durationMs: Long): Boolean {
+        val service = AgentAccessibilityService.instance ?: return false
+        return service.longPressNodeAt(x, y) || service.longPressAt(x, y, durationMs)
+    }
+
     override suspend fun tap(xNormalized: Int, yNormalized: Int, cropRoi: List<Int>?): Boolean {
         if (userStopRequested()) return false
         val (x, y) = toPhysical(xNormalized, yNormalized, cropRoi)
@@ -146,13 +174,10 @@ class HybridPhoneController(
             if (ok) { settleAfterTap(); return true }
         }
 
-        // 3. 无障碍服务兜底
+        // 3. 无障碍服务兜底（节点锚定点击优先，手势注入兜底）
         if (isAccessibilityAllowed) {
-            val service = AgentAccessibilityService.instance
-            if (service != null) {
-                val ok = service.clickAt(x, y)
-                if (ok) { settleAfterTap(); return true }
-            }
+            val ok = accessibilityTapAt(x, y)
+            if (ok) { settleAfterTap(); return true }
         }
         return false
     }
@@ -178,6 +203,8 @@ class HybridPhoneController(
         }
 
         // 3. 无障碍服务兜底
+        //    双击刻意保持手势注入：双击监听（OnDoubleTapListener / 视频点赞 /
+        //    地图缩放）由触摸手势驱动，对节点连点两次 ACTION_CLICK 不会触发。
         if (isAccessibilityAllowed) {
             val service = AgentAccessibilityService.instance
             if (service != null) {
@@ -205,13 +232,10 @@ class HybridPhoneController(
             if (ok) { settleAfterTap(); return true }
         }
 
-        // 3. 无障碍服务兜底
+        // 3. 无障碍服务兜底（树声明可长按才走节点，否则手势长按保真）
         if (isAccessibilityAllowed) {
-            val service = AgentAccessibilityService.instance
-            if (service != null) {
-                val ok = service.longPressAt(x, y, durationMs)
-                if (ok) { settleAfterTap(); return true }
-            }
+            val ok = accessibilityLongPressAt(x, y, durationMs)
+            if (ok) { settleAfterTap(); return true }
         }
 
         return false
@@ -232,13 +256,10 @@ class HybridPhoneController(
             if (ok) { settleAfterTap(); return true }
         }
 
-        // 3. 无障碍服务兜底
+        // 3. 无障碍服务兜底（节点锚定点击优先，手势注入兜底）
         if (isAccessibilityAllowed) {
-            val service = AgentAccessibilityService.instance
-            if (service != null) {
-                val ok = service.clickAt(centerX, centerY)
-                if (ok) { settleAfterTap(); return true }
-            }
+            val ok = accessibilityTapAt(centerX, centerY)
+            if (ok) { settleAfterTap(); return true }
         }
         return false
     }
@@ -443,6 +464,11 @@ class HybridPhoneController(
                 }.getOrDefault(false)
                 if (handledByNode) return true
 
+                // IME 动作不可用（如聊天类 App 的「发送」按钮不是 EditorAction）时，
+                // 点击底部操作带中语义为「发送/提交/确认」的节点，比盲点右下角更精准
+                if (service.clickSubmitActionNode()) return true
+
+                // 最后才盲点右下角（保持旧有兜底行为）
                 val enterX = refWidth() * 0.92f
                 val enterY = refHeight() * 0.94f
                 return service.clickAt(enterX, enterY)
