@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -48,7 +49,13 @@ import com.paw.agent.ui.components.adaptive.AppSwitch
 import com.paw.agent.ui.components.adaptive.AppText
 import com.paw.agent.ui.components.adaptive.AppTextButton
 import com.paw.agent.ui.components.adaptive.AppTopAppBar
+import com.paw.agent.ui.components.adaptive.AppTopBarAction
+import com.paw.agent.ui.components.adaptive.LocalTopBarClearance
 import com.paw.agent.ui.theme.AppTheme
+import top.yukonga.miuix.kmp.basic.Card as MiuixCard
+import top.yukonga.miuix.kmp.basic.CardDefaults as MiuixCardDefaults
+import top.yukonga.miuix.kmp.preference.ArrowPreference
+import top.yukonga.miuix.kmp.preference.SwitchPreference
 
 /*
  * Shared building blocks for the settings screens.
@@ -86,19 +93,38 @@ fun SettingsGroupLabel(text: String, modifier: Modifier = Modifier) {
     )
 }
 
-/** Rounded container that groups related settings. */
+/**
+ * Rounded container that groups related settings.
+ *
+ * Under Miuix this is the library's own [MiuixCard] rather than a hand-built surface: it carries
+ * the HyperOS corner treatment and container colour, and it leaves no `insideMargin` of its own
+ * because the preferences inside it bring their own row padding.
+ */
 @Composable
 fun SettingsCard(
     modifier: Modifier = Modifier,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    AppSurface(
-        modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(CardCorner),
-        color = AppTheme.colors.surfaceContainer,
-        contentColor = AppTheme.colors.onSurface,
-    ) {
-        Column(modifier = Modifier.fillMaxWidth(), content = content)
+    if (AppTheme.isMiuix) {
+        MiuixCard(
+            modifier = modifier.fillMaxWidth(),
+            cornerRadius = CardCorner,
+            insideMargin = PaddingValues(0.dp),
+            colors = MiuixCardDefaults.defaultColors(
+                color = AppTheme.colors.surfaceContainer,
+                contentColor = AppTheme.colors.onSurface,
+            ),
+            content = content,
+        )
+    } else {
+        AppSurface(
+            modifier = modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(CardCorner),
+            color = AppTheme.colors.surfaceContainer,
+            contentColor = AppTheme.colors.onSurface,
+        ) {
+            Column(modifier = Modifier.fillMaxWidth(), content = content)
+        }
     }
 }
 
@@ -151,6 +177,46 @@ fun SettingsNavRow(
     modifier: Modifier = Modifier,
     trailing: String? = null,
 ) {
+    if (AppTheme.isMiuix) {
+        // Miuix 规范：导航行就是 ArrowPreference——标题/摘要/前导图标/右侧箭头都由它自己排，
+        // 不手写 chevron，也不自己铺 clickable，按压反馈与无障碍语义都跟系统一致。
+        ArrowPreference(
+            title = title,
+            summary = summary,
+            onClick = onClick,
+            modifier = modifier,
+            insideMargin = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+            startAction = {
+                AppSurface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = AppTheme.colors.secondaryContainer,
+                    contentColor = AppTheme.colors.onSecondaryContainer,
+                ) {
+                    Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) {
+                        AppIcon(
+                            imageVector = icon,
+                            contentDescription = null,
+                            modifier = Modifier.size(22.dp),
+                        )
+                    }
+                }
+            },
+            endActions = {
+                if (!trailing.isNullOrBlank()) {
+                    AppText(
+                        text = trailing,
+                        modifier = Modifier.widthIn(max = 108.dp),
+                        style = AppTheme.typography.labelMedium,
+                        color = AppTheme.colors.primary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            },
+        )
+        return
+    }
+
     SettingsRow(modifier = modifier.clickable(onClick = onClick)) {
         AppSurface(
             shape = RoundedCornerShape(12.dp),
@@ -313,6 +379,22 @@ fun SettingsSwitchRow(
     subtitle: String? = null,
     enabled: Boolean = true,
 ) {
+    if (AppTheme.isMiuix) {
+        // Miuix 规范：开关行用 SwitchPreference，标题/摘要/开关位置与按压反馈都交给它。
+        SwitchPreference(
+            title = title,
+            summary = subtitle,
+            checked = checked,
+            // SwitchPreference 收的是非空回调：禁用态由它自己的 enabled 管住交互，
+            // 这里只需保证被禁用时不把新值写回。
+            onCheckedChange = { if (enabled) onCheckedChange(it) },
+            enabled = enabled,
+            modifier = modifier,
+            insideMargin = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+        )
+        return
+    }
+
     SettingsRow(modifier = modifier) {
         Column(Modifier.weight(1f)) {
             AppText(
@@ -484,13 +566,16 @@ fun SettingsPageScaffold(
     actions: @Composable RowScope.() -> Unit = {},
     content: @Composable ColumnScope.() -> Unit,
 ) {
+    val scrollState = rememberScrollState()
     AppScaffold(
         modifier = modifier,
         topBar = {
             AppTopAppBar(
                 title = title,
+                // 玻璃顶栏的材质随"页面是否已离开顶部"亮起，用滚动状态而不是常量来驱动。
+                isContentScrolled = scrollState.value > 0,
                 navigationIcon = {
-                    AppIconButton(onClick = onBack) {
+                    AppTopBarAction(onClick = onBack) {
                         AppIcon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = stringResource(R.string.cd_back),
@@ -508,8 +593,15 @@ fun SettingsPageScaffold(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(padding)
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 12.dp),
+                .verticalScroll(scrollState)
+                // 顶栏那一份高度花在可滚动内容上：首屏第一条仍然落在顶栏下方，之后的内容
+                // 从顶栏的渐隐带下穿过。写成根布局的 padding 会变成一条永不滚动的死带。
+                .padding(
+                    start = 16.dp,
+                    end = 16.dp,
+                    top = 12.dp + LocalTopBarClearance.current,
+                    bottom = 12.dp,
+                ),
             content = content,
         )
     }

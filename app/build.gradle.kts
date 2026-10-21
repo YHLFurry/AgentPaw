@@ -140,6 +140,8 @@ dependencies {
     // 可选 UI 主题：Miuix（HyperOS 风格）。Material 主题不依赖它，两套主题共存。
     implementation(libs.miuix.ui)
     implementation(libs.miuix.preference)
+    // miuix-glass 的玻璃材质靠它采样背景层、跑模糊与 AGSL 着色器。
+    implementation(libs.miuix.blur)
 
     debugImplementation(libs.androidx.ui.tooling)
     debugImplementation(libs.androidx.ui.test.manifest)

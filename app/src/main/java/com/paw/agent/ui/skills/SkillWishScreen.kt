@@ -37,6 +37,8 @@ import com.paw.agent.ui.components.adaptive.AppSurface
 import com.paw.agent.ui.components.adaptive.AppText
 import com.paw.agent.ui.components.adaptive.AppTextField
 import com.paw.agent.ui.components.adaptive.AppTopAppBar
+import com.paw.agent.ui.components.adaptive.AppTopBarAction
+import com.paw.agent.ui.components.adaptive.LocalTopBarClearance
 import com.paw.agent.ui.settings.SettingsCard
 import com.paw.agent.ui.settings.SettingsGroupLabel
 import com.paw.agent.ui.theme.AppTheme
@@ -59,14 +61,16 @@ fun SkillWishScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val preview = state.wishPreview
     val configReady = llmConfig.isUsable
+    val scrollState = rememberScrollState()
 
     AppScaffold(
         modifier = modifier.fillMaxSize(),
         topBar = {
             AppTopAppBar(
                 title = stringResource(R.string.skills_wish_title),
+                isContentScrolled = scrollState.value > 0,
                 navigationIcon = {
-                    AppIconButton(onClick = onBack) {
+                    AppTopBarAction(onClick = onBack) {
                         AppIcon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = stringResource(R.string.cd_back),
@@ -82,8 +86,14 @@ fun SkillWishScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 12.dp),
+                .verticalScroll(scrollState)
+                // 顶栏高度作为可滚动内容的顶部间距，内容从玻璃渐隐带下穿过。
+                .padding(
+                    start = 16.dp,
+                    end = 16.dp,
+                    top = 12.dp + LocalTopBarClearance.current,
+                    bottom = 12.dp,
+                ),
         ) {
             AppSurface(
                 shape = RoundedCornerShape(18.dp),

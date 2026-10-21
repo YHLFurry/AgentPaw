@@ -58,6 +58,8 @@ import com.paw.agent.ui.components.adaptive.AppScaffold
 import com.paw.agent.ui.components.adaptive.AppSurface
 import com.paw.agent.ui.components.adaptive.AppText
 import com.paw.agent.ui.components.adaptive.AppTopAppBar
+import com.paw.agent.ui.components.adaptive.AppTopBarAction
+import com.paw.agent.ui.components.adaptive.LocalTopBarClearance
 import com.paw.agent.ui.theme.AppTheme
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -77,14 +79,16 @@ fun HistoryScreen(
     val selectedForCompare = remember { mutableStateListOf<String>() }
     var isCompareMode by remember { mutableStateOf(false) }
     var pendingDeleteConvId by remember { mutableStateOf<String?>(null) }
+    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
 
     AppScaffold(
         modifier = modifier.fillMaxSize(),
         topBar = {
             AppTopAppBar(
                 title = stringResource(R.string.history_title),
+                isContentScrolled = listState.canScrollBackward,
                 navigationIcon = {
-                    AppIconButton(onClick = onBack) {
+                    AppTopBarAction(onClick = onBack) {
                         AppIcon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = stringResource(R.string.cd_back),
@@ -93,7 +97,7 @@ fun HistoryScreen(
                 },
                 actions = {
                     if (historyList.size >= 2) {
-                        AppIconButton(onClick = {
+                        AppTopBarAction(onClick = {
                             isCompareMode = !isCompareMode
                             if (!isCompareMode) selectedForCompare.clear()
                         }) {
@@ -157,9 +161,15 @@ fun HistoryScreen(
                 }
 
                 LazyColumn(
+                    state = listState,
+                    // 外边距维持原样，顶栏那一份高度额外作为 contentPadding：
+                    // Material 下它是 0，布局与改动前逐像素一致。
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(horizontal = 16.dp, vertical = 12.dp),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                        top = LocalTopBarClearance.current,
+                    ),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     items(historyList, key = { it.id }) { conv ->

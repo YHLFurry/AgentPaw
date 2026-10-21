@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -59,6 +60,8 @@ import com.paw.agent.ui.components.adaptive.AppSwitch
 import com.paw.agent.ui.components.adaptive.AppText
 import com.paw.agent.ui.components.adaptive.AppTextField
 import com.paw.agent.ui.components.adaptive.AppTopAppBar
+import com.paw.agent.ui.components.adaptive.AppTopBarAction
+import com.paw.agent.ui.components.adaptive.LocalTopBarClearance
 import com.paw.agent.ui.theme.AppTheme
 
 /**
@@ -78,6 +81,7 @@ fun SkillsHubScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val listState = rememberLazyListState()
 
     var pendingDelete by remember { mutableStateOf<SkillDefinition?>(null) }
     var showImport by remember { mutableStateOf(false) }
@@ -100,8 +104,9 @@ fun SkillsHubScreen(
             AppTopAppBar(
                 title = stringResource(R.string.skills_title),
                 subtitle = stringResource(R.string.skills_subtitle_count, state.skills.size),
+                isContentScrolled = listState.canScrollBackward,
                 navigationIcon = {
-                    AppIconButton(onClick = onBack) {
+                    AppTopBarAction(onClick = onBack) {
                         AppIcon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = stringResource(R.string.cd_back),
@@ -109,7 +114,7 @@ fun SkillsHubScreen(
                     }
                 },
                 actions = {
-                    AppIconButton(onClick = {
+                    AppTopBarAction(onClick = {
                         copyToClipboard(context, viewModel.exportAll())
                         Toast.makeText(context, "已复制全部技能 JSON 到剪贴板", Toast.LENGTH_SHORT).show()
                     }) {
@@ -118,7 +123,7 @@ fun SkillsHubScreen(
                             contentDescription = stringResource(R.string.skills_export),
                         )
                     }
-                    AppIconButton(onClick = { showImport = true }) {
+                    AppTopBarAction(onClick = { showImport = true }) {
                         AppIcon(
                             imageVector = Icons.Default.Upload,
                             contentDescription = stringResource(R.string.skills_import),
@@ -131,12 +136,17 @@ fun SkillsHubScreen(
         containerColor = AppTheme.colors.background,
     ) { innerPadding ->
         LazyColumn(
+            state = listState,
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 12.dp),
+            // 顶栏高度花在 contentPadding 上：首屏内容仍在顶栏下方，滚动时从渐隐带下穿过。
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                top = 12.dp + LocalTopBarClearance.current,
+                bottom = 12.dp,
+            ),
         ) {
             item {
                 WishEntryCard(onClick = onOpenWish)

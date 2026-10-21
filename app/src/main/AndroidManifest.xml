@@ -1,5 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!--
+      miuix-blur（miuix-glass 的背景层/模糊管线）声明 minSdk 32，本项目仍要支持到 26。
+      该库只在 Miuix 主题下被玻璃顶栏用到，且自身按 SDK_INT 降级：不支持的设备走
+      GlassSmallTopAppBar 的实色填充分支，不会触碰到高版本 API。与上游 Termux Ultra 同处理。
+    -->
+    <uses-sdk tools:overrideLibrary="top.yukonga.miuix.kmp.blur" />
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />

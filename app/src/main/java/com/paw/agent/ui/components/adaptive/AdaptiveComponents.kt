@@ -10,6 +10,10 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.calculateEndPadding
+import androidx.compose.foundation.layout.calculateStartPadding
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -34,7 +38,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.ProvidableCompositionLocal
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -44,6 +51,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -52,6 +60,12 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.paw.agent.data.settings.UiThemeMode
 import com.paw.agent.ui.theme.AppTheme
+import top.yukonga.miuix.kmp.blur.Backdrop
+import top.yukonga.miuix.kmp.blur.layerBackdrop
+import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
+import top.yukonga.miuix.kmp.glass.GlassIconButton
+import top.yukonga.miuix.kmp.glass.GlassSmallTopAppBar
+import top.yukonga.miuix.kmp.glass.GlassTopAppBarDefaults
 import top.yukonga.miuix.kmp.basic.Card as MiuixCard
 import top.yukonga.miuix.kmp.basic.CardDefaults as MiuixCardDefaults
 import top.yukonga.miuix.kmp.basic.CircularProgressIndicator as MiuixCircularProgressIndicator
@@ -61,7 +75,6 @@ import top.yukonga.miuix.kmp.basic.IconButton as MiuixIconButton
 import top.yukonga.miuix.kmp.preference.RadioButtonPreference
 import top.yukonga.miuix.kmp.basic.Scaffold as MiuixScaffold
 import top.yukonga.miuix.kmp.basic.SmallTitle
-import top.yukonga.miuix.kmp.basic.SmallTopAppBar
 import top.yukonga.miuix.kmp.basic.SnackbarHost as MiuixSnackbarHost
 import top.yukonga.miuix.kmp.basic.SnackbarHostState as MiuixSnackbarHostState
 import top.yukonga.miuix.kmp.basic.Surface as MiuixSurface
@@ -78,6 +91,22 @@ import top.yukonga.miuix.kmp.basic.Text as MiuixText
  * state and callbacks.
  */
 
+/**
+ * How tall the page's top bar is right now, published by [AppScaffold].
+ *
+ * The glass bar occludes with a gradient band of its own, so a page must not push its content
+ * below the bar — a root padding of the bar's height is a dead band that never scrolls away, and
+ * it would leave the gradient nothing to cover. Instead the page lets its content run under the
+ * bar and spends this value as top padding on its own *scrollable* content: the first item still
+ * starts clear of the bar while everything after it passes beneath the band.
+ *
+ * Always `0.dp` under the Material theme, so a page that reads it is a no-op there.
+ */
+val LocalTopBarClearance: ProvidableCompositionLocal<Dp> = compositionLocalOf { 0.dp }
+
+/** The page-as-a-layer a glass top bar samples. [AppScaffold] captures it and publishes it here. */
+private val LocalGlassPageBackdrop = compositionLocalOf<Backdrop?> { null }
+
 @Composable
 fun AppScaffold(
     modifier: Modifier = Modifier,
@@ -88,14 +117,26 @@ fun AppScaffold(
     content: @Composable (PaddingValues) -> Unit,
 ) {
     if (AppTheme.isMiuix) {
-        MiuixScaffold(
-            modifier = modifier,
-            topBar = topBar,
-            bottomBar = bottomBar,
-            snackbarHost = snackbarHost,
-            containerColor = containerColor,
-            content = content,
-        )
+        // The bar samples what runs under it, so the page has to be captured as one layer — and the
+        // capture goes on the content, never on the Scaffold: a layer that enclosed the bar would
+        // have the bar sampling a texture containing itself, and the runtime shaders it draws for
+        // that abort the process the moment the bar re-captures.
+        val layer = rememberLayerBackdrop()
+        CompositionLocalProvider(LocalGlassPageBackdrop provides layer) {
+            MiuixScaffold(
+                modifier = modifier,
+                topBar = topBar,
+                bottomBar = bottomBar,
+                snackbarHost = snackbarHost,
+                containerColor = containerColor,
+            ) { padding ->
+                CompositionLocalProvider(LocalTopBarClearance provides padding.calculateTopPadding()) {
+                    Box(modifier = Modifier.fillMaxSize().layerBackdrop(layer)) {
+                        content(pagePaddingWithoutTop(padding))
+                    }
+                }
+            }
+        }
     } else {
         Scaffold(
             modifier = modifier,
@@ -109,9 +150,30 @@ fun AppScaffold(
 }
 
 /**
+ * [padding] with its top stripped off, for a page whose content has to pass under the glass bar.
+ *
+ * The bottom and the sides are kept, which is where a page's own insets live. The top is reissued
+ * as [LocalTopBarClearance] for the page's scrollable content to spend.
+ */
+@Composable
+private fun pagePaddingWithoutTop(padding: PaddingValues): PaddingValues {
+    val direction = LocalLayoutDirection.current
+    return PaddingValues(
+        start = padding.calculateStartPadding(direction),
+        end = padding.calculateEndPadding(direction),
+        bottom = padding.calculateBottomPadding(),
+    )
+}
+
+/**
  * @param titleContent an optional rich title (icon + text). Miuix renders a fixed
  *   [title]/[subtitle] pair, so it ignores this and the caller passes the same
  *   information as strings.
+ * @param color Material-only container colour. The Miuix branch is a glass bar, which draws the
+ *   page's own background as its occluding band instead of a flat container.
+ * @param isContentScrolled Miuix-only: whether page content has left its resting position, which
+ *   is what lights the bar's material. A lazy list passes `listState.canScrollBackward`; a page
+ *   that does not scroll leaves it at `true` so the bar keeps its full glass.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -123,15 +185,18 @@ fun AppTopAppBar(
     actions: @Composable RowScope.() -> Unit = {},
     titleContent: (@Composable () -> Unit)? = null,
     color: Color = AppTheme.colors.surfaceContainer,
+    isContentScrolled: Boolean = true,
 ) {
     if (AppTheme.isMiuix) {
-        SmallTopAppBar(
+        // 玻璃顶栏：固定小高度、不折叠，内容从它下面穿过。bandBrush 用页面自己的背景色，
+        // 与上沿实、到下沿渐隐的穿透带一起把滚过去的内容压暗淡出。
+        GlassSmallTopAppBar(
             title = title,
-            modifier = modifier,
-            color = color,
-            titleColor = AppTheme.colors.onSurface,
             subtitle = subtitle,
-            subtitleColor = AppTheme.colors.onSurfaceVariant,
+            isContentScrolled = isContentScrolled,
+            modifier = modifier,
+            backdrop = LocalGlassPageBackdrop.current,
+            bandBrush = GlassTopAppBarDefaults.bandBrush(AppTheme.colors.background),
             navigationIcon = navigationIcon,
             actions = actions,
         )
@@ -259,6 +324,28 @@ fun AppIconButton(
 ) {
     if (AppTheme.isMiuix) {
         MiuixIconButton(onClick = onClick, modifier = modifier, enabled = enabled) { content() }
+    } else {
+        IconButton(onClick = onClick, modifier = modifier, enabled = enabled) { content() }
+    }
+}
+
+/**
+ * A control in a top bar: a glass pill with press feedback under Miuix, a plain icon button under
+ * Material.
+ *
+ * The glass bar gives its slots no surface of their own — a control brings its own pill by being
+ * rendered as one — so bar controls go through here rather than [AppIconButton]. Controls inside
+ * the page body keep using [AppIconButton]; only a bar wants the pill.
+ */
+@Composable
+fun AppTopBarAction(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    content: @Composable () -> Unit,
+) {
+    if (AppTheme.isMiuix) {
+        GlassIconButton(onClick = onClick, modifier = modifier, enabled = enabled) { content() }
     } else {
         IconButton(onClick = onClick, modifier = modifier, enabled = enabled) { content() }
     }

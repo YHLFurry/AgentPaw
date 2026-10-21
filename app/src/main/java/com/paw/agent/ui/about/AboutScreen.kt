@@ -51,6 +51,8 @@ import com.paw.agent.ui.components.adaptive.AppScaffold
 import com.paw.agent.ui.components.adaptive.AppSurface
 import com.paw.agent.ui.components.adaptive.AppText
 import com.paw.agent.ui.components.adaptive.AppTopAppBar
+import com.paw.agent.ui.components.adaptive.AppTopBarAction
+import com.paw.agent.ui.components.adaptive.LocalTopBarClearance
 import com.paw.agent.ui.settings.SettingsCard
 import com.paw.agent.ui.settings.SettingsGroupLabel
 import com.paw.agent.ui.settings.SettingsNavRow
@@ -70,14 +72,16 @@ fun AboutScreen(
     val haptic = LocalHapticFeedback.current
     val scope = rememberCoroutineScope()
     val scaleAnim = remember { Animatable(1f) }
+    val scrollState = rememberScrollState()
 
     AppScaffold(
         modifier = modifier.fillMaxSize(),
         topBar = {
             AppTopAppBar(
                 title = stringResource(R.string.about_title),
+                isContentScrolled = scrollState.value > 0,
                 navigationIcon = {
-                    AppIconButton(onClick = onBack) {
+                    AppTopBarAction(onClick = onBack) {
                         AppIcon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = stringResource(R.string.cd_back),
@@ -93,8 +97,14 @@ fun AboutScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 20.dp),
+                .verticalScroll(scrollState)
+                // 顶栏高度作为可滚动内容的顶部间距，让内容从玻璃渐隐带下穿过而不是被顶下去。
+                .padding(
+                    start = 16.dp,
+                    end = 16.dp,
+                    top = 20.dp + LocalTopBarClearance.current,
+                    bottom = 20.dp,
+                ),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Spacer(Modifier.height(12.dp))
