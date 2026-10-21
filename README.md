@@ -16,7 +16,7 @@
   <img src="https://img.shields.io/badge/Platform-Android_8.0+_(API_26+)-3DDC84?logo=android&logoColor=white" alt="Platform" />
   <img src="https://img.shields.io/badge/Kotlin-2.2.21-7F52FF?logo=kotlin&logoColor=white" alt="Kotlin" />
   <img src="https://img.shields.io/badge/Jetpack_Compose-Material_3_&_Miuix-4285F4?logo=jetpackcompose&logoColor=white" alt="UI" />
-  <img src="https://img.shields.io/badge/Tests-195_Passed-brightgreen" alt="Tests" />
+  <img src="https://img.shields.io/badge/Tests-243_Passed-brightgreen" alt="Tests" />
   <img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License" />
 </p>
 
@@ -38,9 +38,13 @@ Whether you want to automate repetitive device operations, build custom AI mobil
 - **Anti-Duplication Prompt Injection**: Seamlessly synthesizes prior progress into the system context to prevent repetitive actions on restart.
 - **One-Tap UI Recovery**: Dedicated resume card in the chat interface and floating capsule on the desktop for immediate continuation.
 
-### 🤹 Custom Skills System (自定义 Skill)
-- **Visual Skill Studio**: Create, edit, test, and toggle custom skills with user-defined JSON Schema parameters and Prompt templates directly inside the app.
-- **Hot Tool Registration**: Custom skills are automatically registered into the LLM function calling catalog without app restarts.
+### 🤹 Skills System (自定义 Skill，v2 重构)
+- **Wish-to-Skill (许愿式生成)**: Describe the automation in one sentence; the model compiles it into steps and typed parameters. The result is previewed and validated before it is saved — nothing runs automatically.
+- **Two editors, one definition**: a plain-language "quick notes" format (one action per line, e.g. `打开 微信 / 点 搜索 / 输入 {{keyword}}`) and the full JSON editor with guards, conditions, per-step timeouts and failure policies. Switching keeps both views in sync.
+- **14 action kinds**: launch app, tap by text/point, input, swipe, scroll, keys, wait, wait-for-text, scroll-until-found, deep links, screen snapshot, variables, Root shell.
+- **Typed tool schema**: parameters are exported as real JSON Schema (types, enums, required), so the model fills arguments correctly instead of guessing.
+- **Safety first**: risky skills are confirmed once *before* the first step (no mid-run replay), sensitive screens always pause, Root commands sit behind a two-layer switch, and every run returns a per-step trail.
+- **Import / export**: skills are portable JSON; a v1 custom-skill file is migrated automatically on first launch.
 
 ### ⚡ Triple-Tier Controller Architecture (ROOT > Shizuku > Accessibility)
 - **Native ROOT (`su`)**: Highest priority! Unrestricted root access for instantaneous shell dispatch, touch simulation, silent app launching, and high-framerate screencaps without requiring Accessibility service.
@@ -129,7 +133,7 @@ AgentPaw
 │   │   └── ui/
 │   │       ├── chat/              # ChatScreen, BreakpointCard, MessageBubble
 │   │       ├── history/           # TaskHistoryScreen, TaskDetailScreen, TaskDiffScreen
-│   │       ├── skill/             # SkillListScreen, SkillEditorScreen
+│   │       ├── skills/            # SkillsHubScreen, SkillEditorScreen, SkillWishScreen
 │   │       ├── settings/          # LlmSettingsScreen, AppearanceSettingsScreen
 │   │       ├── about/             # AboutScreen (Long-press to unlock Expert Mode)
 │   │       └── theme/             # Material 3 & Miuix dual themes
@@ -203,13 +207,14 @@ dependencies {
 - [x] Multi-round agent execution loop with streaming SSE
 - [x] On-device multi-tier control (Accessibility, Shizuku, ROOT)
 - [x] Task Breakpoint & Natural Language Resume (断点续操)
-- [x] Custom Skills studio and runtime registration
+- [x] Skills v2: wish-to-skill generation, quick-notes + JSON editors, guards and per-step diagnostics
 - [x] Persistent task history and quantitative comparison
 - [x] AI Adaptive pace engine for inter-step wait times
 - [x] Direct text injection with soft keyboard fallback
 - [x] Dual themes (Material 3 + Miuix) with instant switching
 - [x] Secret Expert Mode unlocked via About screen
 - [ ] Task execution workflow export & sharing
+- [ ] Skill marketplace / signed skill packages
 - [ ] Voice input and TTS interaction
 
 ---

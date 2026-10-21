@@ -326,7 +326,7 @@ class HybridPhoneController(
             val res2 = rootController.executeCommand("input keyevent --meta 113 50")
             !res2.startsWith("Error:")
         }
-        kotlinx.coroutines.delay(100)
+        kotlinx.coroutines.delay(250)
         clearClipboardText()
         return ok
     }
@@ -352,7 +352,7 @@ class HybridPhoneController(
             val res2 = shizukuController.executeCommand("input keyevent --meta 113 50")
             !res2.startsWith("Error:")
         }
-        kotlinx.coroutines.delay(100)
+        kotlinx.coroutines.delay(250)
         clearClipboardText()
         return ok
     }
@@ -475,6 +475,14 @@ class HybridPhoneController(
 
         // 4. Root 优先执行 (纯 Root 模式启动应用)
         if (isRootAllowed) {
+            val launchIntent = pm?.getLaunchIntentForPackage(targetPkg)
+            val component = launchIntent?.component?.flattenToString()
+            if (!component.isNullOrBlank()) {
+                val res = rootController.executeCommand("am start -n $component")
+                if (!res.startsWith("Error:") && !res.contains("Error type")) {
+                    return@withContext true
+                }
+            }
             val res = rootController.executeCommand("monkey -p $targetPkg -c android.intent.category.LAUNCHER 1")
             if (!res.contains("No activities found") && !res.startsWith("Error:")) {
                 return@withContext true
@@ -483,6 +491,14 @@ class HybridPhoneController(
 
         // 5. Shizuku 次优执行 (纯 Shizuku 模式启动应用)
         if (isShizukuAllowed) {
+            val launchIntent = pm?.getLaunchIntentForPackage(targetPkg)
+            val component = launchIntent?.component?.flattenToString()
+            if (!component.isNullOrBlank()) {
+                val res = shizukuController.executeCommand("am start -n $component")
+                if (!res.startsWith("Error:") && !res.contains("Error type")) {
+                    return@withContext true
+                }
+            }
             val res = shizukuController.executeCommand("monkey -p $targetPkg -c android.intent.category.LAUNCHER 1")
             if (!res.contains("No activities found") && !res.startsWith("Error:")) {
                 return@withContext true

@@ -9,13 +9,22 @@ import com.paw.agent.core.llm.OpenAiCompatibleClient
 import com.paw.agent.core.search.DuckDuckGoSearchBackend
 import com.paw.agent.core.search.SearchBackend
 import com.paw.agent.core.shell.SandboxLimits
+import com.paw.agent.core.skill.SkillEngine
+import com.paw.agent.core.skill.SkillRegistry
+import com.paw.agent.core.skill.SkillRunOptions
 import com.paw.agent.core.tool.ShellTool
 import com.paw.agent.core.tool.SubAgentTool
 import com.paw.agent.core.tool.WebSearchTool
 import com.paw.agent.data.conversation.ConversationRepository
 import com.paw.agent.data.conversation.InMemoryConversationRepository
+import com.paw.agent.data.settings.AppSettings
 import com.paw.agent.data.settings.DataStoreSettingsRepository
 import com.paw.agent.data.settings.SettingsRepository
+import com.paw.agent.data.skill.SkillStore
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import java.io.File
 
 /**
@@ -26,6 +35,9 @@ import java.io.File
  */
 class AppContainer(application: Application) {
 
+    /** 应用级协程域：技能同步、后台加载等不依赖界面生命周期的工作。 */
+    val appScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
     val settingsRepository: SettingsRepository by lazy {
         DataStoreSettingsRepository(application)
     }
@@ -34,9 +46,8 @@ class AppContainer(application: Application) {
         com.paw.agent.data.conversation.PersistentConversationRepository(application)
     }
 
-    val customSkillRepository: com.paw.agent.data.skill.CustomSkillRepository by lazy {
-        com.paw.agent.data.skill.CustomSkillRepository(application)
-    }
+    /** 用户技能持久化（v2 格式，支持 v1 自动迁移）。 */
+    val skillStore: SkillStore by lazy { SkillStore(application, appScope) }
 
     val llmClient: LlmClient by lazy { OpenAiCompatibleClient() }
 
@@ -57,17 +68,23 @@ class AppContainer(application: Application) {
         activeLlmConfig = config
     }
 
+    /**
+     * 当前生效的执行策略（技能 shell、风险确认豁免、敏感页放行）。
+     * 由 [updateRuntimeSettings] 在设置变化时刷新，技能工具每次执行都会读取最新值。
+     */
+    @Volatile
+    private var skillRunOptions: SkillRunOptions = SkillRunOptions()
+
     val phoneController: com.paw.agent.device.HybridPhoneController by lazy {
         com.paw.agent.device.HybridPhoneController(application)
     }
 
-    val skillRegistry: com.paw.agent.core.skill.SkillRegistry by lazy {
-        com.paw.agent.core.skill.SkillRegistry(
-            listOf(
-                com.paw.agent.core.skill.ReturnHomeAndResetSkill(),
-                com.paw.agent.core.skill.OpenAndSearchSkill(),
-                com.paw.agent.core.skill.ScrollAndFindSkill(),
-            ),
+    val skillRegistry: SkillRegistry by lazy { SkillRegistry() }
+
+    val skillEngine: SkillEngine by lazy {
+        SkillEngine(
+            controller = phoneController,
+            options = { skillRunOptions },
         )
     }
 
@@ -82,8 +99,8 @@ class AppContainer(application: Application) {
     /**
      * The tools the agent may call.
      *
-     * `delegate_task` is listed too, but the sub-agent it spawns gets an empty
-     * registry, so delegation is always a leaf and cannot recurse.
+     * 技能工具不在这里一次性拼进列表：它们由 [SkillStore.syncInto] 按当前启用的
+     * 定义动态注册/注销，避免“删掉的技能仍然留在模型工具表里”。
      */
     val toolRegistry: ToolRegistry by lazy {
         ToolRegistry(
@@ -105,9 +122,9 @@ class AppContainer(application: Application) {
                 com.paw.agent.core.tool.android.GetScreenStateTool(phoneController),
                 com.paw.agent.core.tool.android.ClickElementTool(phoneController),
                 com.paw.agent.core.tool.android.WaitTool(),
-            ) + skillRegistry.toTools(phoneController),
-        ).also {
-            customSkillRepository.syncToSkillRegistry(skillRegistry, it, phoneController)
+            ),
+        ).also { registry ->
+            appScope.launch { skillStore.syncInto(skillRegistry, registry, skillEngine) }
         }
     }
 
@@ -120,6 +137,21 @@ class AppContainer(application: Application) {
             conversationRepository = conversationRepository,
             settingsRepository = settingsRepository,
         )
+    }
+
+    /**
+     * 把设置里的安全策略下发到真正的执行组件。
+     *
+     * 这是「开关真的生效」的唯一接线点：网络策略给 LLM 客户端，技能执行策略给引擎。
+     */
+    fun updateRuntimeSettings(settings: AppSettings) {
+        skillRunOptions = settings.skillRuntimePolicy()
+        (llmClient as? OpenAiCompatibleClient)?.networkPolicy = settings.networkPolicy()
+    }
+
+    /** 技能增删改后调用，把变更同步到模型可调用的工具表。 */
+    suspend fun syncSkills() {
+        skillStore.syncInto(skillRegistry, toolRegistry, skillEngine)
     }
 
     /**
@@ -147,5 +179,10 @@ class AgentPawApplication : Application() {
         // 尽早注册宿主 APP 前后台监听（必须早于首个 Activity 的 onResume），
         // 供 Maven 包的停止悬浮窗判断"用户是否已离开本体 APP"
         com.paw.agent.device.floating.AgentAppForegroundMonitor.install(this)
+        // 提前把持久化的技能注册进工具表，避免首条指令到达时技能尚未就绪
+        container.appScope.launch {
+            container.toolRegistry
+            container.syncSkills()
+        }
     }
 }

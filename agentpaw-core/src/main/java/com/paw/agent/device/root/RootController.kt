@@ -69,8 +69,8 @@ open class RootController {
      * 直接探测 su 提权可用性。protected open 以便测试注入替身，
      * 验证「缓存可被主动刷新」这一真实语义（ISSUE-202）。
      */
-    protected open fun checkSuDirectly(timeoutMs: Long = 800L): Boolean {
-        // 先检查常见 su 路径是否存在，避免在完全未 root 的设备上启动阻塞进程
+    protected open fun checkSuDirectly(timeoutMs: Long = 5_000L): Boolean {
+        // 先检查常见 su 路径或 which su
         val suPaths = arrayOf(
             "/system/bin/su",
             "/system/xbin/su",
@@ -85,20 +85,12 @@ open class RootController {
         )
         val suExists = suPaths.any { File(it).exists() }
         if (!suExists) {
-            // 也可能通过 magisk su 放在环境变量 PATH 中
-            val whichResult = runCatching {
+            runCatching {
                 val whichProc = ProcessBuilder("sh", "-c", "which su").redirectErrorStream(true).start()
-                val output = whichProc.inputStream.bufferedReader().use { it.readText().trim() }
-                val finished = whichProc.waitFor(timeoutMs, TimeUnit.MILLISECONDS)
-                if (!finished) {
-                    whichProc.destroyForcibly()
-                    return false
-                }
-                output
-            }.getOrDefault("")
-            if (whichResult.isBlank() || whichResult.contains("not found")) {
-                return false
+                whichProc.waitFor(800, TimeUnit.MILLISECONDS)
             }
+            // 注意：在 KernelSU / APatch / Magisk Zygisk 环境下，受限应用沙箱可能无法 stat 探测 su 文件，
+            // 因此不在此直接 return false，而是直接尝试 ProcessBuilder("su") 进行最终判定。
         }
 
         return runCatching {
@@ -157,7 +149,8 @@ open class RootController {
     }
 
     /**
-     * 利用 root 权限高速截取全屏快照，先读取完整数据流再等待退出，彻底避免缓冲区死锁
+     * 利用 root 权限高速截取全屏快照，先读取完整数据流再等待退出，彻底避免缓冲区死锁。
+     * 内置针对部分系统 shell/PTY 自动把 \n 转换为 \r\n 破坏 PNG 数据流的脱壳修复机制。
      */
     open suspend fun captureScreen(timeoutMs: Long = 8_000L): Bitmap? = withContext(Dispatchers.IO) {
         var process: Process? = null
@@ -169,7 +162,17 @@ open class RootController {
                     val bytes = readAllBytes(p.inputStream)
                     p.waitFor()
                     if (bytes.isNotEmpty() && p.exitValue() == 0) {
-                        BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                        val directBitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                        if (directBitmap != null) {
+                            directBitmap
+                        } else {
+                            val cleanBytes = stripCrLfIfPng(bytes)
+                            if (cleanBytes != null) {
+                                BitmapFactory.decodeByteArray(cleanBytes, 0, cleanBytes.size)
+                            } else {
+                                null
+                            }
+                        }
                     } else {
                         null
                     }
@@ -185,6 +188,31 @@ open class RootController {
             process?.destroyForcibly()
             null
         }
+    }
+
+    @androidx.annotation.VisibleForTesting(otherwise = androidx.annotation.VisibleForTesting.PRIVATE)
+    internal fun stripCrLfIfPng(bytes: ByteArray): ByteArray? {
+        if (bytes.size < 10) return null
+        val mangledHeader = byteArrayOf(
+            0x89.toByte(), 0x50.toByte(), 0x4E.toByte(), 0x47.toByte(),
+            0x0D.toByte(), 0x0D.toByte(), 0x0A.toByte(), 0x1A.toByte(),
+            0x0D.toByte(), 0x0A.toByte(),
+        )
+        val isMangled = bytes.take(10).toByteArray().contentEquals(mangledHeader)
+        if (!isMangled) return null
+
+        val out = ByteArrayOutputStream(bytes.size)
+        var i = 0
+        while (i < bytes.size) {
+            if (i < bytes.size - 1 && bytes[i] == 0x0D.toByte() && bytes[i + 1] == 0x0A.toByte()) {
+                out.write(0x0A)
+                i += 2
+            } else {
+                out.write(bytes[i].toInt())
+                i++
+            }
+        }
+        return out.toByteArray()
     }
 
     open suspend fun tap(x: Int, y: Int): Boolean = withContext(Dispatchers.IO) {
@@ -234,11 +262,19 @@ open class RootController {
     }
 
     open suspend fun getForegroundInfo(): Pair<String, String> = withContext(Dispatchers.IO) {
-        val out = executeCommand("dumpsys window | grep -E 'mCurrentFocus|mFocusedApp'")
         val regex = Regex("""([a-zA-Z0-9._]+)/([a-zA-Z0-9._]+)""")
+        val out = executeCommand("dumpsys window | grep -E 'mCurrentFocus|mFocusedApp'")
         val match = regex.find(out)
-        val pkg = match?.groupValues?.getOrNull(1).orEmpty()
-        val activity = match?.groupValues?.getOrNull(2).orEmpty()
+        var pkg = match?.groupValues?.getOrNull(1).orEmpty()
+        var activity = match?.groupValues?.getOrNull(2).orEmpty()
+
+        // Android 13/14/15 / 澎湃OS 适配：dumpsys window 可能不再包含 mCurrentFocus，改用 dumpsys activity 备选检索
+        if (pkg.isBlank()) {
+            val actOut = executeCommand("dumpsys activity activities | grep -E 'topResumedActivity|mResumedActivity|ResumedActivity'")
+            val actMatch = regex.find(actOut)
+            pkg = actMatch?.groupValues?.getOrNull(1).orEmpty()
+            activity = actMatch?.groupValues?.getOrNull(2).orEmpty()
+        }
         Pair(pkg, activity)
     }
 
@@ -253,7 +289,7 @@ open class RootController {
     }
 
     /**
-     * 通过 ROOT 权限静默一键开启无障碍服务，避免用户手动翻找复杂系统设置。
+     * 通过 ROOT 权限静默一键开启无障碍服务，自动穿透受限设置与悬浮窗拦截。
      */
     suspend fun enableAccessibilityViaRoot(packageName: String, serviceClassName: String): Boolean = withContext(Dispatchers.IO) {
         if (!isAvailable) return@withContext false
@@ -262,6 +298,13 @@ open class RootController {
             return@withContext false
         }
         val comp = "$packageName/$serviceClassName"
+
+        // 针对 Android 13+ / 澎湃OS：直接通过 ROOT 授予 ACCESS_RESTRICTED_SETTINGS 与 SYSTEM_ALERT_WINDOW，
+        // 一键穿透受限设置与悬浮窗拦截，免除用户繁琐的手动解锁流程
+        executeCommand("appops set $packageName ACCESS_RESTRICTED_SETTINGS allow")
+        executeCommand("appops set $packageName SYSTEM_ALERT_WINDOW allow")
+        executeCommand("pm grant $packageName android.permission.SYSTEM_ALERT_WINDOW")
+
         val currentSetting = executeCommand("settings get secure enabled_accessibility_services").trim()
         val cleanSetting = currentSetting.takeIf { !it.startsWith("Error:") && it != "null" }.orEmpty()
         

@@ -93,3 +93,25 @@
 | **TASK-205** | `P3 (低)` | `core/tools` | **ISSUE-205**：`launch_app`/`open_deeplink` 返回 JSON 用字符串插值拼接，LLM 入参含引号/反斜杠时产出损坏 JSON | `VERIFIED` | [`AndroidPhoneTools.kt`](file:///d:/Projects/AgentPaw/agentpaw-core/src/main/java/com/paw/agent/core/tool/android/AndroidPhoneTools.kt) 改 `buildJsonObject` 结构化序列化；新增 [`AndroidPhoneToolsJsonSafetyTest.kt`](file:///d:/Projects/AgentPaw/agentpaw-core/src/test/java/com/paw/agent/core/tool/android/AndroidPhoneToolsJsonSafetyTest.kt) 5 项：**回退插值后引号用例红 / 修复后全绿** |
 | **TASK-206** | `P3 (低)` | 文档 | **ISSUE-006**：README 测试数 Badge 写 177，实跑为 178 | `VERIFIED` | `testDebugUnitTest` 实跑 25 个测试类 XML 合计 `tests=178 failures=0`；README 双语文档已同步 |
 
+
+
+---
+
+## 六、 2026-10-20 Skill v2 重构与高危功能开关
+
+> 完整审计与设计说明见 `docs/AUDIT_2026-10-20.md`。
+
+| 任务 ID | 优先级 | 模块 | 内容 | 状态 | 验证证据 |
+|---|---|---|---|---|---|
+| **TASK-301** | `P0` | `core/skill` | 彻底删除旧技能实现（`AgentSkill`/`CustomSkillModel`/`CustomSkillRepository`/`CustomSkillsScreen` 及其测试），清理容器、导航与字符串引用 | `VERIFIED` | 全仓库 grep 无 `CustomSkill`/`AgentSkill`/`SkillActionType` 残留；`:app:compileDebugKotlin` 通过 |
+| **TASK-302** | `P0` | `core/skill` | 重建 v2 模型：14 种动作、4 种参数类型、守卫、变量、结构化执行报告 | `VERIFIED` | `SkillDefinitionTest`（11 项） |
+| **TASK-303** | `P0` | `core/skill` | 执行引擎：静态风险前置确认、动态安全暂停、失败策略、总时长预算、逐步轨迹 | `VERIFIED` | `SkillEngineTest`（13 项，含「确认前不产生副作用」断言） |
+| **TASK-304** | `P1` | `core/skill` | 速记 DSL：中文动作行、元信息、参数、守卫、条件前缀与失败后缀，双向无损 | `VERIFIED` | `SkillDefinitionTest.dsl round trips through render` 等 5 项 |
+| **TASK-305** | `P1` | `core/skill` | 许愿式生成：动作目录提示词、JSON 修复、校验、一次自动修正、速记兜底 | `VERIFIED` | `SkillWishComposerTest`（7 项） |
+| **TASK-306** | `P1` | `app/data` | `SkillStore`：原子写入、损坏备份、v1 迁移、导入导出、增量同步工具表 | `VERIFIED` | 编译通过；`skillStore` 接线于 `AppContainer` |
+| **TASK-307** | `P1` | `app/ui` | 技能中心 / 双模式编辑器 / 许愿页，共用导航图级 ViewModel（草稿不丢） | `VERIFIED` | `:app:compileDebugKotlin` + `assembleDebug` |
+| **TASK-308** | `P0` | `app/settings` | 资深设置高危开关（HTTP / 公网明文 / 技能 Root / 敏感页 / 临时豁免），含风险说明、勾选确认、依赖禁用与级联关闭 | `VERIFIED` | `HighRiskRulesTest`（7 项） |
+| **TASK-309** | `P1` | `core/llm` | `NetworkPolicy` 运行时传输策略 + 客户端逐请求判定 | `VERIFIED` | `NetworkPolicyTest`（5 项） |
+| **TASK-310** | `P1` | 文档 | 审计报告、架构、已知问题、任务清单、双语 README 同步；测试数更新为 243 | `VERIFIED` | 本轮文档提交 |
+| **TASK-311** | `P2` | 真机 | RT-101 ~ RT-105 验证 | `TODO` | 需真机/模拟器 |
+| **TASK-312** | `P1` | 回归 | 回退 shell 门禁做变异测试，确认 `SkillEngineTest` 会变红后再恢复 | `VERIFIED` | 变异后 `14 tests, 1 failed`；恢复后全量 **243 项 / 0 失败 / 1 跳过** |

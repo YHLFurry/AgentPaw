@@ -44,6 +44,8 @@ object Routes {
 
     const val ABOUT = "about"
     const val SKILLS = "skills"
+    const val SKILL_EDITOR = "skills/editor"
+    const val SKILL_WISH = "skills/wish"
     const val HISTORY = "history"
     const val HISTORY_DETAIL = "history/detail/{id}"
     const val HISTORY_COMPARE = "history/compare/{id1}/{id2}"
@@ -80,6 +82,22 @@ fun AgentPawApp(
             com.paw.agent.device.DevicePermissionManager.refreshRootAvailability()
         }
     }
+
+    // 把安全策略（网络明文、技能 shell、风险确认豁免）实时下发给执行层。
+    // 放在导航根上，任何入口改动设置都会立即生效。
+    LaunchedEffect(settings) {
+        container.updateRuntimeSettings(settings)
+    }
+
+    val skillsViewModel: com.paw.agent.ui.skills.SkillsViewModel = viewModel(
+        factory = com.paw.agent.ui.skills.SkillsViewModel.Factory(
+            store = container.skillStore,
+            registry = container.skillRegistry,
+            engine = container.skillEngine,
+            llmClient = container.llmClient,
+            sync = { container.syncSkills() },
+        ),
+    )
 
     val chatViewModel: ChatViewModel = viewModel(
         factory = ChatViewModel.Factory(
@@ -201,9 +219,27 @@ fun AgentPawApp(
         }
 
         composable(Routes.SKILLS) {
-            com.paw.agent.ui.skills.CustomSkillsScreen(
-                container = container,
+            com.paw.agent.ui.skills.SkillsHubScreen(
+                viewModel = skillsViewModel,
                 onBack = { navController.popBackStack() },
+                onOpenEditor = { navController.navigate(Routes.SKILL_EDITOR) },
+                onOpenWish = { navController.navigate(Routes.SKILL_WISH) },
+            )
+        }
+
+        composable(Routes.SKILL_EDITOR) {
+            com.paw.agent.ui.skills.SkillEditorScreen(
+                viewModel = skillsViewModel,
+                onBack = { navController.popBackStack() },
+            )
+        }
+
+        composable(Routes.SKILL_WISH) {
+            com.paw.agent.ui.skills.SkillWishScreen(
+                viewModel = skillsViewModel,
+                llmConfig = settings.llm,
+                onBack = { navController.popBackStack() },
+                onEditPreview = { navController.navigate(Routes.SKILL_EDITOR) },
             )
         }
 
@@ -315,4 +351,8 @@ private fun LlmSettingsViewModel.toActions(): LlmSettingsActions = LlmSettingsAc
     onToggleSplitVisionLanguage = ::onToggleSplitVisionLanguage,
     onToggleRootMode = ::onToggleRootMode,
     onToggleAdaptivePacing = ::onToggleAdaptivePacing,
+    onToggleHighRisk = ::onToggleHighRisk,
+    onStartRiskBypass = ::onStartRiskBypass,
+    onStopRiskBypass = ::onStopRiskBypass,
+    onConsumeRiskNotice = ::consumeRiskNotice,
 )

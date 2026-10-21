@@ -41,7 +41,7 @@ class OpenAiCompatibleClientTest {
 
         val client = OpenAiCompatibleClient(httpClient = mockClient)
         val config = LlmConfig(
-            baseUrl = "http://127.0.0.1:11434/v1",
+            baseUrl = "https://127.0.0.1:11434/v1",
             apiKey = "local-key",
             model = "test-model",
             stream = true,
@@ -84,7 +84,7 @@ class OpenAiCompatibleClientTest {
 
         val client = OpenAiCompatibleClient(httpClient = mockClient)
         val config = LlmConfig(
-            baseUrl = "http://localhost:11434/v1",
+            baseUrl = "https://localhost:11434/v1",
             apiKey = "local-key",
             model = "test-model",
             stream = true,

@@ -1,12 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
-    <!-- 默认全局禁止明文 HTTP 通信，遵循纵深防御安全原则 -->
-    <base-config cleartextTrafficPermitted="false" />
-    <!-- 仅针对本地回环与模拟器开发地址放行明文 HTTP (Ollama / LocalAI / vLLM 本地调试) -->
-    <domain-config cleartextTrafficPermitted="true">
-        <domain includeSubdomains="true">localhost</domain>
-        <domain includeSubdomains="true">127.0.0.1</domain>
-        <domain includeSubdomains="true">10.0.2.2</domain>
-        <domain includeSubdomains="true">local</domain>
-    </domain-config>
+    <!--
+      平台层放行明文流量，但真正的闸门在代码里：OpenAiCompatibleClient 通过
+      NetworkPolicy 逐请求判定——默认拒绝所有 http；只有用户在「资深设置 →
+      高危功能开关」中显式开启「允许 HTTP 传输」后才放行，公网明文还需再开一级。
+
+      为什么不在 XML 里写死拒绝：network-security-config 是编译期静态配置，
+      无法随运行时开关变化。若此处永久禁止 cleartext，用户即使打开了开关，
+      也只会得到 OkHttp 的 "Cleartext HTTP traffic not permitted"，开关形同虚设。
+      代价是任何绕过 OpenAiCompatibleClient 的新代码都会默认获得明文能力，
+      因此新增网络调用必须走 NetworkPolicy 判定（见 NetworkPolicy.kt 注释）。
+    -->
+    <base-config cleartextTrafficPermitted="true" />
 </network-security-config>
