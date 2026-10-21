@@ -8,6 +8,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.paw.agent.core.llm.LlmConfig
@@ -23,8 +24,9 @@ private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(na
 /**
  * DataStore-backed [SettingsRepository].
  *
- * The API key is stored in the app's private preferences on-device only; it is
- * never logged and never leaves the device except as an auth header.
+ * The API key is encrypted with Android Keystore before it ever reaches
+ * DataStore; it is never logged and never leaves the device except as an auth
+ * header.
  */
 class DataStoreSettingsRepository(
     private val context: Context,
@@ -49,6 +51,13 @@ class DataStoreSettingsRepository(
         val SPLIT_VISION_LANGUAGE = booleanPreferencesKey("ui_split_vision_language")
         val ROOT_MODE = booleanPreferencesKey("agent_root_mode")
         val ADAPTIVE_PACING = booleanPreferencesKey("agent_adaptive_pacing")
+
+        // 高危开关
+        val ALLOW_HTTP = booleanPreferencesKey("security_allow_http")
+        val ALLOW_PUBLIC_HTTP = booleanPreferencesKey("security_allow_public_http")
+        val ALLOW_SHELL_SKILLS = booleanPreferencesKey("security_allow_shell_skills")
+        val ALLOW_SENSITIVE_SCREEN = booleanPreferencesKey("security_allow_sensitive_screen")
+        val RISK_BYPASS_UNTIL = longPreferencesKey("security_risk_bypass_until")
     }
 
     override val settings: Flow<AppSettings> = context.dataStore.data
@@ -106,11 +115,51 @@ class DataStoreSettingsRepository(
     }
 
     override suspend fun setRootModeEnabled(enabled: Boolean) {
-        context.dataStore.edit { it[Keys.ROOT_MODE] = enabled }
+        context.dataStore.edit { prefs ->
+            val state = HighRiskRules.onRootModeChanged(
+                HighRiskState(
+                    allowHttp = prefs[Keys.ALLOW_HTTP] ?: false,
+                    allowPublicHttp = prefs[Keys.ALLOW_PUBLIC_HTTP] ?: false,
+                    allowShellSkills = prefs[Keys.ALLOW_SHELL_SKILLS] ?: false,
+                    allowSensitiveScreen = prefs[Keys.ALLOW_SENSITIVE_SCREEN] ?: false,
+                    rootModeEnabled = prefs[Keys.ROOT_MODE] ?: false,
+                ),
+                enabled,
+            )
+            prefs[Keys.ROOT_MODE] = state.rootModeEnabled
+            prefs[Keys.ALLOW_SHELL_SKILLS] = state.allowShellSkills
+        }
     }
 
     override suspend fun setAdaptivePacingEnabled(enabled: Boolean) {
         context.dataStore.edit { it[Keys.ADAPTIVE_PACING] = enabled }
+    }
+
+    override suspend fun setHighRiskToggle(toggle: HighRiskToggle, enabled: Boolean): HighRiskResult {
+        var result = HighRiskResult.ok()
+        context.dataStore.edit { prefs ->
+            val state = HighRiskState(
+                allowHttp = prefs[Keys.ALLOW_HTTP] ?: false,
+                allowPublicHttp = prefs[Keys.ALLOW_PUBLIC_HTTP] ?: false,
+                allowShellSkills = prefs[Keys.ALLOW_SHELL_SKILLS] ?: false,
+                allowSensitiveScreen = prefs[Keys.ALLOW_SENSITIVE_SCREEN] ?: false,
+                rootModeEnabled = prefs[Keys.ROOT_MODE] ?: false,
+            )
+            val outcome = HighRiskRules.toggle(state, toggle, enabled)
+            result = HighRiskResult(outcome.applied, outcome.message)
+            if (outcome.applied) {
+                prefs[Keys.ALLOW_HTTP] = outcome.state.allowHttp
+                prefs[Keys.ALLOW_PUBLIC_HTTP] = outcome.state.allowPublicHttp
+                prefs[Keys.ALLOW_SHELL_SKILLS] = outcome.state.allowShellSkills
+                prefs[Keys.ALLOW_SENSITIVE_SCREEN] = outcome.state.allowSensitiveScreen
+            }
+        }
+        return result
+    }
+
+    override suspend fun setRiskBypassMinutes(minutes: Int) {
+        val until = HighRiskRules.bypassUntil(minutes)
+        context.dataStore.edit { prefs -> prefs[Keys.RISK_BYPASS_UNTIL] = until }
     }
 
     /** Clears only the LLM keys; appearance choices (theme, dark, dynamic) stay. */
@@ -153,6 +202,15 @@ class DataStoreSettingsRepository(
         val rawApiKey = this[Keys.API_KEY].orEmpty()
         val decrypted = com.paw.agent.data.security.KeystoreSecretStorage.decrypt(rawApiKey)
         val decryptFailed = rawApiKey.isNotBlank() && decrypted == null
+        val highRisk = HighRiskRules.sanitize(
+            HighRiskState(
+                allowHttp = this[Keys.ALLOW_HTTP] ?: false,
+                allowPublicHttp = this[Keys.ALLOW_PUBLIC_HTTP] ?: false,
+                allowShellSkills = this[Keys.ALLOW_SHELL_SKILLS] ?: false,
+                allowSensitiveScreen = this[Keys.ALLOW_SENSITIVE_SCREEN] ?: false,
+                rootModeEnabled = this[Keys.ROOT_MODE] ?: false,
+            ),
+        )
         return AppSettings(
             llm = toLlmConfig(),
             dynamicColor = this[Keys.DYNAMIC_COLOR] ?: true,
@@ -163,6 +221,11 @@ class DataStoreSettingsRepository(
             rootModeEnabled = this[Keys.ROOT_MODE] ?: false,
             adaptivePacingEnabled = this[Keys.ADAPTIVE_PACING] ?: true,
             apiKeyDecryptionFailed = decryptFailed,
+            allowHttpTransport = highRisk.allowHttp,
+            allowPublicHttp = highRisk.allowPublicHttp,
+            allowShellSkills = highRisk.allowShellSkills,
+            allowSensitiveScreen = highRisk.allowSensitiveScreen,
+            riskBypassUntil = this[Keys.RISK_BYPASS_UNTIL] ?: 0L,
         )
     }
 }

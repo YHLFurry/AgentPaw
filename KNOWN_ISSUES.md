@@ -108,3 +108,43 @@
 | RT-003 | ISSUE-203 真机验证：任务结束 1.5s 内连续发起新任务，浮窗与通知持续在线 |
 | RT-004 | Compose 界面实际渲染（双主题）、无障碍手势真实派发、通知栏展示——本轮仅完成代码级审查与 JVM 测试 |
 
+
+
+---
+
+## 6. 2026-10-20 轮次：Skill 子系统彻底重构与高危开关
+
+> 方法：先审计定位根因 → 删除旧实现 → 从零重建 → 用能变红的单测锁定行为 → 全量回归 + Debug 构建。
+> 完整审计报告见 `docs/AUDIT_2026-10-20.md`。本轮实跑 **243 项单测 0 失败**，`assembleDebug` 产出 APK。
+
+### 已修复
+
+- **ISSUE-301 (P0)**：旧 `CustomExecutableSkill` 的 `SHELL_COMMAND` 只检查 `isRootAvailable`，任意技能（含导入技能）都能执行 `su -c`，绕过全部全局开关。→ 新引擎双层门禁：技能 `guard.allowShell` + 宿主 `SkillRunOptions.allowShellSteps`（资深设置，且依赖 ROOT 模式）。
+- **ISSUE-302 (P0)**：旧流程「执行到危险步骤才确认」，确认后 Runner 用同一工具名重放整条技能，造成重复点击/输入/发送。→ 改为执行前静态风险预检；确认发生在第一步之前；运行期新风险改为安全暂停，不自动续跑。
+- **ISSUE-303 (P1)**：`network_security_config.xml` 只放行 4 个域名，与文档宣称的「内网 HTTP 可用」矛盾，真机上局域网模型直接失败。→ 平台层放行 cleartext，判定移至 `NetworkPolicy`；默认拒绝所有 http，资深设置两级放开。
+- **ISSUE-304 (P1)**：`syncToSkillRegistry` 只注册不注销，删除的技能仍留在模型工具表。→ `SkillStore.syncInto` 记录已注册 key，按差量注销/注册。
+- **ISSUE-305 (P1)**：技能预留名硬编码，缺 `shell_command`/`web_search`/`delegate_task`，技能可覆盖内置工具。→ 统一收敛到 `SkillValidator.RESERVED_TOOL_NAMES`。
+- **ISSUE-306 (P1)**：技能写入异常被 `runCatching` 静默吞掉，用户以为保存成功。→ 记录并在技能页展示错误；损坏文件自动备份。
+- **ISSUE-307 (P1)**：旧 `parametersSchema` 是自由文本，模型收到空对象 schema。→ 由参数定义生成真实 JSON Schema（类型/枚举/必填）。
+- **ISSUE-308 (P1)**：首次启动时工具表懒加载与技能异步注册竞争，首条指令可能看不到技能。→ Application `onCreate` 预同步 + 每次变更后同步。
+- **ISSUE-309 (P2)**：旧编辑器删除步骤用闭包捕获 index，Compose 复用会改错步骤；测试执行仅以 Toast 展示长字符串。→ 新编辑器整体重写；测试运行返回 `SkillRunResult` 逐步展示。
+
+### 遗留（未在本轮修复，已登记审计报告）
+
+| 编号 | 级别 | 内容 |
+|---|---|---|
+| A-04 | P1 | `SafetyGuard` 敏感页关键词表仅 10 条，覆盖不全（建议复用 `RiskActionGuard.PAYMENT_REGEX`） |
+| A-05 | P1 | `ToolControlSignal.parse` 仍保留 `contains("\"requires_confirmation\"")` 子串兜底，可能误触发 |
+| F-06 | P1 | `Agent.kt` 的 `assistantId` 恒为 null，流式消息共用常量 id |
+| Q-01/Q-02 | P2 | `values-zh-rCN` 仍缺 21 条旧字符串；默认（英文）资源中专家模式条目为中文 |
+| Q-03 | P2 | 版本号已把 `version.txt` 对齐到 0.2.1，但 README 中 core 依赖示例仍写 0.1.5 |
+
+### 待真机验证（不得标记为已验证）
+
+| 项 | 内容 |
+|---|---|
+| RT-101 | 开启/关闭「允许 HTTP 传输」后，请求是否立即被放行/拒绝（JVM 单测已覆盖策略语义） |
+| RT-102 | 技能「测试运行」在真机上的逐步轨迹与失败定位是否准确 |
+| RT-103 | 许愿生成在真实模型上的首次通过率、自动修正触发率 |
+| RT-104 | 敏感页暂停 → 用户手动完成 → 恢复执行的全链路 |
+| RT-105 | 技能 shell 双层开关：ROOT 模式关闭后，技能 shell 是否同步失效且界面同步 |

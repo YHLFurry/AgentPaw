@@ -1,9 +1,8 @@
 package com.paw.agent.core.tool.android
 
 import com.paw.agent.core.agent.AgentContext
-import com.paw.agent.core.skill.OpenAndSearchSkill
-import com.paw.agent.core.skill.ReturnHomeAndResetSkill
-import com.paw.agent.core.skill.ScrollAndFindSkill
+import com.paw.agent.core.skill.SkillEngine
+import com.paw.agent.core.skill.SkillPresets
 import com.paw.agent.core.skill.SkillRegistry
 import com.paw.agent.core.tool.android.ClickElementTool
 import com.paw.agent.device.PhoneController
@@ -190,13 +189,20 @@ class AndroidPhoneToolsTest {
     }
 
     @Test
-    fun `skill registry adapts skills to agent tools`() = runTest {
-        val registry = SkillRegistry(listOf(ReturnHomeAndResetSkill(), OpenAndSearchSkill()))
-        val tools = registry.toTools(controller)
+    fun `skill registry adapts built-in presets to agent tools`() = runTest {
+        val engine = SkillEngine(controller)
+        val registry = SkillRegistry()
+        val tools = registry.tools(engine)
 
-        assertEquals(2, tools.size)
+        assertEquals(3, tools.size)
         assertTrue(tools.any { it.definition.name == "skill_return_home" })
         assertTrue(tools.any { it.definition.name == "skill_open_and_search" })
+
+        // 参数 schema 现在由参数定义生成：模型能看到 keyword 是必填字符串，
+        // 而不是旧实现里一段没有任何类型信息的空对象 schema。
+        val openSearch = tools.first { it.definition.name == "skill_open_and_search" }
+        assertTrue(openSearch.definition.parametersSchema.contains("\"keyword\""))
+        assertTrue(openSearch.definition.parametersSchema.contains("\"required\""))
 
         val homeTool = tools.first { it.definition.name == "skill_return_home" }
         val res = homeTool.execute("{}", context)
@@ -250,9 +256,11 @@ class AndroidPhoneToolsTest {
             }
         }
 
-        val skill = com.paw.agent.core.skill.ScrollAndFindSkill()
-        val result = skill.execute("""{"target_text": "目标商品ABC", "max_swipes": 3}""", scrollingController, context)
-        assertTrue(result.contains("found_and_tapped"))
+        val engine = SkillEngine(scrollingController)
+        val preset = SkillPresets.find("skill_scroll_and_find")!!
+        val result = engine.run(preset, """{"target_text": "目标商品ABC"}""", context)
+        assertTrue(result.isSuccess)
+        assertTrue(result.steps.first().message.contains("找到"))
         assertEquals(2, swipeCount)
     }
 
@@ -368,9 +376,10 @@ class AndroidPhoneToolsTest {
         // 在非 1080x2400 设备上会整体偏移。新实现直接按真实像素中心点击。
         val elem = UiElementInfo(text = "搜索", bounds = RectBounds(100, 200, 300, 400)) // center (200, 300)
         val ctrl = SkillFakeController(elem)
-        val skill = OpenAndSearchSkill()
-        val res = skill.execute("""{"app_name": "test", "keyword": "hello"}""", ctrl, context)
-        assertTrue(res.contains("success"))
+        val engine = SkillEngine(ctrl)
+        val preset = SkillPresets.find("skill_open_and_search")!!
+        val result = engine.run(preset, """{"app_name": "test", "keyword": "hello"}""", context)
+        assertTrue(result.isSuccess)
         assertEquals(Pair(200f, 300f), ctrl.lastTapAtPixel)
     }
 
@@ -378,9 +387,10 @@ class AndroidPhoneToolsTest {
     fun `scroll_and_find skill taps at real pixel center, not a hardcoded resolution`() = runTest {
         val elem = UiElementInfo(text = "目标商品ABC", bounds = RectBounds(50, 60, 150, 160)) // center (100, 110)
         val ctrl = SkillFakeController(elem)
-        val skill = ScrollAndFindSkill()
-        val res = skill.execute("""{"target_text": "目标商品ABC", "max_swipes": 3}""", ctrl, context)
-        assertTrue(res.contains("found_and_tapped"))
+        val engine = SkillEngine(ctrl)
+        val preset = SkillPresets.find("skill_scroll_and_find")!!
+        val result = engine.run(preset, """{"target_text": "目标商品ABC"}""", context)
+        assertTrue(result.isSuccess)
         assertEquals(Pair(100f, 110f), ctrl.lastTapAtPixel)
     }
 

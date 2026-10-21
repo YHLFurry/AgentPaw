@@ -99,6 +99,11 @@ data class LlmSettingsActions(
     val onToggleSplitVisionLanguage: (Boolean) -> Unit = {},
     val onToggleRootMode: (Boolean) -> Unit = {},
     val onToggleAdaptivePacing: (Boolean) -> Unit = {},
+    // ---- 资深模式：高危开关 ----
+    val onToggleHighRisk: (com.paw.agent.data.settings.HighRiskToggle, Boolean) -> Unit = { _, _ -> },
+    val onStartRiskBypass: () -> Unit = {},
+    val onStopRiskBypass: () -> Unit = {},
+    val onConsumeRiskNotice: () -> Unit = {},
 )
 
 /**
@@ -684,6 +689,93 @@ fun AgentControlPage(
                     }
                 },
             )
+        }
+
+        val isXiaomiDevice = remember {
+            com.paw.agent.device.DevicePermissionManager.isXiaomiOrHyperOs()
+        }
+        if (isXiaomiDevice) {
+            Spacer(Modifier.height(20.dp))
+            SettingsGroupLabel("小米澎湃OS (HyperOS) 专属适配与排障")
+            AppCard(
+                cornerRadius = 12.dp,
+                containerColor = AppTheme.colors.surfaceContainerHigh,
+                contentColor = AppTheme.colors.onSurface,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    AppText(
+                        text = "澎湃OS / MIUI 具有极严格的后台管制与专属权限。若 AgentPaw 无法模拟点击、无法拉起目标应用或无障碍开关无法开启，请完成以下配置：",
+                        style = AppTheme.typography.bodySmall,
+                        color = AppTheme.colors.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(12.dp))
+
+                    AppText(
+                        text = "1. 解除受限设置（针对无障碍开关置灰不可点）",
+                        style = AppTheme.typography.titleSmall,
+                    )
+                    AppText(
+                        text = "Android 13+ 澎湃OS 对非应用商店安装的 APK 默认限制无障碍。请点击下方按钮打开应用详情，点击右上角【⋮】并选择【允许受限设置】，验证锁屏密码后即可开启无障碍。",
+                        style = AppTheme.typography.bodySmall,
+                        color = AppTheme.colors.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    AppOutlinedButton(
+                        onClick = { com.paw.agent.device.DevicePermissionManager.openAppDetailsSettings(context) },
+                    ) {
+                        AppText("打开应用详情（右上角⋮允许受限设置）", style = AppTheme.typography.labelSmall)
+                    }
+
+                    Spacer(Modifier.height(14.dp))
+
+                    AppText(
+                        text = "2. 开启「后台弹出界面」与「悬浮窗」",
+                        style = AppTheme.typography.titleSmall,
+                    )
+                    AppText(
+                        text = "澎湃OS 默认拦截后台启动 Activity。未开启「后台弹出界面」时，Agent 无法在后台或悬浮窗状态下自动打开目标应用。",
+                        style = AppTheme.typography.bodySmall,
+                        color = AppTheme.colors.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    AppOutlinedButton(
+                        onClick = { com.paw.agent.device.DevicePermissionManager.openXiaomiPermissionsSettings(context) },
+                    ) {
+                        AppText("跳转权限管理（开启后台弹出界面）", style = AppTheme.typography.labelSmall)
+                    }
+
+                    Spacer(Modifier.height(14.dp))
+
+                    AppText(
+                        text = "3. 省电策略设为「无限制」与开启「自启动」",
+                        style = AppTheme.typography.titleSmall,
+                    )
+                    AppText(
+                        text = "在应用详情中将【省电策略】改为【无限制】，并开启【自启动】，并在多任务后台为 AgentPaw 加锁，防止系统在后台终止无障碍服务。",
+                        style = AppTheme.typography.bodySmall,
+                        color = AppTheme.colors.onSurfaceVariant,
+                    )
+
+                    Spacer(Modifier.height(14.dp))
+
+                    AppText(
+                        text = "4. 开启「USB 调试（安全设置）」（Shizuku 模式必需）",
+                        style = AppTheme.typography.titleSmall,
+                    )
+                    AppText(
+                        text = "在澎湃OS下使用 Shizuku 免 Root 执行时，必须在开发者选项中开启【USB 调试（安全设置）】（允许模拟点击），否则 input tap 会被系统拦截报错 INJECT_EVENTS。",
+                        style = AppTheme.typography.bodySmall,
+                        color = AppTheme.colors.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    AppOutlinedButton(
+                        onClick = { com.paw.agent.device.DevicePermissionManager.openDeveloperOptions(context) },
+                    ) {
+                        AppText("打开开发者选项（开启USB调试安全设置）", style = AppTheme.typography.labelSmall)
+                    }
+                }
+            }
         }
 
         Spacer(Modifier.height(32.dp))

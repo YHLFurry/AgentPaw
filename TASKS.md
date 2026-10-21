@@ -106,3 +106,24 @@
 | 任务 ID | 优先级 | 模块 | 缺陷与修复内容 | 状态 | 修复文件与验证证据 |
 |---|---|---|---|---|---|
 | **TASK-207** | `P1 (高)` | `core/device` + `core/accessibility` | **ISSUE-207**：无障碍点击接入「节点锚定优先、手势兜底」——新增纯逻辑命中解析器（最深可见节点 + 父链可点击祖先）、服务侧 `clickNodeAt`/`longPressNodeAt`/`clickSubmitActionNode`、坐标按真实显示边界钳制、手势瞬时失败单次重试；`pressEnter` 兜底从盲点右下角升级为「IME 动作 → 底部提交节点 → 盲点」三级降级 | `VERIFIED` | 新增 [`AccessibilityClickResolver.kt`](file:///d:/Projects/AgentPaw/agentpaw-core/src/main/java/com/paw/agent/device/accessibility/AccessibilityClickResolver.kt)；改造 [`AgentAccessibilityService.kt`](file:///d:/Projects/AgentPaw/agentpaw-core/src/main/java/com/paw/agent/device/accessibility/AgentAccessibilityService.kt) 与 [`HybridPhoneController.kt`](file:///d:/Projects/AgentPaw/agentpaw-core/src/main/java/com/paw/agent/device/HybridPhoneController.kt)（类改 open + 两个 protected open 接缝）；新增 [`AccessibilityClickResolverTest.kt`](file:///d:/Projects/AgentPaw/agentpaw-core/src/test/java/com/paw/agent/device/accessibility/AccessibilityClickResolverTest.kt) 14 项 + [`HybridPhoneControllerAccessibilityClickTest.kt`](file:///d:/Projects/AgentPaw/agentpaw-core/src/test/java/com/paw/agent/device/HybridPhoneControllerAccessibilityClickTest.kt) 9 项：**修复前接缝不存在（编译红）/ 修复后 23 项全绿**；`:agentpaw-core:testDebugUnitTest` 26 类 194 项 0 失败（基线 171），`:app:assembleDebug` 通过；真机精度提升待设备实测 |
+
+---
+
+## 七、 2026-10-20 Skill v2 重构与高危功能开关
+
+> 完整审计与设计说明见 `docs/AUDIT_2026-10-20.md`。
+
+| 任务 ID | 优先级 | 模块 | 内容 | 状态 | 验证证据 |
+|---|---|---|---|---|---|
+| **TASK-301** | `P0` | `core/skill` | 彻底删除旧技能实现（`AgentSkill`/`CustomSkillModel`/`CustomSkillRepository`/`CustomSkillsScreen` 及其测试），清理容器、导航与字符串引用 | `VERIFIED` | 全仓库 grep 无 `CustomSkill`/`AgentSkill`/`SkillActionType` 残留；`:app:compileDebugKotlin` 通过 |
+| **TASK-302** | `P0` | `core/skill` | 重建 v2 模型：14 种动作、4 种参数类型、守卫、变量、结构化执行报告 | `VERIFIED` | `SkillDefinitionTest`（11 项） |
+| **TASK-303** | `P0` | `core/skill` | 执行引擎：静态风险前置确认、动态安全暂停、失败策略、总时长预算、逐步轨迹 | `VERIFIED` | `SkillEngineTest`（13 项，含「确认前不产生副作用」断言） |
+| **TASK-304** | `P1` | `core/skill` | 速记 DSL：中文动作行、元信息、参数、守卫、条件前缀与失败后缀，双向无损 | `VERIFIED` | `SkillDefinitionTest.dsl round trips through render` 等 5 项 |
+| **TASK-305** | `P1` | `core/skill` | 许愿式生成：动作目录提示词、JSON 修复、校验、一次自动修正、速记兜底 | `VERIFIED` | `SkillWishComposerTest`（7 项） |
+| **TASK-306** | `P1` | `app/data` | `SkillStore`：原子写入、损坏备份、v1 迁移、导入导出、增量同步工具表 | `VERIFIED` | 编译通过；`skillStore` 接线于 `AppContainer` |
+| **TASK-307** | `P1` | `app/ui` | 技能中心 / 双模式编辑器 / 许愿页，共用导航图级 ViewModel（草稿不丢） | `VERIFIED` | `:app:compileDebugKotlin` + `assembleDebug` |
+| **TASK-308** | `P0` | `app/settings` | 资深设置高危开关（HTTP / 公网明文 / 技能 Root / 敏感页 / 临时豁免），含风险说明、勾选确认、依赖禁用与级联关闭 | `VERIFIED` | `HighRiskRulesTest`（7 项） |
+| **TASK-309** | `P1` | `core/llm` | `NetworkPolicy` 运行时传输策略 + 客户端逐请求判定 | `VERIFIED` | `NetworkPolicyTest`（5 项） |
+| **TASK-310** | `P1` | 文档 | 审计报告、架构、已知问题、任务清单、双语 README 同步；测试数更新为 243 | `VERIFIED` | 本轮文档提交 |
+| **TASK-311** | `P2` | 真机 | RT-101 ~ RT-105 验证 | `TODO` | 需真机/模拟器 |
+| **TASK-312** | `P1` | 回归 | 回退 shell 门禁做变异测试，确认 `SkillEngineTest` 会变红后再恢复 | `VERIFIED` | 变异后 `14 tests, 1 failed`；恢复后全量 **243 项 / 0 失败 / 1 跳过** |

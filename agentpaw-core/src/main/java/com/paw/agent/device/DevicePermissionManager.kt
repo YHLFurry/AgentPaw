@@ -218,5 +218,79 @@ object DevicePermissionManager {
         context.startActivity(intent)
     }
 
+    /**
+     * 判断当前设备是否为小米/红米/POCO 设备或运行小米澎湃OS (HyperOS) / MIUI
+     */
+    fun isXiaomiOrHyperOs(): Boolean {
+        val manufacturer = Build.MANUFACTURER.orEmpty()
+        val brand = Build.BRAND.orEmpty()
+        if (manufacturer.contains("Xiaomi", ignoreCase = true) ||
+            brand.contains("Xiaomi", ignoreCase = true) ||
+            brand.contains("Redmi", ignoreCase = true) ||
+            brand.contains("POCO", ignoreCase = true)
+        ) {
+            return true
+        }
+        return !getSystemProperty("ro.miui.ui.version.name").isNullOrBlank() ||
+            !getSystemProperty("ro.mi.os.version.name").isNullOrBlank()
+    }
+
+    private fun getSystemProperty(key: String): String? {
+        return runCatching {
+            val clazz = Class.forName("android.os.SystemProperties")
+            val getMethod = clazz.getMethod("get", String::class.java)
+            getMethod.invoke(null, key) as? String
+        }.getOrNull()
+    }
+
+    /**
+     * 打开应用详情页面（针对 Android 13+ 小米澎湃OS 的“受限设置”，
+     * 需在此页面右上角点击「允许受限设置」；同时可配置自启动与省电策略）。
+     */
+    fun openAppDetailsSettings(context: Context) {
+        runCatching {
+            val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                data = Uri.parse("package:${context.packageName}")
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+            context.startActivity(intent)
+        }
+    }
+
+    /**
+     * 打开小米澎湃OS / MIUI 权限管理页面（包含“后台弹出界面”、“显示悬浮窗”等专属开关）。
+     */
+    fun openXiaomiPermissionsSettings(context: Context): Boolean {
+        return runCatching {
+            val intent = Intent("miui.intent.action.APP_PERM_EDITOR").apply {
+                setClassName(
+                    "com.miui.securitycenter",
+                    "com.miui.permcenter.permissions.PermissionsEditorActivity",
+                )
+                putExtra("extra_pkgname", context.packageName)
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+            context.startActivity(intent)
+            true
+        }.recoverCatching {
+            openAppDetailsSettings(context)
+            false
+        }.getOrDefault(false)
+    }
+
+    /**
+     * 打开系统开发者选项页面（用于开启「USB 调试（安全设置）」以支持模拟点击）。
+     */
+    fun openDeveloperOptions(context: Context): Boolean {
+        return runCatching {
+            val intent = Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+            context.startActivity(intent)
+            true
+        }.getOrDefault(false)
+    }
+
     private const val SHIZUKU_PACKAGE = "moe.shizuku.privileged.api"
 }
+

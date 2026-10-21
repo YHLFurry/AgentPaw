@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -21,10 +23,63 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    val localProperties = Properties().apply {
+        val localPropFile = project.rootProject.file("local.properties")
+        if (localPropFile.exists()) {
+            localPropFile.inputStream().use { stream ->
+                this.load(stream)
+            }
+        }
+    }
+
+    val signingStoreFile = localProperties.getProperty("agentpaw.signing.storeFile")
+        ?: System.getenv("AGENTPAW_STORE_FILE")
+        ?: (project.findProperty("agentpaw.signing.storeFile") as? String)
+
+    val signingStorePass = localProperties.getProperty("agentpaw.signing.storePassword")
+        ?: System.getenv("AGENTPAW_STORE_PASSWORD")
+        ?: (project.findProperty("agentpaw.signing.storePassword") as? String)
+
+    val signingKeyAlias = localProperties.getProperty("agentpaw.signing.keyAlias")
+        ?: System.getenv("AGENTPAW_KEY_ALIAS")
+        ?: (project.findProperty("agentpaw.signing.keyAlias") as? String)
+
+    val signingKeyPass = localProperties.getProperty("agentpaw.signing.keyPassword")
+        ?: System.getenv("AGENTPAW_KEY_PASSWORD")
+        ?: (project.findProperty("agentpaw.signing.keyPassword") as? String)
+
+    val resolvedKeystore = if (!signingStoreFile.isNullOrBlank()) {
+        val f = file(signingStoreFile)
+        if (f.exists()) f else project.rootProject.file(signingStoreFile).takeIf { it.exists() }
+    } else null
+
+    val isSigningConfigured = resolvedKeystore != null &&
+        !signingStorePass.isNullOrBlank() &&
+        !signingKeyAlias.isNullOrBlank() &&
+        !signingKeyPass.isNullOrBlank()
+
+    signingConfigs {
+        if (isSigningConfigured) {
+            create("release") {
+                storeFile = resolvedKeystore
+                storePassword = signingStorePass
+                keyAlias = signingKeyAlias
+                keyPassword = signingKeyPass
+                enableV1Signing = true
+                enableV2Signing = true
+                enableV3Signing = true
+                enableV4Signing = true
+            }
+        }
+    }
+
     buildTypes {
         debug {
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-debug"
+            if (isSigningConfigured) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
         release {
             isMinifyEnabled = true
@@ -33,6 +88,9 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
+            if (isSigningConfigured) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 

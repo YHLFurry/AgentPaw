@@ -11,7 +11,7 @@
 - **仓库地址**：[https://github.com/YHLFurry/AgentPaw](https://github.com/YHLFurry/AgentPaw)
 - **当前 Git 分支**：`feat/controller-priority-root-shizuku-accessibility`
 - **项目定位**：运行在 Android 手机上的自主智能体（Autonomous Agent）交互与执行框架。具备多模态视觉感知、多轮工具调用、阶梯式混合控制（ROOT > Shizuku > 无障碍）、断点续操恢复与高风险动作拦截能力。
-- **发布版本**：v0.1.5 (Build 6)
+- **发布版本**：v0.2.1 (versionCode 11)
 - **开源协议**：Apache License 2.0
 
 ---
@@ -48,7 +48,9 @@ AgentPaw/
 │   │   │   ├── model/             # 领域模型 (Conversation, Message, ToolCall, ToolDefinition, ToolResult)
 │   │   │   ├── search/            # 免 Key 网页搜索 (DuckDuckGoSearchBackend.kt)
 │   │   │   ├── shell/             # 纯 Kotlin 进程内沙箱脚本引擎 (Lexer, Parser, Interpreter)
-│   │   │   ├── skill/             # 技能模型与热注册 (AgentSkill.kt, CustomSkillModel.kt)
+│   │   │   ├── skill/             # 技能 v2：模型 / 校验 / 表达式 / DSL / 执行引擎 / 许愿生成
+│   │   │   │                      # (SkillModel, SkillValidator, SkillEngine, SkillDsl,
+│   │   │   │                      #  SkillWishComposer, SkillPresets, SkillRegistry)
 │   │   │   └── tool/              # 12项手机控制工具、子智能体委派、沙箱脚本工具
 │   │   └── device/                # 设备控制与系统特权层
 │   │       ├── HybridPhoneController.kt    # 三通道加权调度中心 (ROOT > Shizuku > Accessibility)
@@ -59,7 +61,7 @@ AgentPaw/
 │   │       ├── root/                       # RootController (基于 su 执行底层事件与截屏)
 │   │       ├── shizuku/                    # ShizukuController & ShizukuInitializer (Binder 通道)
 │   │       └── floating/                   # 悬浮停止按钮与前台应用状态监控
-│   └── src/test/java/             # 147 项核心功能单元测试
+│   └── src/test/java/             # 核心模块单元测试（与 app 合计 243 项）
 ├── app/                           # Android 宿主应用模块 (Jetpack Compose 交互界面)
 │   ├── src/main/AndroidManifest.xml # 宿主 Manifest (MainActivity, AgentFloatingService, 权限与规则)
 │   ├── src/main/java/com/paw/agent/
@@ -69,19 +71,20 @@ AgentPaw/
 │   │   │   ├── conversation/      # 持久化会话仓储 (PersistentConversationRepository.kt, 图片解耦落盘)
 │   │   │   ├── security/          # 凭据硬件加密 (KeystoreSecretStorage.kt)
 │   │   │   ├── settings/          # DataStoreSettingsRepository.kt
-│   │   │   └── skill/             # 自定义技能持久化 (CustomSkillRepository.kt)
+│   │   │   └── skill/             # 技能持久化 / v1 迁移 / 导入导出 (SkillStore.kt)
 │   │   ├── runner/
 │   │   │   └── AgentTaskRunner.kt # 独立于 UI 生命周期的任务执行调度器、断点状态机、崩溃恢复
 │   │   └── ui/
 │   │       ├── chat/              # 聊天主页面 (ChatScreen.kt, ChatViewModel.kt, MessageBubble.kt)
 │   │       ├── history/           # 任务历史、详情与双任务多维对比 (HistoryScreen.kt, TaskCompareScreen.kt)
-│   │       ├── skills/            # 自定义技能工坊管理界面 (CustomSkillsScreen.kt)
+│   │       ├── skills/            # 技能中心、双模式编辑器、许愿生成
+│   │       │                      # (SkillsHubScreen, SkillEditorScreen, SkillWishScreen)
 │   │       ├── settings/          # 设置主页与各二级页面 (模型、生成、控制、外观、资深专家)
 │   │       ├── about/             # 关于界面与萌爪长按解锁资深模式 (AboutScreen.kt)
 │   │       ├── floating/          # 跨应用前台服务与悬浮状态胶囊 (AgentFloatingService.kt)
 │   │       ├── navigation/        # Compose 路由导航中枢 (AgentPawApp.kt)
 │   │       └── theme/             # Material 3 & Miuix 双生设计主题体系
-│   └── src/test/java/             # 22 项 UI 与数据仓储单元测试
+│   └── src/test/java/             # 应用层单元测试（含高危规则约束）
 ├── docs/                          # 技术架构审计与路线图 (AGENT_AUDIT_AND_ROADMAP.md)
 └── build.gradle.kts / settings.gradle.kts / gradle.properties
 ```

@@ -16,7 +16,7 @@
   <img src="https://img.shields.io/badge/平台-Android_8.0+_(API_26+)-3DDC84?logo=android&logoColor=white" alt="Platform" />
   <img src="https://img.shields.io/badge/语言-Kotlin_2.2.21-7F52FF?logo=kotlin&logoColor=white" alt="Kotlin" />
   <img src="https://img.shields.io/badge/界面-Material_3_&_Miuix-4285F4?logo=jetpackcompose&logoColor=white" alt="UI" />
-  <img src="https://img.shields.io/badge/单元测试-195_全部通过-brightgreen" alt="Tests" />
+  <img src="https://img.shields.io/badge/单元测试-243_全部通过-brightgreen" alt="Tests" />
   <img src="https://img.shields.io/badge/开源协议-Apache_2.0-blue.svg" alt="License" />
 </p>
 
@@ -38,10 +38,13 @@
 - **防重复上下文注入**：恢复时动态生成包含已执行清单的系统级防重 Prompt，确保大模型从断点精准继续，坚决避免重复点击或多余执行。
 - **一键快捷唤醒**：聊天界面底部提供醒目的断点恢复卡片，配合系统悬浮胶囊一键即可让 Agent 满血恢复。
 
-### 🤹 自定义 Skill 技能系统
-- **可视化技能工坊**：应用内提供专属管理界面，支持新建、编辑、开关与删除自定义技能。
-- **自定义 Schema 与模板**：自由配置技能参数的 JSON Schema 与 Prompt 模版。
-- **热注入运行时**：新创建或启用的技能即时热注册进 LLM Function Calling 工具集，无需重启即刻投入使用。
+### 🤹 Skill 技能系统（v2 完全重构）
+- **许愿式生成**：用一句人话描述需求，模型自动编译成步骤与带类型的参数；结果先预览、再校验，确认后才保存，绝不自动执行。
+- **双模式编辑，同一份定义**：既可用「速记」一行一个动作（如 `打开 微信 / 点 搜索 / 输入 {{keyword}}`），也可切到完整 JSON 编辑守卫、条件、每步超时与失败策略，两种视图实时同步。
+- **14 种动作**：启动应用、按文字/坐标点击、输入、滑动、滚动、系统按键、等待、等待文字出现、滚动查找、DeepLink、界面快照、变量赋值、Root 命令。
+- **参数即 Schema**：参数定义会被翻译成真正的 JSON Schema（类型、枚举、必填），模型据此填参，而不是自由猜测。
+- **默认安全**：高风险技能在**第一步之前**确认一次（不再边跑边确认、确认后整条重放）；敏感页永远暂停；Root 命令受双层开关约束；每次执行返回逐步轨迹。
+- **导入 / 导出**：技能是可移植的 JSON；旧版 v1 自定义技能文件会在首次启动时自动迁移。
 
 ### ⚡ 三级混合执行架构 (ROOT > Shizuku > 无障碍)
 - **ROOT 模式 (`su`)**：第一优先级！针对已 Root 设备直接以纯 Root 模式进行全功能驱动、物理模拟、静默应用拉起与高帧率底层截屏，完全免无障碍服务。
@@ -132,7 +135,7 @@ AgentPaw
 │   │   └── ui/
 │   │       ├── chat/              # 聊天主页面、断点续操卡片、气泡流式渲染
 │   │       ├── history/           # 任务历史列表、任务详情、双任务对比页面
-│   │       ├── skill/             # 技能工坊列表、技能新增与编辑界面
+│   │       ├── skills/            # 技能中心、双模式编辑器、许愿生成界面
 │   │       ├── settings/          # 大模型参数设置、外观主题设置
 │   │       ├── about/             # 关于页面（长按触发资深专家模式）
 │   │       └── theme/             # Material 3 与 Miuix 双生设计主题体系
@@ -206,7 +209,7 @@ dependencies {
 - [x] 多轮 Agent 流式推理与工具调用闭环
 - [x] 设备级三通道混合控制（无障碍、Shizuku、ROOT）
 - [x] 断点续操与自然语言指令意图识别
-- [x] 自定义 Skill 热注册工坊
+- [x] Skill v2：许愿式生成、速记 + JSON 双编辑器、技能守卫与逐步诊断
 - [x] 任务历史记录与多维量化对比
 - [x] AI 智能步间自适应节奏引擎
 - [x] 文字直接键入与智能软键盘保底

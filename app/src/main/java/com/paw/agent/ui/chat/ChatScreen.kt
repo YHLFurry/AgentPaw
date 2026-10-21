@@ -272,6 +272,22 @@ fun ChatScreen(
                             }
                             Spacer(Modifier.width(6.dp))
                         }
+                        val isXiaomi = remember {
+                            com.paw.agent.device.DevicePermissionManager.isXiaomiOrHyperOs()
+                        }
+                        if (isXiaomi) {
+                            AppOutlinedButton(
+                                onClick = {
+                                    com.paw.agent.device.DevicePermissionManager.openAppDetailsSettings(context)
+                                },
+                            ) {
+                                AppText(
+                                    text = "澎湃OS解除受限",
+                                    style = AppTheme.typography.labelSmall,
+                                )
+                            }
+                            Spacer(Modifier.width(6.dp))
+                        }
                         AppOutlinedButton(
                             onClick = {
                                 com.paw.agent.device.DevicePermissionManager.openAccessibilitySettings(context)
@@ -304,6 +320,22 @@ fun ChatScreen(
                             modifier = Modifier.weight(1f),
                         )
                         Spacer(Modifier.width(8.dp))
+                        val isXiaomi = remember {
+                            com.paw.agent.device.DevicePermissionManager.isXiaomiOrHyperOs()
+                        }
+                        if (isXiaomi) {
+                            AppOutlinedButton(
+                                onClick = {
+                                    com.paw.agent.device.DevicePermissionManager.openXiaomiPermissionsSettings(context)
+                                },
+                            ) {
+                                AppText(
+                                    text = "后台弹出与悬浮窗",
+                                    style = AppTheme.typography.labelSmall,
+                                )
+                            }
+                            Spacer(Modifier.width(6.dp))
+                        }
                         AppOutlinedButton(
                             onClick = {
                                 com.paw.agent.device.DevicePermissionManager.openOverlaySettings(context)

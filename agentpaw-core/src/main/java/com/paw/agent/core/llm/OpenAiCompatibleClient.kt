@@ -39,6 +39,13 @@ class OpenAiCompatibleClient(
     private val json: Json = defaultJson(),
 ) : LlmClient {
 
+    /**
+     * 传输策略。由宿主（设置页）实时下发：开关一变，下一次请求立即按新策略判定。
+     * 默认严格模式——未显式开启前不允许任何明文 HTTP。
+     */
+    @Volatile
+    var networkPolicy: NetworkPolicy = NetworkPolicy()
+
     override fun complete(
         config: LlmConfig,
         request: ChatCompletionRequest,
@@ -49,10 +56,9 @@ class OpenAiCompatibleClient(
             )
         }
 
-        if (config.baseUrl.startsWith("http://", ignoreCase = true) && !isLocalOrPrivateAddress(config.baseUrl)) {
-            throw LlmException.NotConfigured(
-                "公网 API 必须使用 HTTPS 连接以确保 API Key 与通信安全。明文 HTTP 仅允许用于本地或局域网私有模型 (如 127.0.0.1, localhost, 192.168.x.x, 10.x.x.x)。",
-            )
+        val policyDecision = networkPolicy.evaluate(config.baseUrl)
+        if (!policyDecision.allowed) {
+            throw LlmException.NotConfigured(policyDecision.reason)
         }
 
         val wire = request.copy(
@@ -206,10 +212,9 @@ class OpenAiCompatibleClient(
                     throw LlmException.NotConfigured("Fill in the required fields first")
                 }
 
-                if (config.baseUrl.startsWith("http://", ignoreCase = true) && !isLocalOrPrivateAddress(config.baseUrl)) {
-                    throw LlmException.NotConfigured(
-                        "公网 API 必须使用 HTTPS 连接以确保 API Key 与通信安全。明文 HTTP 仅允许用于本地或局域网私有模型 (如 127.0.0.1, localhost, 192.168.x.x, 10.x.x.x)。",
-                    )
+                val decision = networkPolicy.evaluate(config.baseUrl)
+                if (!decision.allowed) {
+                    throw LlmException.NotConfigured(decision.reason)
                 }
 
                 val probe = ChatCompletionRequest(
