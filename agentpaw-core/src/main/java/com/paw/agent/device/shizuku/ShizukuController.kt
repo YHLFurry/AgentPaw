@@ -52,10 +52,13 @@ open class ShizukuController {
                     p.waitFor()
                     val trimmed = output.trim()
                     if (p.exitValue() != 0) {
+                        val hyperOsHint = if (trimmed.contains("INJECT_EVENTS", ignoreCase = true)) {
+                            " (小米澎湃OS/MIUI需在开发者选项中开启「USB 调试（安全设置）」后方可模拟点击)"
+                        } else ""
                         if (trimmed.startsWith("Error:", ignoreCase = true)) {
-                            trimmed
+                            "$trimmed$hyperOsHint"
                         } else if (trimmed.isNotBlank()) {
-                            "Error: $trimmed (exit code ${p.exitValue()})"
+                            "Error: $trimmed$hyperOsHint (exit code ${p.exitValue()})"
                         } else {
                             "Error: exit code ${p.exitValue()}"
                         }

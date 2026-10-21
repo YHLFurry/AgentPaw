@@ -44,6 +44,14 @@ data class LlmSettingsUiState(
     val splitVisionLanguageMode: Boolean = false,
     val rootModeEnabled: Boolean = false,
     val adaptivePacingEnabled: Boolean = true,
+    // ---- 资深模式：高危开关 ----
+    val allowHttpTransport: Boolean = false,
+    val allowPublicHttp: Boolean = false,
+    val allowShellSkills: Boolean = false,
+    val allowSensitiveScreen: Boolean = false,
+    val riskBypassUntil: Long = 0L,
+    /** 高危开关被拒绝时的原因，展示一次后清空。 */
+    val riskNotice: String? = null,
 ) {
     /** No inline errors: safe to persist. */
     val isValid: Boolean
@@ -83,6 +91,11 @@ class LlmSettingsViewModel(
                     splitVisionLanguageMode = settings.splitVisionLanguageMode,
                     rootModeEnabled = settings.rootModeEnabled,
                     adaptivePacingEnabled = settings.adaptivePacingEnabled,
+                    allowHttpTransport = settings.allowHttpTransport,
+                    allowPublicHttp = settings.allowPublicHttp,
+                    allowShellSkills = settings.allowShellSkills,
+                    allowSensitiveScreen = settings.allowSensitiveScreen,
+                    riskBypassUntil = settings.riskBypassUntil,
                 )
                 // Only seed the LLM form once; later edits must not be clobbered by unrelated setting changes.
                 if (!seededFromRepository) {
@@ -95,7 +108,7 @@ class LlmSettingsViewModel(
                         temperature = llm.temperature,
                         topP = llm.topP,
                         maxTokens = llm.maxTokens,
-                        maxToolRounds = llm.maxToolRounds.coerceIn(1, 50),
+                        maxToolRounds = llm.maxToolRounds.coerceIn(0, 100),
                         visionResolutionMode = llm.visionResolutionMode,
                         stream = llm.stream,
                         systemPrompt = llm.systemPrompt,
@@ -124,6 +137,34 @@ class LlmSettingsViewModel(
     fun onToggleAdaptivePacing(enabled: Boolean) {
         _uiState.value = _uiState.value.copy(adaptivePacingEnabled = enabled)
         viewModelScope.launch { settingsRepository.setAdaptivePacingEnabled(enabled) }
+    }
+
+    // ------------------------------------------------------------ 高危开关
+
+    /**
+     * 变更高危开关。拒绝原因由仓储层给出（依赖未满足等），这里只负责展示。
+     * 不做乐观更新：开关状态必须反映真实落盘结果，否则会出现「界面显示已开、
+     * 实际策略仍是关」的最坏情况。
+     */
+    fun onToggleHighRisk(toggle: com.paw.agent.data.settings.HighRiskToggle, enabled: Boolean) {
+        viewModelScope.launch {
+            val result = settingsRepository.setHighRiskToggle(toggle, enabled)
+            if (!result.applied) {
+                _uiState.value = _uiState.value.copy(riskNotice = result.message)
+            }
+        }
+    }
+
+    fun onStartRiskBypass(minutes: Int = 15) {
+        viewModelScope.launch { settingsRepository.setRiskBypassMinutes(minutes) }
+    }
+
+    fun onStopRiskBypass() {
+        viewModelScope.launch { settingsRepository.setRiskBypassMinutes(0) }
+    }
+
+    fun consumeRiskNotice() {
+        _uiState.value = _uiState.value.copy(riskNotice = null)
     }
 
     fun onProviderChange(provider: LlmProvider) {
@@ -165,11 +206,18 @@ class LlmSettingsViewModel(
     }
 
     fun onMaxToolRoundsChange(value: Int) {
-        _uiState.value = _uiState.value.copy(maxToolRounds = value.coerceIn(1, 50))
+        val clamped = value.coerceIn(0, 100)
+        _uiState.value = _uiState.value.copy(maxToolRounds = clamped)
+        viewModelScope.launch {
+            settingsRepository.updateLlm { it.copy(maxToolRounds = clamped) }
+        }
     }
 
     fun onVisionResolutionModeChange(value: String) {
         _uiState.value = _uiState.value.copy(visionResolutionMode = value)
+        viewModelScope.launch {
+            settingsRepository.updateLlm { it.copy(visionResolutionMode = value) }
+        }
     }
 
     fun onStreamChange(value: Boolean) {

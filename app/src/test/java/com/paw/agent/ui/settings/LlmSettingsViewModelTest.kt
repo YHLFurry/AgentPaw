@@ -4,6 +4,10 @@ import com.paw.agent.core.llm.LlmChunk
 import com.paw.agent.core.llm.LlmClient
 import com.paw.agent.core.llm.LlmConfig
 import com.paw.agent.core.llm.dto.ChatCompletionRequest
+import com.paw.agent.data.settings.HighRiskResult
+import com.paw.agent.data.settings.HighRiskRules
+import com.paw.agent.data.settings.HighRiskState
+import com.paw.agent.data.settings.HighRiskToggle
 import com.paw.agent.data.settings.AppSettings
 import com.paw.agent.data.settings.SettingsRepository
 import com.paw.agent.data.settings.UiThemeMode
@@ -87,15 +91,18 @@ class LlmSettingsViewModelTest {
     }
 
     @Test
-    fun `clamps maxToolRounds within 1 to 50`() = runTest {
+    fun `clamps maxToolRounds within 0 to 100 and persists`() = runTest {
         val viewModel = LlmSettingsViewModel(fakeSettingsRepo, fakeLlmClient)
         advanceUntilIdle()
 
         viewModel.onMaxToolRoundsChange(0)
-        assertEquals(1, viewModel.uiState.value.maxToolRounds)
+        assertEquals(0, viewModel.uiState.value.maxToolRounds)
 
-        viewModel.onMaxToolRoundsChange(100)
-        assertEquals(50, viewModel.uiState.value.maxToolRounds)
+        viewModel.onMaxToolRoundsChange(150)
+        assertEquals(100, viewModel.uiState.value.maxToolRounds)
+
+        viewModel.onMaxToolRoundsChange(-5)
+        assertEquals(0, viewModel.uiState.value.maxToolRounds)
     }
 
     private class FakeLlmClient : LlmClient {
@@ -144,7 +151,40 @@ class LlmSettingsViewModelTest {
         }
 
         override suspend fun setRootModeEnabled(enabled: Boolean) {
-            _settings.update { it.copy(rootModeEnabled = enabled) }
+            _settings.update { it.copy(rootModeEnabled = enabled, allowShellSkills = false) }
+        }
+
+        override suspend fun setHighRiskToggle(
+            toggle: HighRiskToggle,
+            enabled: Boolean,
+        ): HighRiskResult {
+            val current = _settings.value
+            val outcome = HighRiskRules.toggle(
+                HighRiskState(
+                    allowHttp = current.allowHttpTransport,
+                    allowPublicHttp = current.allowPublicHttp,
+                    allowShellSkills = current.allowShellSkills,
+                    allowSensitiveScreen = current.allowSensitiveScreen,
+                    rootModeEnabled = current.rootModeEnabled,
+                ),
+                toggle,
+                enabled,
+            )
+            if (outcome.applied) {
+                _settings.update {
+                    it.copy(
+                        allowHttpTransport = outcome.state.allowHttp,
+                        allowPublicHttp = outcome.state.allowPublicHttp,
+                        allowShellSkills = outcome.state.allowShellSkills,
+                        allowSensitiveScreen = outcome.state.allowSensitiveScreen,
+                    )
+                }
+            }
+            return HighRiskResult(outcome.applied, outcome.message)
+        }
+
+        override suspend fun setRiskBypassMinutes(minutes: Int) {
+            _settings.update { it.copy(riskBypassUntil = HighRiskRules.bypassUntil(minutes)) }
         }
 
         override suspend fun setAdaptivePacingEnabled(enabled: Boolean) {

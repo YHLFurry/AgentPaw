@@ -13,6 +13,10 @@ import com.paw.agent.core.model.MessageStatus
 import com.paw.agent.core.model.ToolCall
 import com.paw.agent.core.model.ToolDefinition
 import com.paw.agent.data.conversation.InMemoryConversationRepository
+import com.paw.agent.data.settings.HighRiskResult
+import com.paw.agent.data.settings.HighRiskRules
+import com.paw.agent.data.settings.HighRiskState
+import com.paw.agent.data.settings.HighRiskToggle
 import com.paw.agent.data.settings.AppSettings
 import com.paw.agent.data.settings.SettingsRepository
 import com.paw.agent.data.settings.UiThemeMode
@@ -327,7 +331,40 @@ class ChatViewModelTest {
         }
 
         override suspend fun setRootModeEnabled(enabled: Boolean) {
-            _settings.update { it.copy(rootModeEnabled = enabled) }
+            _settings.update { it.copy(rootModeEnabled = enabled, allowShellSkills = false) }
+        }
+
+        override suspend fun setHighRiskToggle(
+            toggle: HighRiskToggle,
+            enabled: Boolean,
+        ): HighRiskResult {
+            val current = _settings.value
+            val outcome = HighRiskRules.toggle(
+                HighRiskState(
+                    allowHttp = current.allowHttpTransport,
+                    allowPublicHttp = current.allowPublicHttp,
+                    allowShellSkills = current.allowShellSkills,
+                    allowSensitiveScreen = current.allowSensitiveScreen,
+                    rootModeEnabled = current.rootModeEnabled,
+                ),
+                toggle,
+                enabled,
+            )
+            if (outcome.applied) {
+                _settings.update {
+                    it.copy(
+                        allowHttpTransport = outcome.state.allowHttp,
+                        allowPublicHttp = outcome.state.allowPublicHttp,
+                        allowShellSkills = outcome.state.allowShellSkills,
+                        allowSensitiveScreen = outcome.state.allowSensitiveScreen,
+                    )
+                }
+            }
+            return HighRiskResult(outcome.applied, outcome.message)
+        }
+
+        override suspend fun setRiskBypassMinutes(minutes: Int) {
+            _settings.update { it.copy(riskBypassUntil = HighRiskRules.bypassUntil(minutes)) }
         }
 
         override suspend fun setAdaptivePacingEnabled(enabled: Boolean) {
