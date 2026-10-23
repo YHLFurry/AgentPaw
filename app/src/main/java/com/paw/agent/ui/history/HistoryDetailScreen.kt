@@ -40,6 +40,8 @@ import com.paw.agent.ui.components.adaptive.AppIconButton
 import com.paw.agent.ui.components.adaptive.AppScaffold
 import com.paw.agent.ui.components.adaptive.AppText
 import com.paw.agent.ui.components.adaptive.AppTopAppBar
+import com.paw.agent.ui.components.adaptive.AppTopBarAction
+import com.paw.agent.ui.components.adaptive.LocalTopBarClearance
 import com.paw.agent.ui.theme.AppTheme
 
 @Composable
@@ -55,14 +57,16 @@ fun HistoryDetailScreen(
     val conv = remember(historyList, conversationId) {
         historyList.firstOrNull { it.id == conversationId }
     }
+    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
 
     AppScaffold(
         modifier = modifier.fillMaxSize(),
         topBar = {
             AppTopAppBar(
                 title = conv?.title?.ifBlank { "任务详情" } ?: "任务详情",
+                isContentScrolled = listState.canScrollBackward,
                 navigationIcon = {
-                    AppIconButton(onClick = onBack) {
+                    AppTopBarAction(onClick = onBack) {
                         AppIcon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = stringResource(R.string.cd_back),
@@ -71,7 +75,7 @@ fun HistoryDetailScreen(
                 },
                 actions = {
                     if (conv != null) {
-                        AppIconButton(onClick = {
+                        AppTopBarAction(onClick = {
                             val ok = container.restoreConversation(conv.id)
                             if (ok) {
                                 Toast.makeText(context, "已载入此任务历史上下文！", Toast.LENGTH_SHORT).show()
@@ -136,10 +140,15 @@ fun HistoryDetailScreen(
             }
         } else {
             LazyColumn(
+                state = listState,
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(innerPadding)
                     .padding(horizontal = 16.dp, vertical = 12.dp),
+                // 顶栏那一份高度额外作为 contentPadding：Material 下是 0，布局与改动前一致。
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                    top = LocalTopBarClearance.current,
+                ),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 // 不以 message.id 单独作为 key，使用带 index 的安全组合 key，

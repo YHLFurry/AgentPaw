@@ -39,6 +39,8 @@ import com.paw.agent.ui.components.adaptive.AppText
 import com.paw.agent.ui.components.adaptive.AppTextButton
 import com.paw.agent.ui.components.adaptive.AppTextField
 import com.paw.agent.ui.components.adaptive.AppTopAppBar
+import com.paw.agent.ui.components.adaptive.AppTopBarAction
+import com.paw.agent.ui.components.adaptive.LocalTopBarClearance
 import com.paw.agent.ui.settings.SettingsCard
 import com.paw.agent.ui.settings.SettingsGroupLabel
 import com.paw.agent.ui.settings.SettingsRowDivider
@@ -63,6 +65,7 @@ fun SkillEditorScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val editing = state.editing
+    val scrollState = rememberScrollState()
 
     AppScaffold(
         modifier = modifier.fillMaxSize(),
@@ -78,8 +81,9 @@ fun SkillEditorScreen(
                 } else {
                     stringResource(R.string.skills_no_errors)
                 },
+                isContentScrolled = scrollState.value > 0,
                 navigationIcon = {
-                    AppIconButton(onClick = onBack) {
+                    AppTopBarAction(onClick = onBack) {
                         AppIcon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = stringResource(R.string.cd_back),
@@ -112,8 +116,14 @@ fun SkillEditorScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 12.dp),
+                .verticalScroll(scrollState)
+                // 顶栏高度作为可滚动内容的顶部间距，内容从玻璃渐隐带下穿过。
+                .padding(
+                    start = 16.dp,
+                    end = 16.dp,
+                    top = 12.dp + LocalTopBarClearance.current,
+                    bottom = 12.dp,
+                ),
         ) {
             ModeSwitcher(
                 mode = state.editorMode,

@@ -66,6 +66,8 @@ import com.paw.agent.ui.components.adaptive.AppSurface
 import com.paw.agent.ui.components.adaptive.AppText
 import com.paw.agent.ui.components.adaptive.AppTextField
 import com.paw.agent.ui.components.adaptive.AppTopAppBar
+import com.paw.agent.ui.components.adaptive.AppTopBarAction
+import com.paw.agent.ui.components.adaptive.LocalTopBarClearance
 import com.paw.agent.ui.theme.AppTheme
 
 @Composable
@@ -110,17 +112,11 @@ fun ChatScreen(
             AppTopAppBar(
                 title = stringResource(R.string.chat_title),
                 subtitle = modelLabel,
-                // Miuix renders a fixed title/subtitle pair, so the paw mark goes
-                // into its leading slot instead of inside the title content.
-                navigationIcon = {
-                    if (AppTheme.isMiuix) {
-                        PawMark(
-                            size = 26.dp,
-                            color = AppTheme.colors.onPrimary,
-                            modifier = Modifier.padding(start = 16.dp, end = 4.dp),
-                        )
-                    }
-                },
+                // 流式对话页用列表自身的位置驱动：滚过一条就点亮玻璃材质，回到顶部则收起。
+                isContentScrolled = listState.canScrollBackward,
+                // Miuix 的玻璃顶栏把标题居中排，四颗玻璃胶囊按钮已经占掉右侧一整排，
+                // 前导位再放爪印会把标题挤到截断；Material 仍把爪印画进标题里。
+                navigationIcon = {},
                 titleContent = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         PawMark(size = 26.dp, color = AppTheme.colors.onPrimary)
@@ -145,25 +141,25 @@ fun ChatScreen(
                     }
                 },
                 actions = {
-                    AppIconButton(onClick = onOpenHistory) {
+                    AppTopBarAction(onClick = onOpenHistory) {
                         AppIcon(
                             imageVector = Icons.Default.History,
                             contentDescription = stringResource(R.string.history_title),
                         )
                     }
-                    AppIconButton(onClick = onOpenSkills) {
+                    AppTopBarAction(onClick = onOpenSkills) {
                         AppIcon(
                             imageVector = Icons.Outlined.Build,
                             contentDescription = stringResource(R.string.skills_title),
                         )
                     }
-                    AppIconButton(onClick = onNewConversation) {
+                    AppTopBarAction(onClick = onNewConversation) {
                         AppIcon(
                             imageVector = Icons.Outlined.EditNote,
                             contentDescription = stringResource(R.string.chat_new_conversation),
                         )
                     }
-                    AppIconButton(onClick = onOpenSettings) {
+                    AppTopBarAction(onClick = onOpenSettings) {
                         AppIcon(
                             imageVector = Icons.Outlined.Settings,
                             contentDescription = stringResource(R.string.chat_open_settings),
@@ -230,12 +226,36 @@ fun ChatScreen(
             com.paw.agent.device.DevicePermissionManager.hasNotificationPermission(context)
         }
         val hasAnyExecutionEngine = isRootAvailable || hasShizukuPermission || isAccessibilityEnabled
+        // 顶栏让位只对"真正占了头部的内容"生效：提示卡和分流条不在可滚动列表里，
+        // 得自己让开玻璃顶栏；两者都没有时头部为零高度，消息列表照常从顶栏下方穿过。
+        val showTopNotice = !hasAnyExecutionEngine || !hasOverlayPermission || !hasNotificationPermission
+        val showStreamFilter = splitVisionLanguageMode && messages.isNotEmpty()
+        val filteredMessages = remember(messages, selectedFilterIndex, splitVisionLanguageMode) {
+            if (!splitVisionLanguageMode) messages
+            else when (selectedFilterIndex) {
+                1 -> messages.filter {
+                    // 思考与语言流 (Language & CoT)
+                    it.isUser || (it.isAssistant && it.images.isEmpty())
+                }
+                2 -> messages.filter {
+                    // 视觉与动作流 (Vision & Actions)
+                    it.role == com.paw.agent.core.model.MessageRole.TOOL || it.images.isNotEmpty() || it.content.contains("[Current Screen Observation]")
+                }
+                else -> messages
+            }
+        }
 
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding),
         ) {
+            if (showTopNotice || showStreamFilter) {
+              Column(
+                  modifier = Modifier
+                      .fillMaxWidth()
+                      .padding(top = LocalTopBarClearance.current),
+              ) {
             if (!hasAnyExecutionEngine) {
                 AppCard(
                     onClick = {
@@ -390,22 +410,7 @@ fun ChatScreen(
                 }
             }
 
-            val filteredMessages = remember(messages, selectedFilterIndex, splitVisionLanguageMode) {
-                if (!splitVisionLanguageMode) messages
-                else when (selectedFilterIndex) {
-                    1 -> messages.filter {
-                        // 思考与语言流 (Language & CoT)
-                        it.isUser || (it.isAssistant && it.images.isEmpty())
-                    }
-                    2 -> messages.filter {
-                        // 视觉与动作流 (Vision & Actions)
-                        it.role == com.paw.agent.core.model.MessageRole.TOOL || it.images.isNotEmpty() || it.content.contains("[Current Screen Observation]")
-                    }
-                    else -> messages
-                }
-            }
-
-            if (splitVisionLanguageMode && messages.isNotEmpty()) {
+            if (showStreamFilter) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -434,6 +439,8 @@ fun ChatScreen(
                     }
                 }
             }
+              }
+            }
 
             Box(
                 Modifier
@@ -451,7 +458,12 @@ fun ChatScreen(
                     LazyColumn(
                         state = listState,
                         modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(vertical = 12.dp),
+                        // 顶栏高度花在 contentPadding 上：首条消息仍在顶栏下方起始，
+                        // 往上滚时消息从玻璃顶栏的渐隐带下穿过而不是被硬切掉。
+                        contentPadding = PaddingValues(
+                            top = 12.dp + LocalTopBarClearance.current,
+                            bottom = 12.dp,
+                        ),
                     ) {
                         // 不以 message.id 作为 key：部分 OpenAI 兼容后端会返回重复或
                         // 空的 tool-call id，重复 key 会让 LazyColumn 直接抛

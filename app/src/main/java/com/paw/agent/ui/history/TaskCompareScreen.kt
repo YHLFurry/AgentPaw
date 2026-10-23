@@ -44,6 +44,8 @@ import com.paw.agent.ui.components.adaptive.AppScaffold
 import com.paw.agent.ui.components.adaptive.AppSurface
 import com.paw.agent.ui.components.adaptive.AppText
 import com.paw.agent.ui.components.adaptive.AppTopAppBar
+import com.paw.agent.ui.components.adaptive.AppTopBarAction
+import com.paw.agent.ui.components.adaptive.LocalTopBarClearance
 import com.paw.agent.ui.settings.SettingsCard
 import com.paw.agent.ui.settings.SettingsGroupLabel
 import com.paw.agent.ui.settings.SettingsRowDivider
@@ -60,6 +62,7 @@ fun TaskCompareScreen(
     val historyList by container.conversationRepository.historyList.collectAsStateWithLifecycle()
     val conv1 = remember(historyList, id1) { historyList.firstOrNull { it.id == id1 } }
     val conv2 = remember(historyList, id2) { historyList.firstOrNull { it.id == id2 } }
+    val scrollState = rememberScrollState()
 
     AppScaffold(
         modifier = modifier.fillMaxSize(),
@@ -67,13 +70,14 @@ fun TaskCompareScreen(
             AppTopAppBar(
                 title = stringResource(R.string.history_compare_title),
                 navigationIcon = {
-                    AppIconButton(onClick = onBack) {
+                    AppTopBarAction(onClick = onBack) {
                         AppIcon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = stringResource(R.string.cd_back),
                         )
                     }
                 },
+                isContentScrolled = scrollState.value > 0,
                 color = AppTheme.colors.surfaceContainer,
             )
         },
@@ -96,8 +100,14 @@ fun TaskCompareScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(innerPadding)
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 16.dp, vertical = 14.dp),
+                    .verticalScroll(scrollState)
+                    // 顶栏高度作为可滚动内容的顶部间距，内容从玻璃渐隐带下穿过。
+                    .padding(
+                        start = 16.dp,
+                        end = 16.dp,
+                        top = 14.dp + LocalTopBarClearance.current,
+                        bottom = 14.dp,
+                    ),
             ) {
                 // 顶部：两任务概览并排卡片
                 Row(
