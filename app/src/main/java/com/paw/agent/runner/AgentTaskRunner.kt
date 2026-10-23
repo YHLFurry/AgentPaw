@@ -3,6 +3,7 @@ package com.paw.agent.runner
 import android.content.Context
 import com.paw.agent.core.agent.Agent
 import com.paw.agent.core.agent.AgentEvent
+import com.paw.agent.core.agent.SensitiveDataMasker
 import com.paw.agent.core.agent.breakpoint.ResumeIntentDetector
 import com.paw.agent.core.agent.breakpoint.StepSnapshot
 import com.paw.agent.core.agent.breakpoint.TaskBreakpoint
@@ -18,6 +19,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -160,7 +162,7 @@ class AgentTaskRunner(
         }
     }
 
-    fun startTask(config: LlmConfig, promptText: String) {
+    fun startTask(config: LlmConfig, promptText: String, images: List<String> = emptyList()) {
         if (_isGenerating.value) return
 
         val text = promptText.trim()
@@ -168,7 +170,7 @@ class AgentTaskRunner(
 
         val currentBp = _activeBreakpoint.value
         val resumeIntent = ResumeIntentDetector.detect(text, hasActiveBreakpoint = currentBp != null)
-        if (currentBp != null && resumeIntent.isResume) {
+        if (currentBp != null && resumeIntent.isResume && images.isEmpty()) {
             resumeBreakpoint(
                 customInstruction = resumeIntent.additionalInstruction,
                 config = config,
@@ -190,6 +192,7 @@ class AgentTaskRunner(
                 id = UUID.randomUUID().toString(),
                 role = MessageRole.USER,
                 content = text,
+                images = images,
                 createdAt = System.currentTimeMillis(),
             ),
         )
@@ -209,7 +212,7 @@ class AgentTaskRunner(
         cancelled = false
         com.paw.agent.device.accessibility.AgentAccessibilityService.clearGlobalStop()
         stepCount = 0
-        maxSteps = (if (config.maxToolRounds <= 0) 15 else config.maxToolRounds).coerceIn(1, 100)
+        maxSteps = if (config.maxToolRounds <= 0) 0 else config.maxToolRounds
         AgentExecutionController.markStarted(maxSteps)
 
         runJob = scope.launch {
@@ -276,7 +279,7 @@ class AgentTaskRunner(
         cancelled = false
         com.paw.agent.device.accessibility.AgentAccessibilityService.clearGlobalStop()
         stepCount = bp.stoppedAtStep
-        maxSteps = (if (bp.maxSteps <= 0) 15 else bp.maxSteps).coerceIn(1, 100)
+        maxSteps = if (bp.maxSteps <= 0) 0 else bp.maxSteps
         AgentExecutionController.markStarted(maxSteps)
         AgentExecutionController.updateProgress(stepCount, maxSteps, "从断点继续执行中...")
 
@@ -440,6 +443,7 @@ class AgentTaskRunner(
                         it.copy(
                             content = event.message.content,
                             toolCalls = event.message.toolCalls,
+                            durationMs = event.message.durationMs,
                             status = MessageStatus.COMPLETE,
                         )
                     }
@@ -461,7 +465,7 @@ class AgentTaskRunner(
                 val currentId = activeAssistantId
                 if (currentId != null) {
                     conversationRepository.updateMessage(currentId) {
-                        it.copy(content = event.message.content, status = MessageStatus.COMPLETE)
+                        it.copy(content = event.message.content, status = MessageStatus.COMPLETE, durationMs = event.message.durationMs)
                     }
                     activeAssistantId = null
                 } else if (event.message.content.isNotBlank()) {
@@ -471,6 +475,7 @@ class AgentTaskRunner(
                             role = MessageRole.ASSISTANT,
                             content = event.message.content,
                             status = MessageStatus.COMPLETE,
+                            durationMs = event.message.durationMs,
                             createdAt = System.currentTimeMillis(),
                         ),
                     )
@@ -557,7 +562,7 @@ class AgentTaskRunner(
                 val briefContent = when {
                     isSafetyPaused -> "检测到敏感密码/支付页面，自动化操作已安全暂停"
                     isConfirmationRequired -> "高风险操作拦截，等待用户授权: ${(controlSignal as ToolControlSignal.RequiresConfirmation).action}"
-                    event.result.name == "take_screenshot" -> "屏幕截图成功 (多模态感知已同步)"
+                    event.result.name == "take_screenshot" && !event.result.isError -> "屏幕截图成功 (多模态感知已同步)"
                     desensitized.length > 120 -> desensitized.take(120) + "…"
                     else -> desensitized
                 }
@@ -571,6 +576,7 @@ class AgentTaskRunner(
                             else -> "✔ ${event.result.name}: $briefContent"
                         },
                         fullLog = desensitized,
+                        durationMs = event.result.durationMs,
                         status = when {
                             isSafetyPaused || isConfirmationRequired -> MessageStatus.CANCELLED
                             event.result.isError -> MessageStatus.FAILED
@@ -694,11 +700,35 @@ class AgentTaskRunner(
 
         val effectiveConfig = config ?: lastLlmConfig
         _isGenerating.value = true
+        cancelled = false
         context?.let { runCatching { AgentFloatingService.start(it) } }
 
-        scope.launch {
+        runJob = scope.launch {
             try {
-                val toolResult = agent.executeDirectTool(risk.toolName, confirmedArgs)
+                val toolResult = agent.executeDirectTool(risk.toolName, confirmedArgs, isCancelled = { cancelled })
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                val call = ToolCall(toolResult.toolCallId, risk.toolName, confirmedArgs)
+                when (val signal = ToolControlSignal.parse(toolResult.content, risk.toolName, confirmedArgs)) {
+                    is ToolControlSignal.SafetyPause -> {
+                        triggerSafetyPauseBreakpoint(toolResult, call, signal)
+                        return@launch
+                    }
+                    is ToolControlSignal.RequiresConfirmation -> {
+                        triggerRiskConfirmationBreakpoint(toolResult, call, signal)
+                        return@launch
+                    }
+                    ToolControlSignal.None -> Unit
+                }
+                if (toolResult.isError) {
+                    _isGenerating.value = false
+                    AgentExecutionController.markFailed("授权操作执行失败，请检查权限与当前页面后重试")
+                    conversationRepository.addMessage(Message(
+                        id = UUID.randomUUID().toString(), role = MessageRole.ASSISTANT,
+                        content = "授权操作执行失败，任务已停止。", status = MessageStatus.FAILED,
+                        error = SensitiveDataMasker.mask(toolResult.content).take(1000),
+                    ))
+                    return@launch
+                }
 
                 val toolResultMsgId = UUID.randomUUID().toString()
                 val briefContent = "✔ 已显式授权执行: ${risk.action} (${risk.target})"
@@ -737,7 +767,9 @@ class AgentTaskRunner(
                     customInstruction = "【系统确认】：用户已显式确认并授权执行完成 [${risk.action}: ${risk.target}]，请直接根据最新屏幕状态推进后续步骤。",
                     config = effectiveConfig,
                 )
-            } catch (t: Throwable) {
+            } catch (t: CancellationException) {
+                throw t
+            } catch (t: Exception) {
                 _isGenerating.value = false
                 AgentExecutionController.markFailed(t.message ?: "授权执行失败")
             }

@@ -1,6 +1,8 @@
 package com.paw.agent.ui.chat
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -33,6 +35,8 @@ import androidx.compose.material.icons.outlined.Security
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.AddPhotoAlternate
+import androidx.compose.foundation.lazy.LazyRow
 import com.paw.agent.core.agent.breakpoint.TaskBreakpoint
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -80,6 +84,12 @@ fun ChatScreen(
     splitVisionLanguageMode: Boolean = false,
     activeBreakpoint: TaskBreakpoint? = null,
     isInitialized: Boolean = true,
+    storageError: String? = null,
+    images: List<String> = emptyList(),
+    importingImages: Boolean = false,
+    attachmentError: Boolean = false,
+    onImagesPicked: (List<String>) -> Unit = {},
+    onRemoveImage: (Int) -> Unit = {},
     onDraftChange: (String) -> Unit,
     onSendOrStop: () -> Unit,
     onResumeBreakpoint: () -> Unit = {},
@@ -92,19 +102,10 @@ fun ChatScreen(
     modifier: Modifier = Modifier,
 ) {
     val listState = rememberLazyListState()
-    var selectedFilterIndex by androidx.compose.runtime.remember { androidx.compose.runtime.mutableIntStateOf(0) }
-
-    // Keep the newest message in view as tokens stream in without animation conflicts.
-    LaunchedEffect(messages.size, messages.lastOrNull()?.content?.length) {
-        if (messages.isNotEmpty()) {
-            val isNearBottom = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index?.let {
-                it >= messages.size - 2
-            } ?: true
-            if (isNearBottom) {
-                listState.scrollToItem(messages.lastIndex)
-            }
-        }
+    val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        onImagesPicked(uris.map { it.toString() })
     }
+    var selectedFilterIndex by androidx.compose.runtime.remember { androidx.compose.runtime.mutableIntStateOf(0) }
 
     AppScaffold(
         modifier = modifier.fillMaxSize(),
@@ -176,7 +177,12 @@ fun ChatScreen(
                 configReady = configReady,
                 activeBreakpoint = activeBreakpoint,
                 isInitialized = isInitialized,
-                enabled = (draft.isNotBlank() && isInitialized) || isGenerating,
+                images = images,
+                importingImages = importingImages,
+                attachmentError = attachmentError,
+                onPickImages = { imagePicker.launch(arrayOf("image/*")) },
+                onRemoveImage = onRemoveImage,
+                enabled = ((draft.isNotBlank() || images.isNotEmpty()) && isInitialized && !importingImages) || isGenerating,
                 onDraftChange = onDraftChange,
                 onSendOrStop = onSendOrStop,
                 onResumeBreakpoint = onResumeBreakpoint,
@@ -188,6 +194,7 @@ fun ChatScreen(
         containerColor = AppTheme.colors.background,
     ) { padding ->
         val context = androidx.compose.ui.platform.LocalContext.current
+        val resources = androidx.compose.ui.platform.LocalResources.current
         val coroutineScope = rememberCoroutineScope()
         val permTick = remember { mutableIntStateOf(0) }
         val notificationPermissionLauncher = rememberLauncherForActivityResult(
@@ -226,9 +233,12 @@ fun ChatScreen(
             com.paw.agent.device.DevicePermissionManager.hasNotificationPermission(context)
         }
         val hasAnyExecutionEngine = isRootAvailable || hasShizukuPermission || isAccessibilityEnabled
+        val agentExecutionState by com.paw.agent.ui.floating.AgentExecutionController.state.collectAsStateWithLifecycle()
         // 顶栏让位只对"真正占了头部的内容"生效：提示卡和分流条不在可滚动列表里，
         // 得自己让开玻璃顶栏；两者都没有时头部为零高度，消息列表照常从顶栏下方穿过。
-        val showTopNotice = !hasAnyExecutionEngine || !hasOverlayPermission || !hasNotificationPermission
+        val showRootDashboard = isRootAvailable
+        val showTopNotice = (!hasAnyExecutionEngine || !hasOverlayPermission || !hasNotificationPermission) && !showRootDashboard
+        val showTopHeader = showRootDashboard || showTopNotice || storageError != null || (splitVisionLanguageMode && messages.isNotEmpty())
         val showStreamFilter = splitVisionLanguageMode && messages.isNotEmpty()
         val filteredMessages = remember(messages, selectedFilterIndex, splitVisionLanguageMode) {
             if (!splitVisionLanguageMode) messages
@@ -244,19 +254,81 @@ fun ChatScreen(
                 else -> messages
             }
         }
+        LaunchedEffect(filteredMessages.size, filteredMessages.lastOrNull()?.content?.length, selectedFilterIndex) {
+            if (filteredMessages.isNotEmpty()) {
+                val isNearBottom = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index?.let {
+                    it >= filteredMessages.size - 2
+                } ?: true
+                if (isNearBottom) listState.scrollToItem(filteredMessages.lastIndex)
+            }
+        }
 
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding),
         ) {
-            if (showTopNotice || showStreamFilter) {
+            if (showTopHeader) {
               Column(
                   modifier = Modifier
                       .fillMaxWidth()
                       .padding(top = LocalTopBarClearance.current),
               ) {
-            if (!hasAnyExecutionEngine) {
+            storageError?.let {
+                AppText(it, color = AppTheme.colors.error, modifier = Modifier.fillMaxWidth().padding(12.dp))
+            }
+            if (showRootDashboard) {
+                RootAuthDashboard(
+                    shizukuGranted = hasShizukuPermission,
+                    accessibilityEnabled = isAccessibilityEnabled,
+                    overlayEnabled = hasOverlayPermission,
+                    agentState = agentExecutionState,
+                    onShizukuClick = {
+                        val dispatched = com.paw.agent.device.DevicePermissionManager.openShizukuApp(context)
+                        if (!dispatched) {
+                            android.widget.Toast.makeText(context, resources.getString(R.string.chat_shizuku_missing), android.widget.Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    onAccessibilityClick = {
+                        coroutineScope.launch {
+                            if (!isAccessibilityEnabled) {
+                                val ok = com.paw.agent.device.DevicePermissionManager.enableAccessibilityViaRoot(context)
+                                if (ok) {
+                                    permTick.intValue++
+                                    android.widget.Toast.makeText(context, resources.getString(R.string.chat_accessibility_root_enabled), android.widget.Toast.LENGTH_SHORT).show()
+                                } else {
+                                    com.paw.agent.device.DevicePermissionManager.openAccessibilitySettings(context)
+                                }
+                            } else {
+                                android.widget.Toast.makeText(context, resources.getString(R.string.chat_accessibility_running), android.widget.Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    },
+                    onOverlayClick = {
+                        if (!hasOverlayPermission) {
+                            val isXiaomi = com.paw.agent.device.DevicePermissionManager.isXiaomiOrHyperOs()
+                            if (isXiaomi) {
+                                com.paw.agent.device.DevicePermissionManager.openXiaomiPermissionsSettings(context)
+                            } else {
+                                com.paw.agent.device.DevicePermissionManager.openOverlaySettings(context)
+                            }
+                        } else {
+                            android.widget.Toast.makeText(context, resources.getString(R.string.chat_overlay_ready), android.widget.Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    onAgentStateClick = {
+                        if (agentExecutionState.isRunning) {
+                            com.paw.agent.ui.floating.AgentExecutionController.requestStop()
+                            android.widget.Toast.makeText(context, resources.getString(R.string.chat_stop_requested), android.widget.Toast.LENGTH_SHORT).show()
+                        } else if (agentExecutionState.isPaused) {
+                            com.paw.agent.ui.floating.AgentExecutionController.requestResume()
+                            android.widget.Toast.makeText(context, resources.getString(R.string.chat_resumed), android.widget.Toast.LENGTH_SHORT).show()
+                        } else {
+                            android.widget.Toast.makeText(context, resources.getString(R.string.chat_idle), android.widget.Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                )
+            } else if (!hasAnyExecutionEngine) {
                 AppCard(
                     onClick = {
                         com.paw.agent.device.DevicePermissionManager.openAccessibilitySettings(context)
@@ -271,7 +343,7 @@ fun ChatScreen(
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         AppText(
-                            text = "⚠ 未开启任何执行通道（ROOT > Shizuku > 无障碍）：Agent 无法操作目标应用。",
+                            text = stringResource(R.string.chat_no_engine),
                             style = AppTheme.typography.bodySmall,
                             modifier = Modifier.weight(1f),
                         )
@@ -286,7 +358,7 @@ fun ChatScreen(
                                 },
                             ) {
                                 AppText(
-                                    text = "ROOT一键激活",
+                                    text = stringResource(R.string.chat_enable_root),
                                     style = AppTheme.typography.labelSmall,
                                 )
                             }
@@ -302,7 +374,7 @@ fun ChatScreen(
                                 },
                             ) {
                                 AppText(
-                                    text = "澎湃OS解除受限",
+                                    text = stringResource(R.string.chat_hyperos_restrictions),
                                     style = AppTheme.typography.labelSmall,
                                 )
                             }
@@ -335,7 +407,7 @@ fun ChatScreen(
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         AppText(
-                            text = "💡 悬浮窗权限未开启：跨应用执行任务时将无法展示操作进度胶囊与一键停止按钮。",
+                            text = stringResource(R.string.chat_overlay_notice),
                             style = AppTheme.typography.bodySmall,
                             modifier = Modifier.weight(1f),
                         )
@@ -350,7 +422,7 @@ fun ChatScreen(
                                 },
                             ) {
                                 AppText(
-                                    text = "后台弹出与悬浮窗",
+                                    text = stringResource(R.string.chat_background_overlay),
                                     style = AppTheme.typography.labelSmall,
                                 )
                             }
@@ -362,7 +434,7 @@ fun ChatScreen(
                             },
                         ) {
                             AppText(
-                                text = "开启悬浮窗",
+                                text = stringResource(R.string.chat_enable_overlay),
                                 style = AppTheme.typography.labelSmall,
                             )
                         }
@@ -387,7 +459,7 @@ fun ChatScreen(
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         AppText(
-                            text = "🔔 通知权限未开启：后台前台服务运行状态与中止按钮无法在系统通知栏显示。",
+                            text = stringResource(R.string.chat_notifications_notice),
                             style = AppTheme.typography.bodySmall,
                             modifier = Modifier.weight(1f),
                         )
@@ -402,7 +474,7 @@ fun ChatScreen(
                             },
                         ) {
                             AppText(
-                                text = "开启通知",
+                                text = stringResource(R.string.chat_enable_notifications),
                                 style = AppTheme.typography.labelSmall,
                             )
                         }
@@ -417,7 +489,7 @@ fun ChatScreen(
                         .padding(horizontal = 16.dp, vertical = 4.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    listOf("全部流", "思考与语言", "视觉与动作").forEachIndexed { idx, label ->
+                    listOf(stringResource(R.string.chat_stream_all), stringResource(R.string.chat_stream_text), stringResource(R.string.chat_stream_actions)).forEachIndexed { idx, label ->
                         val active = selectedFilterIndex == idx
                         AppSurface(
                             shape = RoundedCornerShape(12.dp),
@@ -469,7 +541,7 @@ fun ChatScreen(
                         // 空的 tool-call id，重复 key 会让 LazyColumn 直接抛
                         // "Key was already used" 崩掉整个对话界面。消息列表只追加
                         // 不重排，默认的位置 key 足够且更稳。
-                        items(items = filteredMessages) { message: com.paw.agent.core.model.Message ->
+                        items(items = filteredMessages, key = { it.id }) { message: com.paw.agent.core.model.Message ->
                             if (message.role != com.paw.agent.core.model.MessageRole.ASSISTANT ||
                                 message.content.isNotBlank() ||
                                 message.status == com.paw.agent.core.model.MessageStatus.STREAMING
@@ -491,6 +563,11 @@ private fun Composer(
     configReady: Boolean,
     activeBreakpoint: TaskBreakpoint?,
     isInitialized: Boolean = true,
+    images: List<String>,
+    importingImages: Boolean,
+    attachmentError: Boolean,
+    onPickImages: () -> Unit,
+    onRemoveImage: (Int) -> Unit,
     enabled: Boolean,
     onDraftChange: (String) -> Unit,
     onSendOrStop: () -> Unit,
@@ -542,7 +619,7 @@ private fun Composer(
                                 )
                                 Spacer(Modifier.width(8.dp))
                                 AppText(
-                                    text = "高风险操作授权确认 [${risk.riskLevel}]",
+                                    text = stringResource(R.string.chat_risk_title, risk.riskLevel),
                                     style = AppTheme.typography.titleSmall,
                                     fontWeight = FontWeight.Bold,
                                     color = AppTheme.colors.error,
@@ -551,23 +628,23 @@ private fun Composer(
                                 AppIconButton(onClick = onDismissBreakpoint) {
                                     AppIcon(
                                         imageVector = Icons.Outlined.Close,
-                                        contentDescription = "取消放弃",
+                                        contentDescription = stringResource(R.string.chat_dismiss),
                                         modifier = Modifier.size(18.dp),
                                     )
                                 }
                             }
                             Spacer(Modifier.height(6.dp))
                             AppText(
-                                text = "🎯 目标对象: ${risk.target}",
+                                text = stringResource(R.string.chat_risk_target, risk.target),
                                 style = AppTheme.typography.bodyMedium,
                                 fontWeight = FontWeight.SemiBold,
                             )
                             AppText(
-                                text = "⚡ 执行动作: ${risk.action} (${risk.toolName})",
+                                text = stringResource(R.string.chat_risk_action, risk.action, risk.toolName),
                                 style = AppTheme.typography.bodySmall,
                             )
                             AppText(
-                                text = "⚠️ 影响说明: ${risk.reason}",
+                                text = stringResource(R.string.chat_risk_reason, risk.reason),
                                 style = AppTheme.typography.bodySmall,
                                 color = AppTheme.colors.onErrorContainer.copy(alpha = 0.85f),
                             )
@@ -580,14 +657,14 @@ private fun Composer(
                                 AppOutlinedButton(
                                     onClick = onDismissBreakpoint,
                                 ) {
-                                    AppText(text = "取消操作", style = AppTheme.typography.labelSmall)
+                                    AppText(text = stringResource(R.string.chat_cancel_action), style = AppTheme.typography.labelSmall)
                                 }
                                 Spacer(Modifier.width(8.dp))
                                 AppButton(
                                     onClick = onConfirmRiskAction,
                                 ) {
                                     AppText(
-                                        text = "确认执行",
+                                        text = stringResource(R.string.chat_confirm_action),
                                         style = AppTheme.typography.labelSmall,
                                         fontWeight = FontWeight.Bold,
                                     )
@@ -622,7 +699,7 @@ private fun Composer(
                                 )
                                 Spacer(Modifier.width(8.dp))
                                 AppText(
-                                    text = "🛡️ 敏感页面已安全暂停",
+                                    text = stringResource(R.string.chat_sensitive_paused),
                                     style = AppTheme.typography.titleSmall,
                                     fontWeight = FontWeight.Bold,
                                     modifier = Modifier.weight(1f),
@@ -630,14 +707,14 @@ private fun Composer(
                                 AppIconButton(onClick = onDismissBreakpoint) {
                                     AppIcon(
                                         imageVector = Icons.Outlined.Close,
-                                        contentDescription = "取消放弃",
+                                        contentDescription = stringResource(R.string.chat_dismiss),
                                         modifier = Modifier.size(18.dp),
                                     )
                                 }
                             }
                             Spacer(Modifier.height(6.dp))
                             AppText(
-                                text = "检测到密码输入或支付敏感界面。为确保安全已为您自动暂停，请在手机上手动输入或确认后继续。",
+                                text = stringResource(R.string.chat_sensitive_help),
                                 style = AppTheme.typography.bodySmall,
                             )
                             Spacer(Modifier.height(10.dp))
@@ -646,11 +723,11 @@ private fun Composer(
                                 horizontalArrangement = Arrangement.End,
                             ) {
                                 AppOutlinedButton(onClick = onDismissBreakpoint) {
-                                    AppText(text = "放弃任务", style = AppTheme.typography.labelSmall)
+                                    AppText(text = stringResource(R.string.chat_abandon), style = AppTheme.typography.labelSmall)
                                 }
                                 Spacer(Modifier.width(8.dp))
                                 AppButton(onClick = onResumeBreakpoint) {
-                                    AppText(text = "已在手机上完成，继续执行", style = AppTheme.typography.labelSmall)
+                                    AppText(text = stringResource(R.string.chat_manual_done), style = AppTheme.typography.labelSmall)
                                 }
                             }
                         }
@@ -680,7 +757,7 @@ private fun Composer(
                             Spacer(Modifier.width(8.dp))
                             Column(modifier = Modifier.weight(1f)) {
                                 AppText(
-                                    text = "任务已在第 ${activeBreakpoint.stoppedAtStep} 步暂停",
+                                    text = stringResource(R.string.chat_paused_step, activeBreakpoint.stoppedAtStep),
                                     style = AppTheme.typography.labelMedium,
                                     fontWeight = FontWeight.Bold,
                                 )
@@ -695,13 +772,13 @@ private fun Composer(
                             AppButton(
                                 onClick = onResumeBreakpoint,
                             ) {
-                                AppText(text = "继续执行", style = AppTheme.typography.labelSmall)
+                                AppText(text = stringResource(R.string.chat_continue_action), style = AppTheme.typography.labelSmall)
                             }
                             Spacer(Modifier.width(4.dp))
                             AppIconButton(onClick = onDismissBreakpoint) {
                                 AppIcon(
                                     imageVector = Icons.Outlined.Close,
-                                    contentDescription = "放弃断点",
+                                    contentDescription = stringResource(R.string.chat_dismiss_breakpoint),
                                     modifier = Modifier.size(18.dp),
                                 )
                             }
@@ -710,18 +787,40 @@ private fun Composer(
                 }
             }
 
+            if (images.isNotEmpty()) {
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(images.size, key = { images[it] }) { index ->
+                        Box(Modifier.size(88.dp)) {
+                            MessageImages(listOf(images[index]))
+                            AppIconButton(onClick = { onRemoveImage(index) }, modifier = Modifier.align(Alignment.TopEnd)) {
+                                AppIcon(Icons.Outlined.Close, stringResource(R.string.chat_remove_image))
+                            }
+                        }
+                    }
+                }
+            }
+            if (importingImages || attachmentError) {
+                AppText(
+                    stringResource(if (importingImages) R.string.chat_importing_images else R.string.chat_image_error),
+                    color = if (attachmentError) AppTheme.colors.error else AppTheme.colors.onSurfaceVariant,
+                    style = AppTheme.typography.bodySmall,
+                )
+            }
             Row(
                 verticalAlignment = Alignment.Bottom,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                AppIconButton(onClick = onPickImages, enabled = isInitialized && !isGenerating && !importingImages && images.size < ChatViewModel.MAX_ATTACHMENTS) {
+                    AppIcon(Icons.Outlined.AddPhotoAlternate, stringResource(R.string.chat_add_images))
+                }
                 AppTextField(
                     value = draft,
                     onValueChange = onDraftChange,
                     modifier = Modifier.weight(1f),
                     placeholder = when {
-                        !isInitialized -> "正在恢复会话历史..."
+                        !isInitialized -> stringResource(R.string.chat_loading_history)
                         !configReady -> stringResource(R.string.chat_composer_hint_unconfigured)
-                        activeBreakpoint != null -> "输入补充指示继续，或点击上方[继续执行]"
+                        activeBreakpoint != null -> stringResource(R.string.chat_resume_hint)
                         else -> stringResource(R.string.chat_input_hint)
                     },
                     cornerRadius = 24.dp,
@@ -776,3 +875,154 @@ private fun Composer(
 }
 
 private val RectangleShape = RoundedCornerShape(0.dp)
+
+@Composable
+private fun RootAuthDashboard(
+    shizukuGranted: Boolean,
+    accessibilityEnabled: Boolean,
+    overlayEnabled: Boolean,
+    agentState: com.paw.agent.ui.floating.AgentExecutionController.ExecutionState,
+    onShizukuClick: () -> Unit,
+    onAccessibilityClick: () -> Unit,
+    onOverlayClick: () -> Unit,
+    onAgentStateClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    AppCard(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 4.dp),
+        cornerRadius = 14.dp,
+        containerColor = AppTheme.colors.surfaceContainer,
+        contentPadding = PaddingValues(10.dp),
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                AppText(
+                    text = stringResource(R.string.chat_system_console),
+                    style = AppTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = AppTheme.colors.onSurface,
+                )
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(AppTheme.colors.primaryContainer)
+                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                ) {
+                    AppText(
+                        text = stringResource(R.string.chat_root_granted),
+                        style = AppTheme.typography.labelSmall,
+                        color = AppTheme.colors.onPrimaryContainer,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+            }
+
+            // 4个独立按钮以 2x2 网格排列
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                RootModuleButton(
+                    title = "Shizuku",
+                    statusText = if (shizukuGranted) stringResource(R.string.chat_authorized_connected) else stringResource(R.string.chat_unauthorized),
+                    isReady = shizukuGranted,
+                    onClick = onShizukuClick,
+                    modifier = Modifier.weight(1f),
+                )
+                RootModuleButton(
+                    title = stringResource(R.string.chat_channel_accessibility),
+                    statusText = if (accessibilityEnabled) stringResource(R.string.chat_accessibility_active) else stringResource(R.string.chat_accessibility_inactive),
+                    isReady = accessibilityEnabled,
+                    onClick = onAccessibilityClick,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                RootModuleButton(
+                    title = stringResource(R.string.chat_channel_overlay),
+                    statusText = if (overlayEnabled) stringResource(R.string.chat_overlay_ready) else stringResource(R.string.chat_overlay_inactive),
+                    isReady = overlayEnabled,
+                    onClick = onOverlayClick,
+                    modifier = Modifier.weight(1f),
+                )
+                RootModuleButton(
+                    title = stringResource(R.string.chat_runtime_state),
+                    statusText = when {
+                        agentState.isRunning -> stringResource(R.string.chat_running_step, agentState.currentStep)
+                        agentState.isPaused -> stringResource(R.string.chat_paused_continue)
+                        else -> stringResource(R.string.chat_idle_ready)
+                    },
+                    isReady = agentState.isRunning || !agentState.isPaused,
+                    onClick = onAgentStateClick,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun RootModuleButton(
+    title: String,
+    statusText: String,
+    isReady: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    AppSurface(
+        onClick = onClick,
+        shape = RoundedCornerShape(10.dp),
+        color = if (isReady) AppTheme.colors.surfaceContainerHigh else AppTheme.colors.errorContainer.copy(alpha = 0.5f),
+        modifier = modifier,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 10.dp, vertical = 8.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                AppText(
+                    text = title,
+                    style = AppTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = AppTheme.colors.onSurface,
+                )
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(if (isReady) AppTheme.colors.primary.copy(alpha = 0.15f) else AppTheme.colors.error.copy(alpha = 0.15f))
+                        .padding(horizontal = 4.dp, vertical = 1.dp),
+                ) {
+                    AppText(
+                        text = if (isReady) stringResource(R.string.chat_ready) else stringResource(R.string.chat_not_ready),
+                        style = AppTheme.typography.labelSmall,
+                        color = if (isReady) AppTheme.colors.primary else AppTheme.colors.error,
+                        fontWeight = FontWeight.Medium,
+                    )
+                }
+            }
+            Spacer(Modifier.height(4.dp))
+            AppText(
+                text = statusText,
+                style = AppTheme.typography.bodySmall,
+                color = if (isReady) AppTheme.colors.onSurfaceVariant else AppTheme.colors.error,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}

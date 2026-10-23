@@ -6,11 +6,11 @@ plugins {
 }
 
 // Version can be overridden via -Pagentpaw.version= (used by CI when publishing from a tag)
-val agentpawVersion: String = (project.findProperty("agentpaw.version") as String?) ?: "0.1.0"
+val agentpawVersion: String = (project.findProperty("agentpaw.version") as String?) ?: rootProject.file("version.txt").readText().trim()
 
 android {
     namespace = "com.paw.agent.core"
-    compileSdk = 36
+    compileSdk = providers.gradleProperty("agentpaw.compileSdk").get().toInt()
 
     defaultConfig {
         minSdk = 26
@@ -40,6 +40,7 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.okhttp)
+    implementation(libs.re2j)
     api(libs.shizuku.api)
     api(libs.shizuku.provider)
 

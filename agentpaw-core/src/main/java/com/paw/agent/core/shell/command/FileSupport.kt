@@ -4,6 +4,7 @@ import com.paw.agent.core.shell.CommandResult
 import com.paw.agent.core.shell.SandboxSecurityException
 import com.paw.agent.core.shell.ShellEnvironment
 import java.io.File
+import com.paw.agent.core.io.BoundedIO
 
 /**
  * File helpers shared by the built-in commands.
@@ -34,8 +35,8 @@ internal object FileSupport {
                 out.append("cat: $path: Is a directory\n")
                 continue
             }
-            val content = runCatching { file.readText() }
-                .getOrElse { return "cat: $path: ${it.message}\n" }
+            val content = runCatching { file.reader().use { BoundedIO.readText(it, BoundedIO.MAX_TEXT_CHARS - out.length) } }
+                .getOrElse { throw SandboxSecurityException("cannot read $path: ${it.message}") }
             out.append(content)
         }
         return out.toString()
@@ -46,6 +47,11 @@ internal object FileSupport {
         val resolved = env.resolvePath(path)
         if (!env.isInsideRoot(resolved)) {
             throw SandboxSecurityException("path escapes the sandbox: $path")
+        }
+        val root = File(env.normalizeSandboxRoot()).canonicalFile.toPath()
+        val candidate = File(resolved).canonicalFile.toPath()
+        if (!candidate.startsWith(root)) {
+            throw SandboxSecurityException("path escapes the sandbox through a symbolic link: $path")
         }
         return File(resolved)
     }

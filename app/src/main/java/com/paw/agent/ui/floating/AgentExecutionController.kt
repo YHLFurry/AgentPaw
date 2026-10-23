@@ -76,7 +76,7 @@ object AgentExecutionController {
     }
 
     fun updateProgress(step: Int, maxSteps: Int, action: String) {
-        val safeMax = if (maxSteps <= 0) DEFAULT_MAX_STEPS else maxSteps.coerceIn(1, HARD_CAP_MAX_STEPS)
+        val safeMax = if (maxSteps <= 0) 0 else maxSteps
         _state.value = ExecutionState(
             isRunning = true,
             currentStep = step,
@@ -87,7 +87,7 @@ object AgentExecutionController {
     }
 
     fun markStarted(maxSteps: Int) {
-        val safeMax = if (maxSteps <= 0) DEFAULT_MAX_STEPS else maxSteps.coerceIn(1, HARD_CAP_MAX_STEPS)
+        val safeMax = if (maxSteps <= 0) 0 else maxSteps
         _state.value = ExecutionState(
             isRunning = true,
             currentStep = 1,

@@ -20,14 +20,21 @@ import kotlinx.serialization.json.jsonPrimitive
 private val json = Json { ignoreUnknownKeys = true }
 
 object SafetyGuard {
+    fun isSensitive(state: com.paw.agent.device.ScreenStateInfo): Boolean =
+        state.elements.any { it.isPassword } || isSensitive(state.elements.joinToString(" ") { it.text + " " + it.contentDescription })
+
+    fun pausePayload(): String = """{"status":"paused","is_safety_pause":true,"message":"[SAFETY PAUSE] Sensitive screen detected. Complete this step manually on your device."}"""
     private val sensitiveKeywords = listOf(
         "支付密码", "输入密码", "确认付款", "确认支付", "验证码支付", "指纹支付",
-        "payment password", "enter password", "confirm payment", "cvv", "安全凭据",
+        "请输入密码", "登录密码", "短信验证码", "一次性验证码", "安全凭据",
+    )
+    private val sensitiveEnglish = Regex(
+        """(?i)\b(?:payment password|enter (?:your )?password|confirm payment|password|passcode|cvv|cvc|one[ -]time (?:password|code)|verification code|recovery phrase|seed phrase)\b""",
     )
 
     fun isSensitive(text: String): Boolean {
         val lower = text.lowercase()
-        return sensitiveKeywords.any { lower.contains(it) }
+        return sensitiveKeywords.any { lower.contains(it) } || sensitiveEnglish.containsMatchIn(text)
     }
 
     fun checkRisk(toolName: String, arguments: String, screenText: String = "", targetElementText: String = ""): com.paw.agent.core.agent.RiskDecision {
@@ -64,15 +71,13 @@ object SafetyGuard {
         targetTextExtra: String = "",
     ): String? {
         val isConfirmed = context.isGranted("risk_confirmed:$toolName")
-        if (isConfirmed) {
-            return null // 用户已显式授权此操作，直接放行，杜绝死循环
-        }
-
         val state = phoneController.getScreenState()
         val allText = state.elements.joinToString(" ") { it.text + " " + it.contentDescription }
-        if (isSensitive(allText)) {
+        if (isSensitive(state)) {
             return """{"status":"paused","is_safety_pause":true,"reason":"检测到敏感密码/支付页面，自动化操作已安全暂停","message":"[SAFETY PAUSE] Detected sensitive password/payment screen. Automated operation is paused for security. Please complete this step manually on your device."}"""
         }
+        // 操作确认只授权该动作，不能授权读取或操作后来出现的密码页面。
+        if (isConfirmed) return null
 
         val evalText = if (targetTextExtra.isNotBlank()) "$targetTextExtra $allText" else allText
         val risk = checkRisk(toolName, arguments, evalText, targetElementText = targetTextExtra)
@@ -125,10 +130,10 @@ class TakeScreenshotTool(
 
         val screenState = phoneController.getScreenState()
         val allText = screenState.elements.joinToString(" ") { it.text + " " + it.contentDescription }
-        val isSensitive = SafetyGuard.isSensitive(allText)
+        val isSensitive = SafetyGuard.isSensitive(screenState)
 
         // 严禁将包含密码/支付凭据的敏感屏幕截图回传至云端大模型，必须阻断并转为安全暂停
-        if (isSensitive && !context.isGranted("risk_confirmed:take_screenshot")) {
+        if (isSensitive) {
             return """{"status":"paused","is_safety_pause":true,"reason":"检测到敏感密码/支付页面，屏幕截图已脱敏拦截","message":"[SAFETY PAUSE] Detected sensitive password/payment screen. Automated screenshot transmission is blocked for security. Please complete this step manually on your device."}"""
         }
 
@@ -441,6 +446,7 @@ class GetScreenStateTool(
 
     override suspend fun execute(arguments: String, context: AgentContext): String {
         val state = phoneController.getScreenState()
+        if (SafetyGuard.isSensitive(state)) return SafetyGuard.pausePayload()
         val root = buildJsonObject {
             put("foreground_package", JsonPrimitive(state.foregroundPackage))
             put("foreground_activity", JsonPrimitive(state.foregroundActivity))
@@ -503,7 +509,7 @@ class ClickElementTool(
         val isConfirmed = context.isGranted("risk_confirmed:click_element")
         val state = phoneController.getScreenState()
         val allText = state.elements.joinToString(" ") { it.text + " " + it.contentDescription }
-        if (!isConfirmed && SafetyGuard.isSensitive(allText)) {
+        if (SafetyGuard.isSensitive(state)) {
             return """{"status":"paused","is_safety_pause":true,"reason":"检测到敏感密码/支付页面，自动化操作已安全暂停","message":"[SAFETY PAUSE] Detected sensitive password/payment screen. Automated tapping is paused for security. Please complete this step manually on your device."}"""
         }
 

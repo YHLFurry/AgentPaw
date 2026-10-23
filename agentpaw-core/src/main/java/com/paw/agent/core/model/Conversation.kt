@@ -5,8 +5,7 @@ import kotlinx.serialization.Serializable
 /**
  * An ordered list of messages plus the bookkeeping the UI needs.
  *
- * The framework keeps conversation state in memory for now; persisting it is a
- * follow-up (see the roadmap in the README).
+ * History entries may contain only a summary; the full body is loaded on demand.
  */
 @Serializable
 data class Conversation(
@@ -15,6 +14,7 @@ data class Conversation(
     val messages: List<Message> = emptyList(),
     val createdAt: Long = 0L,
     val updatedAt: Long = 0L,
+    val summary: ConversationSummary? = null,
 ) {
     val isEmpty: Boolean get() = messages.isEmpty()
 
@@ -22,3 +22,12 @@ data class Conversation(
     val isStreaming: Boolean
         get() = messages.lastOrNull()?.status == MessageStatus.STREAMING
 }
+
+@Serializable
+data class ConversationSummary(
+    val initialGoal: String = "",
+    val stepCount: Int = 0,
+    val durationMs: Long = 0,
+    val status: MessageStatus = MessageStatus.COMPLETE,
+    val toolCounts: Map<String, Int> = emptyMap(),
+)

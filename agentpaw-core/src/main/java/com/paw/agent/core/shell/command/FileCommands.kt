@@ -388,7 +388,7 @@ object FindCommand : SandboxCommand {
         val wantedType = args.valueAfter("-type")
 
         val matches = root.walkTopDown()
-            .filter { file -> env.isInsideRoot(file.absolutePath) }
+            .filter { file -> runCatching { resolveFile(file.path, env) }.isSuccess }
             .filter { file ->
                 when (wantedType) {
                     "f" -> file.isFile

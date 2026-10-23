@@ -39,16 +39,16 @@ class AgentExecutionControllerTest {
     }
 
     @Test
-    fun `non-positive maxSteps safely falls back to bounded default steps`() {
+    fun `non-positive maxSteps represents unbounded execution with 0`() {
         AgentExecutionController.markStarted(maxSteps = 0)
         var state = AgentExecutionController.state.value
         assertTrue(state.isRunning)
-        assertEquals(AgentExecutionController.DEFAULT_MAX_STEPS, state.maxSteps)
+        assertEquals(0, state.maxSteps)
 
-        AgentExecutionController.updateProgress(step = 6, maxSteps = -1, action = "swipe 500 800")
+        AgentExecutionController.updateProgress(step = 6, maxSteps = 0, action = "swipe 500 800")
         state = AgentExecutionController.state.value
         assertEquals(6, state.currentStep)
-        assertEquals(AgentExecutionController.DEFAULT_MAX_STEPS, state.maxSteps)
+        assertEquals(0, state.maxSteps)
         assertEquals("swipe 500 800", state.currentAction)
 
         AgentExecutionController.markCompleted()

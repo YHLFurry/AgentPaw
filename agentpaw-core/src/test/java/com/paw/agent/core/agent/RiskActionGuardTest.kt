@@ -6,6 +6,12 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class RiskActionGuardTest {
+    @Test
+    fun `structured parameters tolerate whitespace and escaped uri`() {
+        assertTrue(RiskActionGuard.evaluate("input_text", """{"text":"发送", "press_enter" : true}""").requiresConfirmation)
+        assertEquals("DANGEROUS_SCHEME", RiskActionGuard.evaluate("open_deeplink", """{"uri" : "file:\/\/private/key"}""").category)
+        assertEquals("PAYMENT", RiskActionGuard.evaluate("open_deeplink", """{"uri":"weixin://dl/businessWeb"}""").category)
+    }
 
     @Test
     fun `test shell command is evaluated as critical risk`() {

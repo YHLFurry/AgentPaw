@@ -44,6 +44,37 @@ import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class ChatViewModelTest {
+    @Test fun `removed local files cannot be sent as invisible attachments`() = runTest(testDispatcher) {
+        val viewModel = ChatViewModel(Agent(ScriptedLlmClient(emptyList())), conversationRepository, settingsRepository)
+        viewModel.importImages(listOf("missing"), importer = { _, _ -> "file:///definitely-missing-agentpaw.jpg" })
+        advanceUntilIdle()
+        sendMessage(viewModel, "keep this text")
+        advanceUntilIdle()
+        assertTrue(viewModel.uiState.value.attachmentError)
+        assertEquals("keep this text", viewModel.uiState.value.draft)
+        assertTrue(conversationRepository.conversation.value.messages.isEmpty())
+    }
+    @Test fun `images travel with the next user message and can be removed before sending`() = runTest(testDispatcher) {
+        val viewModel = ChatViewModel(Agent(ScriptedLlmClient(listOf(listOf(LlmChunk.Delta("done"))))), conversationRepository, settingsRepository)
+        viewModel.importImages(listOf("first", "second"), importer = { uri, _ -> "data:image/jpeg;base64,$uri" })
+        advanceUntilIdle()
+        assertEquals(2, viewModel.uiState.value.images.size)
+        viewModel.removeImage(0)
+        sendMessage(viewModel, "Analyze this image")
+        advanceUntilIdle()
+        assertEquals(listOf("data:image/jpeg;base64,second"), conversationRepository.conversation.value.messages.first { it.isUser }.images)
+        assertTrue(viewModel.uiState.value.images.isEmpty())
+    }
+
+    @Test fun `attachment count is bounded and import failures preserve the text draft`() = runTest(testDispatcher) {
+        val viewModel = ChatViewModel(Agent(ScriptedLlmClient(emptyList())), conversationRepository, settingsRepository)
+        viewModel.onDraftChange("keep my draft")
+        viewModel.importImages((1..6).map { "$it" }, importer = { uri, _ -> uri })
+        advanceUntilIdle()
+        assertEquals(4, viewModel.uiState.value.images.size)
+        assertTrue(viewModel.uiState.value.attachmentError)
+        assertEquals("keep my draft", viewModel.uiState.value.draft)
+    }
 
     private val testDispatcher = StandardTestDispatcher()
     private val conversationRepository = InMemoryConversationRepository()
@@ -272,6 +303,31 @@ class ChatViewModelTest {
     }
 
     // --- Helpers ---
+    @Test
+    fun `confirmation stops when tool reports a new safety pause`() = runTest(testDispatcher) {
+        val tool = object : AgentTool {
+            override val definition = ToolDefinition("risky", "Risk test tool", """{"type":"object"}""")
+            override suspend fun execute(arguments: String, context: AgentContext): String =
+                if (context.isGranted("risk_confirmed:risky")) {
+                    """{"status":"paused","is_safety_pause":true,"message":"请输入密码"}"""
+                } else {
+                    """{"status":"requires_confirmation","action":"执行操作","tool_name":"risky","arguments":"{}"}"""
+                }
+        }
+        val client = ScriptedLlmClient(listOf(
+            listOf(LlmChunk.ToolCalls(listOf(ToolCall("risk_1", "risky", "{}")))),
+            listOf(LlmChunk.Delta("must not resume")),
+        ))
+        val viewModel = ChatViewModel(Agent(client, ToolRegistry(listOf(tool))), conversationRepository, settingsRepository)
+        sendMessage(viewModel, "执行任务")
+        advanceUntilIdle()
+        assertNotNull(viewModel.taskRunner.activeBreakpoint.value?.riskConfirmation)
+        viewModel.confirmRiskAction(config)
+        advanceUntilIdle()
+        assertTrue(viewModel.taskRunner.activeBreakpoint.value?.isSafetyPaused == true)
+        assertFalse(viewModel.taskRunner.isGenerating.value)
+        assertFalse(conversationRepository.conversation.value.messages.any { it.content.contains("must not resume") })
+    }
 
     private class ScriptedLlmClient(
         private val script: List<List<LlmChunk>>,

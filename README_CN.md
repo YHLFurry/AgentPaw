@@ -16,7 +16,7 @@
   <img src="https://img.shields.io/badge/平台-Android_8.0+_(API_26+)-3DDC84?logo=android&logoColor=white" alt="Platform" />
   <img src="https://img.shields.io/badge/语言-Kotlin_2.2.21-7F52FF?logo=kotlin&logoColor=white" alt="Kotlin" />
   <img src="https://img.shields.io/badge/界面-Material_3_&_Miuix-4285F4?logo=jetpackcompose&logoColor=white" alt="UI" />
-  <img src="https://img.shields.io/badge/单元测试-243_全部通过-brightgreen" alt="Tests" />
+  <img src="https://github.com/YHLFurry/AgentPaw/actions/workflows/ci.yml/badge.svg" alt="Tests" />
   <img src="https://img.shields.io/badge/开源协议-Apache_2.0-blue.svg" alt="License" />
 </p>
 
@@ -31,6 +31,11 @@
 ---
 
 ## ✨ 核心特性
+
+### 🖼️ 图片附件与历史检索
+- 点击聊天输入框旁的图片按钮，最多选择 4 张图片（原图每张不超过 10 MB），预览后发送给支持视觉的模型；支持移除附件或仅发送图片。
+- 图片会在本地缩放、压缩并去除原元数据，存入应用私有目录，无需全盘读取权限。
+- 历史按摘要分页，支持跨全部历史搜索标题/目标、筛选失败任务，以及清理历史图片并保留文字记录。
 
 ### ⏯️ 断点续操系统 (Task Breakpoint & Resume)
 - **现场完整快照**：任务中途暂停或用户手动中止时，系统自动持久化断点现场 `TaskBreakpoint`（含任务总目标、已完成步骤清单、在途状态回滚及现场快照）。
@@ -63,7 +68,7 @@
 ### 📜 任务历史记录与回溯对比
 - **持久化记录**：每次任务的完整对话轮次、各步骤耗时与操作详情永久留存，随时翻阅。
 - **历史回溯**：支持一键将历史任务的上下文重新载入到当前主对话会话中继续交流。
-- **双任务量化对比**：提供两两任务在步骤数、总耗时、各工具调用分布上的多维度量化对比视图。
+- **双任务量化对比**：对比步骤数、模型与工具累计处理耗时、工具调用分布；旧记录没有处理耗时数据时显示未知。
 
 ### 🎨 双生主题（Material You & Miuix）
 - **Material 3（默认）**：现代化 Material You 质感设计，在 Android 12+ 上原生支持根据系统壁纸动态取色。
@@ -146,8 +151,8 @@ AgentPaw
 ## 🛠️ 本地编译与验证
 
 ### 环境要求
-- JDK 17+
-- Android SDK (compileSdk 36, minSdk 26)
+- JDK 21（本地与 CI 验证版本）
+- Android SDK (compileSdk 37, minSdk 26)
 
 ### 编译与测试指令
 ```bash
@@ -166,7 +171,7 @@ cd AgentPaw
 `app/build/outputs/apk/debug/app-debug.apk`
 
 ### 自动化测试覆盖
-工程包含全量自动化单元测试（核心模块 + UI 模块），在 JVM 环境毫秒级完成回归验证：
+工程包含全量自动化单元测试（核心模块 + UI 模块），在 JVM 环境完成回归验证：
 - `ResumeIntentDetectorTest`：覆盖完整断点意图识别、带补充修正条件意图解析、断点防重提示词构建。
 - `AgentTest`：多轮工具调用、用户中途取消、工具执行失败回退与流式事件响应。
 - `InterpreterTest`：沙箱环境变量隔离、防路径穿越穿透（如 `../../..`）、复杂管道流与数学运算。

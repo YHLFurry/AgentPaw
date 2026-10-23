@@ -80,7 +80,8 @@ class DataStoreSettingsRepository(
             val wasDecryptionFailed = currentRawApiKey.isNotBlank() && currentDecrypted == null
 
             // 若 API Key 产生变动，或此前解密失败需要重新写入，进行加密存储
-            if (updated.apiKey != currentDecrypted.orEmpty() || wasDecryptionFailed || !prefs.contains(Keys.API_KEY)) {
+            if (updated.apiKey != currentDecrypted.orEmpty() || wasDecryptionFailed ||
+                !currentRawApiKey.startsWith("enc:gcm:") || !prefs.contains(Keys.API_KEY)) {
                 if (updated.apiKey.isNotBlank() || !wasDecryptionFailed) {
                     prefs[Keys.API_KEY] = com.paw.agent.data.security.KeystoreSecretStorage.encrypt(updated.apiKey)
                 }
@@ -89,7 +90,7 @@ class DataStoreSettingsRepository(
             prefs[Keys.TEMPERATURE] = updated.temperature
             prefs[Keys.TOP_P] = updated.topP
             prefs[Keys.MAX_TOKENS] = updated.maxTokens
-            prefs[Keys.MAX_TOOL_ROUNDS] = (if (updated.maxToolRounds <= 0) 15 else updated.maxToolRounds).coerceIn(1, 100)
+            prefs[Keys.MAX_TOOL_ROUNDS] = updated.maxToolRounds.coerceAtLeast(0)
             prefs[Keys.VISION_RESOLUTION_MODE] = updated.visionResolutionMode
             prefs[Keys.PACING_PROFILE] = updated.pacingProfile
             prefs[Keys.TIMEOUT_SECONDS] = updated.timeoutSeconds
@@ -195,7 +196,7 @@ class DataStoreSettingsRepository(
             temperature = this[Keys.TEMPERATURE] ?: 0.7f,
             topP = this[Keys.TOP_P] ?: 1.0f,
             maxTokens = this[Keys.MAX_TOKENS] ?: 2048,
-            maxToolRounds = (this[Keys.MAX_TOOL_ROUNDS] ?: 15).coerceIn(1, 100),
+            maxToolRounds = (this[Keys.MAX_TOOL_ROUNDS] ?: 15).coerceAtLeast(0),
             visionResolutionMode = this[Keys.VISION_RESOLUTION_MODE] ?: "AUTO",
             pacingProfile = this[Keys.PACING_PROFILE] ?: "BALANCED",
             timeoutSeconds = (this[Keys.TIMEOUT_SECONDS] ?: 60).coerceIn(10, 300),

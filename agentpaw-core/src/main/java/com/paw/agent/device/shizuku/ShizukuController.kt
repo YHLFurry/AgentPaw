@@ -44,11 +44,11 @@ open class ShizukuController {
         var process: Process? = null
         try {
             withTimeout(timeoutMs) {
-                runInterruptible {
-                    val p = createProcess(arrayOf("sh", "-c", "$cmd 2>&1"))
-                        ?: return@runInterruptible "Error: Shizuku process invocation failed"
-                    process = p
-                    val output = p.inputStream.bufferedReader().use { it.readText() }
+                val p = createProcess(arrayOf("sh", "-c", "$cmd 2>&1"))
+                    ?: return@withTimeout "Error: Shizuku process invocation failed"
+                process = p
+                com.paw.agent.core.io.ProcessLifetime.read(p) {
+                    val output = p.inputStream.bufferedReader().use { com.paw.agent.core.io.BoundedIO.readText(it) }
                     p.waitFor()
                     val trimmed = output.trim()
                     if (p.exitValue() != 0) {
@@ -88,9 +88,9 @@ open class ShizukuController {
         var process: Process? = null
         try {
             withTimeout(timeoutMs) {
-                runInterruptible {
-                    val p = createProcess(arrayOf("screencap", "-p")) ?: return@runInterruptible null
-                    process = p
+                val p = createProcess(arrayOf("screencap", "-p")) ?: return@withTimeout null
+                process = p
+                com.paw.agent.core.io.ProcessLifetime.read(p) {
                     val bytes = readAllBytes(p.inputStream)
                     p.waitFor()
                     if (bytes.isNotEmpty() && p.exitValue() == 0) {
@@ -168,13 +168,5 @@ open class ShizukuController {
         Pair(pkg, activity)
     }
 
-    private fun readAllBytes(input: InputStream): ByteArray {
-        val buffer = ByteArrayOutputStream()
-        val data = ByteArray(16384)
-        var n: Int
-        while (input.read(data, 0, data.size).also { n = it } != -1) {
-            buffer.write(data, 0, n)
-        }
-        return buffer.toByteArray()
-    }
+    private fun readAllBytes(input: InputStream): ByteArray = com.paw.agent.core.io.BoundedIO.readBytes(input)
 }

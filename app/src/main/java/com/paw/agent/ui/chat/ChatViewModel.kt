@@ -16,6 +16,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.update
 
 /** Transient UI state that is not part of the conversation itself. */
 data class ChatUiState(
@@ -24,7 +26,12 @@ data class ChatUiState(
     val configReady: Boolean = false,
     val activeBreakpoint: TaskBreakpoint? = null,
     val isInitialized: Boolean = false,
+    val images: List<String> = emptyList(),
+    val importingImages: Boolean = false,
+    val attachmentError: Boolean = false,
 )
+
+private data class ChatDraft(val text: String = "", val images: List<String> = emptyList(), val importing: Boolean = false, val error: Boolean = false)
 
 /**
  * 聊天界面 ViewModel。
@@ -47,8 +54,10 @@ class ChatViewModel(
     val conversation: StateFlow<Conversation> = conversationRepository.conversation
     val isInitialized: StateFlow<Boolean> = conversationRepository.isInitialized
 
-    private val _draft = MutableStateFlow("")
+    private val _draft = MutableStateFlow(ChatDraft())
     private val _configReady = MutableStateFlow(false)
+    private var importVersion = 0
+    private var discardAttachment: (String) -> Unit = {}
 
     val uiState: StateFlow<ChatUiState> = combine(
         _draft,
@@ -58,7 +67,10 @@ class ChatViewModel(
         conversationRepository.isInitialized,
     ) { draft, isGenerating, configReady, activeBreakpoint, isInitialized ->
         ChatUiState(
-            draft = draft,
+            draft = draft.text,
+            images = draft.images,
+            importingImages = draft.importing,
+            attachmentError = draft.error,
             isGenerating = isGenerating,
             configReady = configReady,
             activeBreakpoint = activeBreakpoint,
@@ -79,7 +91,42 @@ class ChatViewModel(
     }
 
     fun onDraftChange(value: String) {
-        _draft.value = value
+        _draft.update { it.copy(text = value) }
+    }
+
+    fun importImages(uris: List<String>, importer: suspend (String, String) -> String, discard: (String) -> Unit = {}) {
+        if (_draft.value.importing || taskRunner.isGenerating.value || uris.isEmpty()) return
+        val conversationId = conversation.value.id
+        val version = ++importVersion
+        discardAttachment = discard
+        val available = MAX_ATTACHMENTS - _draft.value.images.size
+        _draft.update { it.copy(importing = true, error = uris.size > available) }
+        viewModelScope.launch {
+            try {
+                for (uri in uris.take(available)) {
+                    val image = importer(uri, conversationId)
+                    if (conversation.value.id != conversationId || version != importVersion) { discard(image); break }
+                    _draft.update { it.copy(images = it.images + image) }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                if (version == importVersion) _draft.update { it.copy(error = true) }
+            } finally {
+                if (version == importVersion) _draft.update { it.copy(importing = false) }
+            }
+        }
+    }
+
+    fun removeImage(index: Int) {
+        _draft.value.images.getOrNull(index)?.let(discardAttachment)
+        _draft.update { it.copy(images = it.images.filterIndexed { i, _ -> i != index }, error = false) }
+    }
+
+    private fun clearDraft() {
+        importVersion++
+        _draft.value.images.forEach(discardAttachment)
+        _draft.value = ChatDraft()
     }
 
     /** Sends the current draft, or stops generation if a turn is already running. */
@@ -91,11 +138,17 @@ class ChatViewModel(
             return
         }
 
-        val text = _draft.value.trim()
-        if (text.isEmpty()) return
+        val draft = _draft.value
+        if (draft.importing || !config.isUsable) return
+        if (draft.images.any { it.startsWith("file://") && !java.io.File(it.removePrefix("file://")).isFile }) {
+            _draft.update { it.copy(error = true) }
+            return
+        }
+        val text = draft.text.trim()
+        if (text.isEmpty() && draft.images.isEmpty()) return
 
-        _draft.value = ""
-        taskRunner.startTask(config, text)
+        _draft.value = ChatDraft()
+        taskRunner.startTask(config, text.ifBlank { "请分析所附图片。" }, draft.images)
     }
 
     fun stop() {
@@ -115,18 +168,21 @@ class ChatViewModel(
     }
 
     fun newConversation() {
+        clearDraft()
         taskRunner.stop()
         taskRunner.dismissBreakpoint()
         conversationRepository.newConversation()
     }
 
     fun clear() {
+        clearDraft()
         taskRunner.stop()
         taskRunner.dismissBreakpoint()
         conversationRepository.clear()
     }
 
-    fun restoreConversation(id: String): Boolean {
+    suspend fun restoreConversation(id: String): Boolean {
+        clearDraft()
         taskRunner.stop()
         taskRunner.dismissBreakpoint()
         return conversationRepository.loadConversation(id)
@@ -152,4 +208,6 @@ class ChatViewModel(
                 ),
             ) as T
     }
+
+    companion object { const val MAX_ATTACHMENTS = 4 }
 }

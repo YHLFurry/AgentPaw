@@ -13,6 +13,7 @@ import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.compose.currentBackStackEntryAsState
 import com.paw.agent.AppContainer
 import com.paw.agent.ui.chat.ChatScreen
 import com.paw.agent.ui.chat.ChatViewModel
@@ -116,6 +117,7 @@ fun AgentPawApp(
         composable(Routes.CHAT) {
             val conversation by chatViewModel.conversation.collectAsStateWithLifecycle()
             val uiState by chatViewModel.uiState.collectAsStateWithLifecycle()
+            val storageError by container.conversationRepository.storageError.collectAsStateWithLifecycle()
 
             ChatScreen(
                 messages = conversation.messages,
@@ -126,6 +128,12 @@ fun AgentPawApp(
                 splitVisionLanguageMode = settings.splitVisionLanguageMode,
                 activeBreakpoint = uiState.activeBreakpoint,
                 isInitialized = uiState.isInitialized,
+                storageError = storageError,
+                images = uiState.images,
+                importingImages = uiState.importingImages,
+                attachmentError = uiState.attachmentError,
+                onImagesPicked = { chatViewModel.importImages(it, container.imageAttachmentStore::importImage, container.imageAttachmentStore::discardImage) },
+                onRemoveImage = chatViewModel::removeImage,
                 onDraftChange = chatViewModel::onDraftChange,
                 onSendOrStop = { chatViewModel.onSendOrStop(settings.llm) },
                 onResumeBreakpoint = { chatViewModel.resumeBreakpoint(config = settings.llm) },
@@ -309,7 +317,8 @@ private fun rememberSettingsViewModels(
     navController: NavHostController,
     container: AppContainer,
 ): Pair<LlmSettingsViewModel, AppearanceSettingsViewModel> {
-    val owner: ViewModelStoreOwner = remember(navController) {
+    val entry by navController.currentBackStackEntryAsState()
+    val owner: ViewModelStoreOwner = remember(navController, entry) {
         navController.getBackStackEntry(navController.graph.id)
     }
 
@@ -357,4 +366,5 @@ private fun LlmSettingsViewModel.toActions(): LlmSettingsActions = LlmSettingsAc
     onStartRiskBypass = ::onStartRiskBypass,
     onStopRiskBypass = ::onStopRiskBypass,
     onConsumeRiskNotice = ::consumeRiskNotice,
+    onFetchModels = ::fetchModels,
 )

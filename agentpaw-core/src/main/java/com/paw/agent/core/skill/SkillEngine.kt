@@ -9,6 +9,10 @@ import com.paw.agent.device.PhoneController
 import com.paw.agent.device.ScreenStateInfo
 import com.paw.agent.device.UiElementInfo
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.add
@@ -45,6 +49,23 @@ class SkillEngine(
         argumentsJson: String = "{}",
         context: AgentContext = AgentContext(conversationId = "skill_run"),
     ): SkillRunResult {
+        val reports = mutableListOf<SkillStepReport>()
+        return withTimeoutOrNull(def.guard.maxDurationMs.coerceAtLeast(1L)) {
+            runInternal(def, argumentsJson, context, reports)
+        } ?: SkillRunResult(
+            status = SkillRunStatus.FAILED,
+            skillKey = def.key,
+            steps = reports.toList(),
+            message = "技能执行超过设定的总时长，已中断；已完成的操作不会自动重试。",
+        )
+    }
+
+    private suspend fun runInternal(
+        def: SkillDefinition,
+        argumentsJson: String,
+        context: AgentContext,
+        reports: MutableList<SkillStepReport>,
+    ): SkillRunResult {
         val errors = SkillValidator.errorsOf(def)
         if (errors.isNotEmpty()) {
             return SkillRunResult(
@@ -66,7 +87,8 @@ class SkillEngine(
         }
 
         val vars = buildVariables(def, argumentsJson)
-        val preflight = preflightRisk(def)
+        val approvedTargets = def.steps.map { SkillInterpolator.render(it.target, vars).text }
+        val preflight = preflightRisk(def.copy(steps = def.steps.mapIndexed { i, step -> step.copy(target = approvedTargets[i]) }))
         val needsConfirm = (def.guard.confirmBeforeRun || preflight != null) && !opts.bypassRiskConfirmation
         if (needsConfirm && !context.isGranted("risk_confirmed:${def.key}")) {
             return SkillRunResult(
@@ -77,10 +99,10 @@ class SkillEngine(
             )
         }
 
-        val reports = mutableListOf<SkillStepReport>()
         val deadline = clock() + def.guard.maxDurationMs
 
         for ((index, step) in def.steps.withIndex()) {
+            currentCoroutineContext().ensureActive()
             if (!step.enabled) {
                 reports += report(step, index, SkillStepStatus.SKIPPED, "步骤已禁用")
                 continue
@@ -113,7 +135,7 @@ class SkillEngine(
             var used = 0
             while (used < maxAttempts) {
                 used++
-                outcome = execute(step, def, vars, opts, context)
+                outcome = execute(step, def, vars, opts, context, approvedTargets[index])
                 if (outcome.ok || outcome.pausedPayload != null) break
                 if (used < maxAttempts) delay(400L * used)
             }
@@ -181,12 +203,13 @@ class SkillEngine(
         vars: MutableMap<String, String>,
         opts: SkillRunOptions,
         context: AgentContext,
+        approvedTarget: String,
     ): StepOutcome {
         val target = SkillInterpolator.render(step.target, vars)
         val interactive = isInteractive(step.kind)
         // 用户已为整条技能显式确认过：静态目标文本不再重复拦截，
         // 但实时屏幕上的新风险（例如页面跳到了支付页）仍然会暂停。
-        val confirmed = context.isGranted("risk_confirmed:${def.key}")
+        val confirmed = context.isGranted("risk_confirmed:${def.key}") && target.text == approvedTarget
 
         if (interactive) {
             val state = safeScreenState()
@@ -196,13 +219,14 @@ class SkillEngine(
                     message = "当前前台应用 ${state.foregroundPackage} 不在允许列表 ${def.guard.allowedPackages} 中",
                 )
             }
+            guardPolledState(state, def, opts, context)?.let { return it }
             val screenText = state?.elements
                 ?.joinToString(" ") { it.text + " " + it.contentDescription }
                 .orEmpty()
             vars["foreground_package"] = state?.foregroundPackage.orEmpty()
             if (screenText.isNotBlank()) vars["screen_text"] = screenText.take(4000)
 
-            if (SafetyGuard.isSensitive(screenText) &&
+            if (state != null && SafetyGuard.isSensitive(state) &&
                 !opts.allowSensitiveScreen &&
                 !def.guard.allowSensitiveScreen
             ) {
@@ -221,7 +245,9 @@ class SkillEngine(
             // 例外：用户已经为整条技能显式确认过（confirmed），此时不再做二次
             // 风险确认——否则「确认了却仍然跑不动」会让确认按钮形同虚设。
             // 注意敏感页检查（上方）不受确认影响，那是最底线的安全暂停。
-            if (!confirmed) {
+            val newPaymentRisk = SafetyGuard.checkRisk("tap", "{}", screenText).requiresConfirmation &&
+                !SafetyGuard.checkRisk("tap", target.text).requiresConfirmation
+            if (!confirmed || newPaymentRisk) {
                 val risk = runtimeRisk(
                     step = step,
                     screenText = screenText,
@@ -248,7 +274,9 @@ class SkillEngine(
             }
 
             SkillActionKind.TAP_ELEMENT, SkillActionKind.WAIT_FOR_TEXT ->
-                waitAndTap(step, target.text, timeout = step.timeoutMs, maxAttempts = step.maxAttempts)
+                waitAndTap(step, target.text, timeout = step.timeoutMs, maxAttempts = step.maxAttempts) { state ->
+                    guardPolledState(state, def, opts, context)
+                }
 
             SkillActionKind.TAP_POINT -> {
                 val ok = controller.tap(step.x, step.y)
@@ -302,7 +330,9 @@ class SkillEngine(
                 StepOutcome(true, "等待 $ms 毫秒")
             }
 
-            SkillActionKind.SCROLL_UNTIL_FOUND -> scrollUntilFound(step, target.text)
+            SkillActionKind.SCROLL_UNTIL_FOUND -> scrollUntilFound(step, target.text) { state ->
+                guardPolledState(state, def, opts, context)
+            }
 
             SkillActionKind.OPEN_DEEPLINK -> {
                 if (target.text.isBlank()) return StepOutcome(false, "未填写链接")
@@ -316,6 +346,7 @@ class SkillEngine(
 
             SkillActionKind.SCREEN_SNAPSHOT -> {
                 val state = safeScreenState() ?: return StepOutcome(false, "无法读取当前界面")
+                guardPolledState(state, def, opts, context)?.let { return it }
                 val text = state.elements.joinToString(" | ") { it.text }
                     .replace(Regex("\\s+"), " ")
                     .take(500)
@@ -331,6 +362,9 @@ class SkillEngine(
 
             SkillActionKind.SHELL -> {
                 if (target.text.isBlank()) return StepOutcome(false, "未填写命令")
+                if (!confirmed && !opts.bypassRiskConfirmation) return StepOutcome(
+                    false, "Root 命令参数已变化，需要重新确认", pausedPayload = safetyPausePayload("Root 命令参数已变化，需要重新确认"),
+                )
                 val output = runShell(target.text)
                     ?: return StepOutcome(false, "无法执行 Root 命令（未获得 ROOT 权限或宿主未启用执行器）")
                 StepOutcome(true, "命令已执行", output.take(500))
@@ -344,12 +378,14 @@ class SkillEngine(
         targetText: String,
         timeout: Long,
         maxAttempts: Int,
+        guard: (ScreenStateInfo?) -> StepOutcome?,
     ): StepOutcome {
         val deadline = clock() + timeout
         var attempts = 0
         while (true) {
             attempts++
             val state = safeScreenState()
+            guard(state)?.let { return it }
             val found = state?.let { findElement(it, targetText, step.exactMatch) }
             if (found != null) {
                 return if (step.tapAfter) {
@@ -373,11 +409,16 @@ class SkillEngine(
     }
 
     /** 边滚动边查找。用于长列表，避免反复截图推理。 */
-    private suspend fun scrollUntilFound(step: SkillStep, targetText: String): StepOutcome {
+    private suspend fun scrollUntilFound(
+        step: SkillStep,
+        targetText: String,
+        guard: (ScreenStateInfo?) -> StepOutcome?,
+    ): StepOutcome {
         val deadline = clock() + step.timeoutMs
         var swipes = 0
         while (true) {
             val state = safeScreenState()
+            guard(state)?.let { return it }
             val found = state?.let { findElement(it, targetText, step.exactMatch) }
             if (found != null) {
                 return if (step.tapAfter) {
@@ -396,7 +437,9 @@ class SkillEngine(
             if (swipes >= step.maxAttempts || clock() >= deadline) {
                 return StepOutcome(false, "滚动 $swipes 次后仍未找到「$targetText」")
             }
-            controller.swipe(500, 750, 500, 300, step.durationMs)
+            if (!controller.swipe(500, 750, 500, 300, step.durationMs)) {
+                return StepOutcome(false, "滚动失败，请检查执行权限或当前应用是否支持滚动")
+            }
             swipes++
             delay(500)
         }
@@ -503,14 +546,38 @@ class SkillEngine(
 
     // -------------------------------------------------------------- 基础工具
 
-    private suspend fun safeScreenState(): ScreenStateInfo? =
-        runCatching { controller.getScreenState() }.getOrNull()
+    private suspend fun safeScreenState(): ScreenStateInfo? = try {
+        currentCoroutineContext().ensureActive()
+        controller.getScreenState()
+    } catch (e: CancellationException) {
+        throw e
+    } catch (_: Exception) {
+        null
+    }
+
+    /** 每次轮询后、点击/滚动前重新检查，不能沿用等待前的页面授权。 */
+    private fun guardPolledState(
+        state: ScreenStateInfo?,
+        def: SkillDefinition,
+        opts: SkillRunOptions,
+        context: AgentContext,
+    ): StepOutcome? {
+        val reason = when {
+            context.isCancelled() -> "用户已中止技能执行"
+            state == null -> "无法读取当前界面，已阻止继续操作"
+            !packageAllowed(def, state.foregroundPackage) -> "当前应用不在技能允许列表中，已暂停"
+            SafetyGuard.isSensitive(state) &&
+                !opts.allowSensitiveScreen && !def.guard.allowSensitiveScreen -> "检测到敏感密码/支付页面，技能已安全暂停"
+            else -> return null
+        }
+        return StepOutcome(false, reason, pausedPayload = safetyPausePayload(reason))
+    }
 
     private fun packageAllowed(def: SkillDefinition, pkg: String): Boolean {
         val allowed = def.guard.allowedPackages
         if (allowed.isEmpty()) return true
-        if (pkg.isBlank()) return true // 无障碍尚未就绪时不要误判
-        return allowed.any { pkg == it || pkg.startsWith("$it.") }
+        if (pkg.isBlank()) return false
+        return pkg in allowed
     }
 
     private fun findElement(state: ScreenStateInfo, target: String, exact: Boolean): UiElementInfo? {

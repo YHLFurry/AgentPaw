@@ -73,6 +73,8 @@ fun AboutScreen(
     val scope = rememberCoroutineScope()
     val scaleAnim = remember { Animatable(1f) }
     val scrollState = rememberScrollState()
+    val expertUnlockedMessage = stringResource(R.string.about_expert_unlocked)
+    val expertLockedMessage = stringResource(R.string.about_expert_locked)
 
     AppScaffold(
         modifier = modifier.fillMaxSize(),
@@ -132,9 +134,9 @@ fun AboutScreen(
                                 scaleAnim.animateTo(1f, spring(dampingRatio = Spring.DampingRatioMediumBouncy))
                             }
                             val msg = if (targetState) {
-                                context.getString(R.string.about_expert_unlocked)
+                                expertUnlockedMessage
                             } else {
-                                context.getString(R.string.about_expert_locked)
+                                expertLockedMessage
                             }
                             Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
                         },

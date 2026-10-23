@@ -16,7 +16,7 @@
   <img src="https://img.shields.io/badge/Platform-Android_8.0+_(API_26+)-3DDC84?logo=android&logoColor=white" alt="Platform" />
   <img src="https://img.shields.io/badge/Kotlin-2.2.21-7F52FF?logo=kotlin&logoColor=white" alt="Kotlin" />
   <img src="https://img.shields.io/badge/Jetpack_Compose-Material_3_&_Miuix-4285F4?logo=jetpackcompose&logoColor=white" alt="UI" />
-  <img src="https://img.shields.io/badge/Tests-243_Passed-brightgreen" alt="Tests" />
+  <img src="https://github.com/YHLFurry/AgentPaw/actions/workflows/ci.yml/badge.svg" alt="Tests" />
   <img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License" />
 </p>
 
@@ -31,6 +31,11 @@ Whether you want to automate repetitive device operations, build custom AI mobil
 ---
 
 ## ✨ Key Features
+
+### 🖼️ Image Attachments and Searchable History
+- Attach up to 4 images from the system picker (up to 10 MB per source image), preview or remove them, and send them to a vision-capable model. Image-only messages are supported.
+- Images are downsampled, recompressed and stripped of original metadata locally, then stored privately without broad storage permission.
+- History uses summary pagination with search across all task titles/goals, a failed-task filter, and image cleanup that preserves text records.
 
 ### ⏯️ Task Breakpoint & Resume (断点续操)
 - **Automatic Execution Snapshot**: When a task is paused or stopped, AgentPaw captures a complete `TaskBreakpoint` snapshot, including completed steps, pending goals, and UI state.
@@ -63,7 +68,7 @@ Whether you want to automate repetitive device operations, build custom AI mobil
 ### 📜 Task History & Comparison
 - Complete persistent task runs with step breakdowns, durations, and status tracking.
 - **Context Rollback**: Rehydrate past task context directly back into the live chat conversation.
-- **Dual-Task Quantitative Diff**: Compare execution metrics (step count, elapsed time, tool distribution) side by side.
+- **Dual-Task Quantitative Diff**: Compare step counts, cumulative model/tool processing time and tool distributions. Older records without timing data show an unknown duration.
 
 ### 🎨 Dual Coexisting Themes (Material You & Miuix)
 - **Material 3 (Default)**: Modern Material You palette with Android 12+ wallpaper dynamic color adaptation.
@@ -144,8 +149,8 @@ AgentPaw
 ## 🛠️ Building & Testing
 
 ### Requirements
-- JDK 17 or higher
-- Android SDK (compileSdk 36, minSdk 26)
+- JDK 21 (used locally and in CI)
+- Android SDK (compileSdk 37, minSdk 26)
 
 ### Build Commands
 ```bash

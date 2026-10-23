@@ -9,6 +9,7 @@ import com.paw.agent.core.shell.ShellEnvironment
 import com.paw.agent.core.shell.command.CommandRegistry
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.runInterruptible
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
@@ -83,7 +84,7 @@ class ShellTool(
             ?.coerceIn(MIN_TIMEOUT_MS, MAX_TIMEOUT_MS)
             ?: limits.timeoutMillis
 
-        return withContext(Dispatchers.Default) {
+        return runInterruptible(Dispatchers.IO) {
             val root = ensureSandboxRoot()
             val environment = ShellEnvironment(rootDir = root.absolutePath)
             val interpreter = Interpreter(registry, limits.copy(timeoutMillis = timeout))

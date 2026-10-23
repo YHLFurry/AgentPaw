@@ -19,6 +19,31 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AndroidPhoneToolsTest {
+    @Test fun `password node attributes block confirmed clicks and text observations`() = runTest {
+        val controller = object : PhoneController by FakePhoneController() {
+            override suspend fun getScreenState() = ScreenStateInfo(elements = listOf(UiElementInfo(text = "123456", isPassword = true)))
+        }
+        val confirmed = AgentContext("t", grantedTokens = setOf("risk_confirmed:click_element"))
+        val result = ClickElementTool(controller).execute("""{"index":0}""", confirmed)
+        assertTrue(result.contains("is_safety_pause"))
+        val observed = GetScreenStateTool(controller).execute("{}", confirmed)
+        assertTrue(observed.contains("is_safety_pause"))
+        org.junit.Assert.assertFalse(observed.contains("123456"))
+    }
+    @Test
+    fun `confirmation never bypasses a sensitive screen or exposes screenshot`() = runTest {
+        val sensitive = object : PhoneController by FakePhoneController() {
+            override suspend fun getScreenState() = ScreenStateInfo(
+                foregroundPackage = "com.test", elements = listOf(UiElementInfo(text = "Enter your password")),
+            )
+        }
+        val tapResult = TapTool(sensitive).execute("""{"x":500,"y":500}""", AgentContext("t", grantedTokens = setOf("risk_confirmed:tap")))
+        assertTrue(tapResult.contains("is_safety_pause"))
+        val screenshot = TakeScreenshotTool(sensitive).execute("{}", AgentContext("t", grantedTokens = setOf("risk_confirmed:take_screenshot")))
+        assertTrue(screenshot.contains("is_safety_pause"))
+        org.junit.Assert.assertFalse(screenshot.contains("image_base64"))
+        org.junit.Assert.assertFalse(SafetyGuard.isSensitive("passwordless player display"))
+    }
 
     private class FakePhoneController : PhoneController {
         override val isAccessibilityEnabled: Boolean = true

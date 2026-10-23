@@ -133,16 +133,19 @@ object GrepCommand : SandboxCommand {
 
         // A /.../ pattern is treated as a regex; anything else is literal.
         val regex = if (pattern.length > 2 && pattern.startsWith('/') && pattern.endsWith('/')) {
-            runCatching {
-                Regex(pattern.trim('/'), if (ignoreCase) setOf(RegexOption.IGNORE_CASE) else emptySet())
-            }.getOrNull()
+            if (pattern.length > 4096) return CommandResult.error("grep: regex exceeds 4096 characters")
+            try {
+                com.google.re2j.Pattern.compile(pattern.substring(1, pattern.lastIndex), if (ignoreCase) com.google.re2j.Pattern.CASE_INSENSITIVE else 0)
+            } catch (_: com.google.re2j.PatternSyntaxException) {
+                return CommandResult.error("grep: invalid or unsupported regex (lookaround and backreferences are not supported)")
+            }
         } else {
             null
         }
 
         fun matches(line: String): Boolean {
             val hit = when {
-                regex != null -> regex.containsMatchIn(line)
+                regex != null -> regex.matcher(line).find()
                 ignoreCase -> line.contains(pattern, ignoreCase = true)
                 else -> line.contains(pattern)
             }

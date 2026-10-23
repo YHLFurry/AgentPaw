@@ -255,42 +255,14 @@ private fun ToolMessageBody(message: Message) {
 }
 
 @Composable
-private fun MessageImages(images: List<String>) {
+internal fun MessageImages(images: List<String>) {
     images.forEach { raw ->
+        val decoded = remember(raw) { androidx.compose.runtime.mutableStateOf(false) }
         val bitmapState by produceState<androidx.compose.ui.graphics.ImageBitmap?>(initialValue = null, key1 = raw) {
             value = withContext(Dispatchers.IO) {
-                runCatching {
-                    if (raw.startsWith("file://") || java.io.File(raw).exists()) {
-                        val path = raw.removePrefix("file://")
-                        val boundsOpts = android.graphics.BitmapFactory.Options().apply {
-                            inJustDecodeBounds = true
-                        }
-                        android.graphics.BitmapFactory.decodeFile(path, boundsOpts)
-                        val reqWidth = 720
-                        val reqHeight = 1280
-                        var sampleSize = 1
-                        if (boundsOpts.outHeight > reqHeight || boundsOpts.outWidth > reqWidth) {
-                            val halfHeight = boundsOpts.outHeight / 2
-                            val halfWidth = boundsOpts.outWidth / 2
-                            while ((halfHeight / sampleSize) >= reqHeight && (halfWidth / sampleSize) >= reqWidth) {
-                                sampleSize *= 2
-                            }
-                        }
-                        val opts = android.graphics.BitmapFactory.Options().apply {
-                            inSampleSize = sampleSize
-                            inPreferredConfig = android.graphics.Bitmap.Config.RGB_565
-                        }
-                        android.graphics.BitmapFactory.decodeFile(path, opts)?.asImageBitmap()
-                    } else {
-                        val base64Data = if (raw.contains(",")) raw.substringAfter(",") else raw
-                        val bytes = android.util.Base64.decode(base64Data, android.util.Base64.DEFAULT)
-                        val opts = android.graphics.BitmapFactory.Options().apply {
-                            inPreferredConfig = android.graphics.Bitmap.Config.RGB_565
-                        }
-                        android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)?.asImageBitmap()
-                    }
-                }.getOrNull()
+                com.paw.agent.data.conversation.ImagePreviewDecoder.decode(raw)?.asImageBitmap()
             }
+            decoded.value = true
         }
         val bitmap = bitmapState
         if (bitmap != null) {
@@ -304,6 +276,8 @@ private fun MessageImages(images: List<String>) {
                 contentScale = ContentScale.Fit,
             )
             Spacer(Modifier.height(4.dp))
+        } else if (decoded.value) {
+            AppText(stringResource(R.string.chat_image_unavailable), style = AppTheme.typography.bodySmall)
         }
     }
 }

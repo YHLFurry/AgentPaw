@@ -469,13 +469,14 @@ class AgentAccessibilityService : AccessibilityService() {
         val rect = Rect()
         node.getBoundsInScreen(rect)
 
-        val text = node.text?.toString().orEmpty().trim()
-        val desc = node.contentDescription?.toString().orEmpty().trim()
+        val password = node.isPassword
+        val text = if (password) "" else node.text?.toString().orEmpty().trim()
+        val desc = if (password) "" else node.contentDescription?.toString().orEmpty().trim()
         val viewId = node.viewIdResourceName.orEmpty()
         val isClickable = node.isClickable
         val isEditable = node.isEditable
 
-        if (text.isNotEmpty() || desc.isNotEmpty() || isClickable || isEditable) {
+        if (text.isNotEmpty() || desc.isNotEmpty() || isClickable || isEditable || password) {
             list.add(
                 UiElementInfo(
                     text = text,
@@ -484,6 +485,7 @@ class AgentAccessibilityService : AccessibilityService() {
                     className = node.className?.toString().orEmpty(),
                     isClickable = isClickable,
                     isEditable = isEditable,
+                    isPassword = password,
                     bounds = RectBounds(rect.left, rect.top, rect.right, rect.bottom),
                 ),
             )

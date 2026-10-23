@@ -52,8 +52,7 @@ sealed class ToolControlSignal {
                 val element = json.parseToJsonElement(toolResultContent)
                 val obj = element.jsonObject
                 val status = obj["status"]?.jsonPrimitive?.content ?: ""
-                val isSafetyPause = obj["is_safety_pause"]?.jsonPrimitive?.booleanOrNull == true ||
-                    toolResultContent.contains("[SAFETY PAUSE]", ignoreCase = true)
+                val isSafetyPause = obj["is_safety_pause"]?.jsonPrimitive?.booleanOrNull == true
 
                 when {
                     status == "paused" || isSafetyPause -> {
@@ -66,8 +65,7 @@ sealed class ToolControlSignal {
                     }
 
                     status == "requires_confirmation" ||
-                        obj["requires_confirmation"]?.jsonPrimitive?.booleanOrNull == true ||
-                        toolResultContent.contains("\"requires_confirmation\"") -> {
+                        obj["requires_confirmation"]?.jsonPrimitive?.booleanOrNull == true -> {
                         val action = obj["action"]?.jsonPrimitive?.content ?: toolName
                         val target = obj["target"]?.jsonPrimitive?.content ?: "敏感操作目标"
                         val reason = obj["reason"]?.jsonPrimitive?.content ?: "命中高风险防护规则，需用户确认授权"

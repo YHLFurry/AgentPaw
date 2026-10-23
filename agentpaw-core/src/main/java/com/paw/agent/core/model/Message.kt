@@ -59,6 +59,8 @@ data class Message(
     val images: List<String> = emptyList(),
     val createdAt: Long = 0L,
     val fullLog: String? = null,
+    /** Active execution time; excludes time spent waiting for the user. */
+    val durationMs: Long = 0L,
 ) {
     val isUser: Boolean get() = role == MessageRole.USER
     val isAssistant: Boolean get() = role == MessageRole.ASSISTANT
@@ -91,4 +93,5 @@ data class ToolResult(
     val name: String,
     val content: String,
     val isError: Boolean = false,
+    val durationMs: Long = 0L,
 )

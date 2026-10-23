@@ -102,7 +102,10 @@ fun SkillEditorScreen(
         containerColor = AppTheme.colors.background,
     ) { innerPadding ->
         if (editing == null) {
-            // 编辑状态被清空（例如保存后返回），直接展示空提示，避免闪退。
+            androidx.compose.runtime.LaunchedEffect(Unit) {
+                viewModel.startCreate()
+            }
+            // 编辑状态若被清空，展示友好提示并自动恢复空白草稿，杜绝闪退。
             SkillEmptyHint(
                 text = stringResource(R.string.skills_editor_empty),
                 modifier = Modifier
@@ -356,6 +359,7 @@ private fun AdvancedEditor(
     editing: com.paw.agent.core.skill.SkillDefinition,
 ) {
     val guard = editing.guard
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
     SettingsGroupLabel(stringResource(R.string.skills_mode_advanced))
     SettingsCard {
@@ -371,9 +375,7 @@ private fun AdvancedEditor(
                 onValueChange = viewModel::onJsonChange,
                 minLines = 16,
                 maxLines = 40,
-                isError = viewModel.uiState.value.issues.any { it.isError && it.code == "json_invalid" },
-                // 说明：json 文本是草稿，错误态来自校验结果；这里读取一次即可，
-                // 真正的重绘由父级 collectAsState 驱动。
+                isError = uiState.issues.any { it.isError && it.code == "json_invalid" },
                 modifier = Modifier.fillMaxWidth(),
             )
         }
@@ -482,9 +484,10 @@ private fun AdvancedEditor(
 }
 
 /** LazyRow 里的无涟漪点击（避免选中态被水波纹盖住）。 */
+@Composable
 private fun Modifier.clickableNoRipple(onClick: () -> Unit): Modifier =
     this.clickable(
-        interactionSource = androidx.compose.foundation.interaction.MutableInteractionSource(),
+        interactionSource = androidx.compose.runtime.remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
         indication = null,
         onClick = onClick,
     )

@@ -22,6 +22,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.CompareArrows
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.outlined.DeleteSweep
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.outlined.Check
@@ -35,6 +36,9 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -57,6 +61,7 @@ import com.paw.agent.ui.components.adaptive.AppOutlinedButton
 import com.paw.agent.ui.components.adaptive.AppScaffold
 import com.paw.agent.ui.components.adaptive.AppSurface
 import com.paw.agent.ui.components.adaptive.AppText
+import com.paw.agent.ui.components.adaptive.AppTextField
 import com.paw.agent.ui.components.adaptive.AppTopAppBar
 import com.paw.agent.ui.components.adaptive.AppTopBarAction
 import com.paw.agent.ui.components.adaptive.LocalTopBarClearance
@@ -75,10 +80,29 @@ fun HistoryScreen(
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
+    val resources = androidx.compose.ui.platform.LocalResources.current
+    val scope = rememberCoroutineScope()
     val historyList by container.conversationRepository.historyList.collectAsStateWithLifecycle()
+    val initialized by container.conversationRepository.isInitialized.collectAsStateWithLifecycle()
+    val storageError by container.conversationRepository.storageError.collectAsStateWithLifecycle()
+    val hasMore by container.conversationRepository.hasMoreHistory.collectAsStateWithLifecycle()
+    val allHistory by container.conversationRepository.allHistorySummaries.collectAsStateWithLifecycle()
+    var query by rememberSaveable { mutableStateOf("") }
+    var failedOnly by rememberSaveable { mutableStateOf(false) }
+    val visibleHistory = remember(historyList, allHistory, query, failedOnly) {
+        val search = query.trim()
+        (if (search.isNotBlank() || failedOnly) allHistory else historyList).filter { conv ->
+            val stats = PersistentConversationRepository.computeStats(conv)
+            (!failedOnly || stats.status == MessageStatus.FAILED) &&
+                (search.isBlank() || conv.title.contains(search, ignoreCase = true) ||
+                    stats.initialGoal.contains(search, ignoreCase = true))
+        }
+    }
     val selectedForCompare = remember { mutableStateListOf<String>() }
     var isCompareMode by remember { mutableStateOf(false) }
     var pendingDeleteConvId by remember { mutableStateOf<String?>(null) }
+    var pendingClearMedia by remember { mutableStateOf(false) }
+    var clearingMedia by remember { mutableStateOf(false) }
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
 
     AppScaffold(
@@ -96,6 +120,9 @@ fun HistoryScreen(
                     }
                 },
                 actions = {
+                    AppTopBarAction(onClick = { if (!clearingMedia) pendingClearMedia = true }) {
+                        AppIcon(Icons.Outlined.DeleteSweep, stringResource(R.string.history_clear_media))
+                    }
                     if (historyList.size >= 2) {
                         AppTopBarAction(onClick = {
                             isCompareMode = !isCompareMode
@@ -103,7 +130,7 @@ fun HistoryScreen(
                         }) {
                             AppIcon(
                                 imageVector = Icons.AutoMirrored.Filled.CompareArrows,
-                                contentDescription = "多选对比",
+                                contentDescription = stringResource(R.string.history_compare_select),
                                 tint = if (isCompareMode) AppTheme.colors.primary else AppTheme.colors.onSurface,
                             )
                         }
@@ -114,23 +141,62 @@ fun HistoryScreen(
         },
         containerColor = AppTheme.colors.background,
     ) { innerPadding ->
-        if (historyList.isEmpty()) {
+      if (pendingClearMedia) com.paw.agent.ui.components.adaptive.AppAlertDialog(
+          onDismissRequest = { pendingClearMedia = false },
+          title = { AppText(stringResource(R.string.history_clear_media)) },
+          text = { AppText(stringResource(R.string.history_clear_media_help)) },
+          confirmButton = {
+              AppButton(onClick = {
+                  pendingClearMedia = false
+                  clearingMedia = true
+                  container.agentTaskRunner.stop()
+                  scope.launch {
+                      try {
+                          val success = container.conversationRepository.clearAllMedia()
+                          Toast.makeText(context, resources.getString(if (success) R.string.history_media_cleared else R.string.history_media_clear_failed), Toast.LENGTH_SHORT).show()
+                      } finally { clearingMedia = false }
+                  }
+              }) { AppText(stringResource(R.string.action_delete)) }
+          },
+          dismissButton = { AppOutlinedButton(onClick = { pendingClearMedia = false }) { AppText(stringResource(R.string.action_cancel)) } },
+      )
+      Column(Modifier.fillMaxSize().padding(innerPadding).padding(top = LocalTopBarClearance.current)) {
+        storageError?.let {
+            AppText(it, color = AppTheme.colors.error, modifier = Modifier.padding(16.dp))
+            AppOutlinedButton(onClick = container.conversationRepository::retryFailedSaves, modifier = Modifier.padding(horizontal = 16.dp)) {
+                AppText(stringResource(R.string.history_retry_save))
+            }
+        }
+        if (clearingMedia) AppText(stringResource(R.string.history_clearing_media), modifier = Modifier.padding(16.dp))
+        AppTextField(
+            value = query,
+            onValueChange = { query = it },
+            label = stringResource(R.string.history_search),
+            singleLine = true,
+            modifier = Modifier.padding(horizontal = 16.dp),
+        )
+        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+            AppOutlinedButton(onClick = { failedOnly = !failedOnly }) {
+                AppText(stringResource(if (failedOnly) R.string.history_show_all else R.string.history_failed_only))
+            }
+            Spacer(Modifier.width(12.dp))
+            AppText("${visibleHistory.size}/${allHistory.size}", style = AppTheme.typography.bodySmall)
+        }
+        if (visibleHistory.isEmpty()) {
             Box(
                 modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding),
+                    .fillMaxSize(),
                 contentAlignment = Alignment.Center,
             ) {
                 AppText(
-                    text = stringResource(R.string.history_empty),
+                    text = stringResource(if (!initialized) R.string.history_loading else if (historyList.isEmpty()) R.string.history_empty else R.string.history_no_matches),
                     color = AppTheme.colors.onSurfaceVariant,
                 )
             }
         } else {
             Column(
                 modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding),
+                    .fillMaxSize(),
             ) {
                 if (isCompareMode) {
                     AppSurface(
@@ -145,7 +211,7 @@ fun HistoryScreen(
                             horizontalArrangement = Arrangement.SpaceBetween,
                         ) {
                             AppText(
-                                text = "已选 ${selectedForCompare.size}/2 条任务记录进行对比",
+                                text = stringResource(R.string.history_selected_count, selectedForCompare.size),
                                 style = AppTheme.typography.bodyMedium,
                                 color = AppTheme.colors.onPrimaryContainer,
                             )
@@ -153,7 +219,7 @@ fun HistoryScreen(
                                 AppButton(onClick = {
                                     onOpenCompare(selectedForCompare[0], selectedForCompare[1])
                                 }) {
-                                    AppText("开始对比")
+                                    AppText(stringResource(R.string.history_compare_start))
                                 }
                             }
                         }
@@ -168,11 +234,11 @@ fun HistoryScreen(
                         .fillMaxSize()
                         .padding(horizontal = 16.dp, vertical = 12.dp),
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                        top = LocalTopBarClearance.current,
+                        top = 0.dp,
                     ),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    items(historyList, key = { it.id }) { conv ->
+                    items(visibleHistory, key = { it.id }) { conv ->
                         val stats = remember(conv) {
                             PersistentConversationRepository.computeStats(conv)
                         }
@@ -189,25 +255,32 @@ fun HistoryScreen(
                                     } else if (selectedForCompare.size < 2) {
                                         selectedForCompare.add(conv.id)
                                     } else {
-                                        Toast.makeText(context, "一次最多对比两条记录", Toast.LENGTH_SHORT).show()
+                                        Toast.makeText(context, resources.getString(R.string.history_compare_limit), Toast.LENGTH_SHORT).show()
                                     }
                                 } else {
                                     onOpenDetail(conv.id)
                                 }
                             },
                             onRestore = {
+                              scope.launch {
                                 val ok = container.restoreConversation(conv.id)
                                 if (ok) {
-                                    Toast.makeText(context, "已载入此任务历史上下文！", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, resources.getString(R.string.history_restored), Toast.LENGTH_SHORT).show()
                                     onRestoreToChat()
                                 } else {
-                                    Toast.makeText(context, "加载历史记录失败", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, resources.getString(R.string.history_restore_failed), Toast.LENGTH_SHORT).show()
                                 }
+                              }
                             },
                             onDelete = {
                                 pendingDeleteConvId = conv.id
                             },
                         )
+                    }
+                    if (hasMore && query.isBlank() && !failedOnly) item {
+                        AppOutlinedButton(onClick = container.conversationRepository::loadMoreHistory, modifier = Modifier.fillMaxWidth()) {
+                            AppText(stringResource(R.string.history_load_more))
+                        }
                     }
                 }
 
@@ -215,10 +288,10 @@ fun HistoryScreen(
                     val targetId = pendingDeleteConvId!!
                     com.paw.agent.ui.components.adaptive.AppAlertDialog(
                         onDismissRequest = { pendingDeleteConvId = null },
-                        title = { AppText("确认删除历史记录？", style = AppTheme.typography.titleMedium) },
+                        title = { AppText(stringResource(R.string.history_delete_title), style = AppTheme.typography.titleMedium) },
                         text = {
                             AppText(
-                                "此操作将永久删除该会话记录及相关的历史截图，无法撤销。",
+                                stringResource(R.string.history_delete_message),
                                 style = AppTheme.typography.bodyMedium,
                             )
                         },
@@ -228,21 +301,22 @@ fun HistoryScreen(
                                     container.conversationRepository.deleteConversation(targetId)
                                     selectedForCompare.remove(targetId)
                                     pendingDeleteConvId = null
-                                    Toast.makeText(context, "已删除该任务记录", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, resources.getString(R.string.history_deleted), Toast.LENGTH_SHORT).show()
                                 },
                             ) {
-                                AppText("确认删除")
+                                AppText(stringResource(R.string.action_delete))
                             }
                         },
                         dismissButton = {
                             AppOutlinedButton(onClick = { pendingDeleteConvId = null }) {
-                                AppText("取消")
+                                AppText(stringResource(R.string.action_cancel))
                             }
                         },
                     )
                 }
             }
         }
+      }
     }
 }
 
@@ -285,7 +359,7 @@ private fun HistoryTaskCard(
                         )
                     }
                     AppText(
-                        text = stats.title.ifBlank { "任务记录" },
+                        text = stats.title.ifBlank { stringResource(R.string.history_record) },
                         style = AppTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
                         maxLines = 1,
@@ -299,7 +373,7 @@ private fun HistoryTaskCard(
             Spacer(Modifier.height(6.dp))
 
             AppText(
-                text = "目标: ${stats.initialGoal}",
+                text = stringResource(R.string.history_goal, stats.initialGoal),
                 style = AppTheme.typography.bodySmall,
                 color = AppTheme.colors.onSurfaceVariant,
                 maxLines = 2,
@@ -313,13 +387,13 @@ private fun HistoryTaskCard(
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 AppText(
-                    text = "⚙ ${stats.stepCount} 步操作",
+                    text = stringResource(R.string.history_step_count, stats.stepCount),
                     style = AppTheme.typography.labelSmall,
                     color = AppTheme.colors.primary,
                 )
                 if (stats.durationMs > 0) {
                     AppText(
-                        text = "⏱ ${stats.durationMs / 1000f} 秒",
+                        text = stringResource(R.string.history_seconds, stats.durationMs / 1000f),
                         style = AppTheme.typography.labelSmall,
                         color = AppTheme.colors.onSurfaceVariant,
                     )
@@ -351,7 +425,7 @@ private fun HistoryTaskCard(
                 }
                 Spacer(Modifier.width(8.dp))
                 AppIconButton(onClick = onDelete) {
-                    AppIcon(imageVector = Icons.Default.Delete, contentDescription = "删除记录")
+                    AppIcon(imageVector = Icons.Default.Delete, contentDescription = stringResource(R.string.history_delete_record))
                 }
             }
         }
@@ -361,10 +435,10 @@ private fun HistoryTaskCard(
 @Composable
 fun StatusBadge(status: MessageStatus) {
     val (label, bg, fg) = when (status) {
-        MessageStatus.COMPLETE -> Triple("已完成", AppTheme.colors.primary.copy(alpha = 0.12f), AppTheme.colors.primary)
-        MessageStatus.FAILED -> Triple("失败", AppTheme.colors.error.copy(alpha = 0.12f), AppTheme.colors.error)
-        MessageStatus.CANCELLED -> Triple("已停止", AppTheme.colors.outline.copy(alpha = 0.12f), AppTheme.colors.outline)
-        MessageStatus.STREAMING -> Triple("进行中", AppTheme.colors.primaryContainer, AppTheme.colors.onPrimaryContainer)
+        MessageStatus.COMPLETE -> Triple(stringResource(R.string.history_status_complete), AppTheme.colors.primary.copy(alpha = 0.12f), AppTheme.colors.primary)
+        MessageStatus.FAILED -> Triple(stringResource(R.string.history_status_failed), AppTheme.colors.error.copy(alpha = 0.12f), AppTheme.colors.error)
+        MessageStatus.CANCELLED -> Triple(stringResource(R.string.history_status_cancelled), AppTheme.colors.outline.copy(alpha = 0.12f), AppTheme.colors.outline)
+        MessageStatus.STREAMING -> Triple(stringResource(R.string.history_status_streaming), AppTheme.colors.primaryContainer, AppTheme.colors.onPrimaryContainer)
     }
 
     AppSurface(

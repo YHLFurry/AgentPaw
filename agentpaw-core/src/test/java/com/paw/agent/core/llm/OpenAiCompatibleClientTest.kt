@@ -14,6 +14,50 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class OpenAiCompatibleClientTest {
+    @Test fun `oversized SSE lines fail with a resource budget error`() = runTest {
+        val http = OkHttpClient.Builder().addInterceptor { chain ->
+            Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(200).message("OK")
+                .body(("data: " + "x".repeat(1024 * 1024) + "\n").toResponseBody("text/event-stream".toMediaType())).build()
+        }.build()
+        val failure = runCatching {
+            OpenAiCompatibleClient(httpClient = http).complete(
+                LlmConfig(baseUrl = "https://example.test/v1", model = "test", stream = true),
+                ChatCompletionRequest(model = "test", messages = listOf(ChatMessage(role = "user", content = "hi"))),
+            ).toList()
+        }.exceptionOrNull()
+        assertTrue(failure is LlmException.Malformed)
+        assertTrue(failure?.cause?.message.orEmpty().contains("1 MB"))
+    }
+    @Test
+    fun `model discovery rejects redirects before sending credentials to a new target`() = runTest {
+        java.net.ServerSocket(0, 1, java.net.InetAddress.getByName("127.0.0.1")).use { server ->
+            server.soTimeout = 5000
+            val worker = kotlin.concurrent.thread(isDaemon = true) {
+                server.accept().use { socket ->
+                    val reader = socket.getInputStream().bufferedReader()
+                    while (!reader.readLine().isNullOrEmpty()) { /* drain request headers */ }
+                    socket.getOutputStream().write(
+                        "HTTP/1.1 302 Found\r\nLocation: http://example.com/models\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".toByteArray(),
+                    )
+                }
+            }
+            val client = OpenAiCompatibleClient().apply { networkPolicy = NetworkPolicy(allowHttp = true) }
+            val result = client.listModels(LlmConfig(baseUrl = "http://127.0.0.1:${server.localPort}/v1", apiKey = "test-secret"))
+            worker.join(5000)
+            assertTrue(result.exceptionOrNull() is LlmException.Http)
+            assertEquals(302, (result.exceptionOrNull() as LlmException.Http).code)
+        }
+    }
+
+    @Test
+    fun `models url supports base and completions endpoints`() {
+        assertEquals("https://example.com/v1/models", OpenAiCompatibleClient.modelsUrl("https://example.com/v1"))
+        assertEquals(
+            "https://example.com/v1/models",
+            OpenAiCompatibleClient.modelsUrl("https://example.com/v1/chat/completions"),
+        )
+        assertEquals("https://example.com/v1/models", OpenAiCompatibleClient.modelsUrl("https://example.com/v1/models/"))
+    }
 
     @Test
     fun `stream sse with deltas emits deltas and done`() = runTest {

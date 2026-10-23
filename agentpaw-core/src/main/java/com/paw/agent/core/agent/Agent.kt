@@ -73,6 +73,7 @@ class Agent(
     private val llmClient: LlmClient,
     private val toolRegistry: ToolRegistry = ToolRegistry(),
     private val maxToolRounds: Int = DEFAULT_MAX_TOOL_ROUNDS,
+    private val streamUpdateIntervalMs: Long = 50L,
 ) {
 
     fun run(
@@ -88,17 +89,18 @@ class Agent(
         var workingHistory = history
         var assistantId: String? = null
         var buffer = StringBuilder()
+        val sanitizedTools = HashMap<Message, WireMessage>()
 
-        val effectiveMaxRounds: Int = run {
+        val effectiveMaxRounds: Int? = run {
             val configured = if (this@Agent.maxToolRounds != DEFAULT_MAX_TOOL_ROUNDS) {
                 this@Agent.maxToolRounds
             } else {
                 config.maxToolRounds
             }
             if (configured <= 0) {
-                DEFAULT_MAX_TOOL_ROUNDS
+                null
             } else {
-                configured.coerceIn(1, MAX_SAFETY_TOOL_ROUNDS)
+                configured
             }
         }
         var round = 0
@@ -111,21 +113,30 @@ class Agent(
             }
 
             // ---- one model call ----
+            assistantId = java.util.UUID.randomUUID().toString()
             buffer = StringBuilder()
             val pendingToolCalls = mutableListOf<ToolCall>()
             var failure: LlmException? = null
+            val roundStartedAt = System.nanoTime()
+            var lastEmissionAt = 0L
+            var emittedLength = 0
 
             try {
-                llmClient.complete(config, buildRequest(config, workingHistory))
+                llmClient.complete(config, buildRequest(config, workingHistory, sanitizedTools))
                     .collect { chunk ->
                         when (chunk) {
                             is LlmChunk.Delta -> {
                                 buffer.append(chunk.text)
-                                emit(
+                                val now = System.nanoTime()
+                                if (emittedLength == 0 || now - lastEmissionAt >= streamUpdateIntervalMs * 1_000_000) {
+                                  emit(
                                     AgentEvent.AssistantDelta(
                                         currentAssistant(buffer, assistantId, MessageStatus.STREAMING),
                                     ),
                                 )
+                                  emittedLength = buffer.length
+                                  lastEmissionAt = now
+                                }
                             }
 
                             is LlmChunk.ToolCalls -> pendingToolCalls += chunk.calls
@@ -140,6 +151,9 @@ class Agent(
             } catch (e: Exception) {
                 failure = LlmException.Malformed(e)
             }
+
+            if (buffer.length != emittedLength) emit(AgentEvent.AssistantDelta(currentAssistant(buffer, assistantId, MessageStatus.STREAMING)))
+            val roundDurationMs = ((System.nanoTime() - roundStartedAt) / 1_000_000).coerceAtLeast(0L)
 
             if (failure != null) {
                 emit(
@@ -157,17 +171,17 @@ class Agent(
 
             // ---- did the model ask for tools? ----
             if (pendingToolCalls.isEmpty()) {
-                val done = currentAssistant(buffer, assistantId, MessageStatus.COMPLETE)
+                val done = currentAssistant(buffer, assistantId, MessageStatus.COMPLETE).copy(durationMs = roundDurationMs)
                 emit(AgentEvent.Completed(done))
                 return@flow
             }
 
-            if (round >= effectiveMaxRounds) {
+            if (effectiveMaxRounds != null && round >= effectiveMaxRounds) {
                 val msg = currentAssistant(
                     buffer,
                     assistantId,
                     MessageStatus.FAILED,
-                    "已达到最大执行步数限制 (${effectiveMaxRounds} 步)，自动化操作已安全停止，防止无限循环",
+                    "已达到最大执行步数限制 (${effectiveMaxRounds} 步)，自动化操作已安全停止",
                 )
                 emit(AgentEvent.Failed(msg))
                 return@flow
@@ -177,7 +191,7 @@ class Agent(
                 buffer,
                 assistantId,
                 MessageStatus.COMPLETE,
-            ).copy(toolCalls = pendingToolCalls)
+            ).copy(toolCalls = pendingToolCalls, durationMs = roundDurationMs)
 
             workingHistory = workingHistory + assistantMessage
             emit(AgentEvent.AssistantTurn(assistantMessage, round + 1))
@@ -214,12 +228,13 @@ class Agent(
         toolName: String,
         arguments: String,
         conversationId: String = "conversation",
+        isCancelled: () -> Boolean = { false },
     ): ToolResult {
         val context = AgentContext(
             conversationId = conversationId,
             depth = 0,
             grantedTokens = setOf("risk_confirmed:$toolName"),
-            cancelledCheck = { false },
+            cancelledCheck = isCancelled,
         )
         val call = ToolCall(
             id = "confirmed_" + java.util.UUID.randomUUID().toString(),
@@ -230,6 +245,7 @@ class Agent(
     }
 
     private suspend fun executeTool(call: ToolCall, context: AgentContext): ToolResult {
+        val startedAt = System.nanoTime()
         val tool = toolRegistry.find(call.name)
             ?: return ToolResult(
                 toolCallId = call.id,
@@ -240,7 +256,12 @@ class Agent(
 
         return runCatching { tool.execute(call.arguments, context) }
             .fold(
-                onSuccess = { ToolResult(call.id, call.name, it) },
+                onSuccess = { content ->
+                    val status = runCatching {
+                        (json.parseToJsonElement(content).jsonObject["status"] as? kotlinx.serialization.json.JsonPrimitive)?.content
+                    }.getOrNull()
+                    ToolResult(call.id, call.name, content, isError = status?.lowercase() in setOf("error", "failed"))
+                },
                 onFailure = { e ->
                     if (e is kotlinx.coroutines.CancellationException) throw e
                     ToolResult(
@@ -250,10 +271,10 @@ class Agent(
                         isError = true,
                     )
                 },
-            )
+            ).copy(durationMs = ((System.nanoTime() - startedAt) / 1_000_000).coerceAtLeast(0L))
     }
 
-    private fun buildRequest(config: LlmConfig, history: List<Message>): ChatCompletionRequest =
+    private fun buildRequest(config: LlmConfig, history: List<Message>, sanitizedTools: MutableMap<Message, WireMessage>): ChatCompletionRequest =
         ChatCompletionRequest(
             model = config.model,
             messages = buildList {
@@ -295,8 +316,9 @@ class Agent(
                                                 val ext = f.extension.lowercase()
                                                 // 严格校验必须为常规图片文件且大小合理，杜绝目录穿越越权读取非图片私有敏感文件
                                                 if (f.exists() && f.isFile && ext in validExts && f.length() <= 10 * 1024 * 1024) {
-                                                    val b64 = Base64.getEncoder().encodeToString(f.readBytes())
-                                                    "data:image/jpeg;base64,$b64"
+                                                    val b64 = Base64.getEncoder().encodeToString(f.inputStream().use { com.paw.agent.core.io.BoundedIO.readBytes(it) })
+                                                    val mime = when (ext) { "png" -> "image/png"; "webp" -> "image/webp"; "bmp" -> "image/bmp"; else -> "image/jpeg" }
+                                                    "data:$mime;base64,$b64"
                                                 } else null
                                             }
                                             else -> "data:image/jpeg;base64,$img"
@@ -344,14 +366,13 @@ class Agent(
                         }
 
                         MessageRole.TOOL -> {
-                            val sanitized = SensitiveDataMasker.mask(message.content)
-                            add(
+                            add(sanitizedTools.getOrPut(message) {
                                 WireMessage(
                                     role = "tool",
-                                    content = sanitized,
+                                    content = SensitiveDataMasker.mask(message.content),
                                     toolCallId = message.toolCallId,
-                                ),
-                            )
+                                )
+                            })
                         }
                     }
                 }

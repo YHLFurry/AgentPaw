@@ -20,7 +20,19 @@ import org.junit.Test
  * 重点不是「能跑通」，而是几条安全边界真的成立：
  * 静态风险必须执行前确认、动态风险必须暂停、能力开关不可绕过、失败策略可预期。
  */
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class SkillEngineTest {
+    @Test fun `confirmation does not authorize a root command changed by a preceding step`() = runTest {
+        var executed = false
+        val def = skill(guard = SkillGuard(allowShell = true), steps = listOf(
+            SkillStep(kind = SkillActionKind.SET_VARIABLE, target = "whoami", storeAs = "command", delayMs = 0),
+            SkillStep(kind = SkillActionKind.SHELL, target = "{{command}}", delayMs = 0),
+        )).copy(variables = mapOf("command" to "id"))
+        val engine = SkillEngine(FakeController(), options = { SkillRunOptions(allowShellSteps = true) }, shellRunner = { executed = true; "done" })
+        val result = engine.run(def, context = AgentContext("t", grantedTokens = setOf("risk_confirmed:skill_test")))
+        assertEquals(SkillRunStatus.SAFETY_PAUSED, result.status)
+        org.junit.Assert.assertFalse(executed)
+    }
 
     private class FakeController(
         var elements: List<UiElementInfo> = listOf(
@@ -38,6 +50,8 @@ class SkillEngineTest {
         var tappedNormalized: Pair<Int, Int>? = null
         var lastKey: String? = null
         var swipes = 0
+        var screenReads = 0
+        var onRead: (() -> Unit)? = null
 
         override suspend fun tap(xNormalized: Int, yNormalized: Int, cropRoi: List<Int>?): Boolean {
             tappedNormalized = xNormalized to yNormalized
@@ -101,11 +115,15 @@ class SkillEngineTest {
             cropRoi: List<Int>?,
         ): ScreenshotResult = ScreenshotResult("x", 1, 1, false)
 
-        override suspend fun getScreenState(): ScreenStateInfo = ScreenStateInfo(
+        override suspend fun getScreenState(): ScreenStateInfo {
+            screenReads++
+            onRead?.invoke()
+            return ScreenStateInfo(
             foregroundPackage = foreground,
             foregroundActivity = "$foreground.Main",
             elements = elements,
         )
+        }
     }
 
     private fun skill(
@@ -124,6 +142,42 @@ class SkillEngineTest {
         steps = steps,
         guard = guard,
     )
+
+    @Test
+    fun `polling rechecks foreground package before tapping`() = runTest {
+        val controller = FakeController()
+        controller.onRead = {
+            if (controller.screenReads >= 2) controller.foreground = "com.test.app.impostor"
+        }
+        val result = SkillEngine(controller).run(skill(guard = SkillGuard(allowedPackages = listOf("com.test.app"))))
+        assertEquals(SkillRunStatus.SAFETY_PAUSED, result.status)
+        assertEquals(null, controller.tapped)
+    }
+
+    @Test
+    fun `polling rechecks sensitive page even after confirmation`() = runTest {
+        val controller = FakeController()
+        controller.onRead = {
+            if (controller.screenReads >= 2) controller.elements = listOf(UiElementInfo(text = "搜索 Enter your password"))
+        }
+        val result = SkillEngine(controller).run(
+            skill(), context = AgentContext("t", grantedTokens = setOf("risk_confirmed:skill_test")),
+        )
+        assertEquals(SkillRunStatus.SAFETY_PAUSED, result.status)
+        assertEquals(null, controller.tapped)
+    }
+
+    @Test
+    fun `total budget interrupts a single long wait`() = runTest {
+        val def = skill(
+            guard = SkillGuard(maxDurationMs = 1000),
+            steps = listOf(SkillStep(kind = SkillActionKind.WAIT, durationMs = 30_000, delayMs = 0)),
+        )
+        val started = testScheduler.currentTime
+        val result = SkillEngine(FakeController()).run(def)
+        assertEquals(SkillRunStatus.FAILED, result.status)
+        assertTrue(testScheduler.currentTime - started <= 1000)
+    }
 
     @Test
     fun `runs steps in order and records a full trail`() = runTest {
