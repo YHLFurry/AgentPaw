@@ -3,6 +3,7 @@ package com.paw.agent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
+import androidx.exifinterface.media.ExifInterface
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.paw.agent.data.conversation.ImageAttachmentStore
@@ -50,15 +51,15 @@ class ImageAttachmentInstrumentedTest {
                 it.write(tiff)
                 it.write(jpeg, 2, jpeg.size - 2)
             }
-            val originalExif = android.media.ExifInterface(source.absolutePath)
-            assertEquals(6, originalExif.getAttributeInt(android.media.ExifInterface.TAG_ORIENTATION, 0))
-            org.junit.Assert.assertNotNull(originalExif.getAttribute(android.media.ExifInterface.TAG_GPS_LATITUDE))
+            val originalExif = ExifInterface(source.absolutePath)
+            assertEquals(6, originalExif.getAttributeInt(ExifInterface.TAG_ORIENTATION, 0))
+            org.junit.Assert.assertNotNull(originalExif.getAttribute(ExifInterface.TAG_GPS_LATITUDE))
             target = File(ImageAttachmentStore(context).importImage(Uri.fromFile(source).toString(), "instrumented").removePrefix("file://"))
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             BitmapFactory.decodeFile(target.absolutePath, bounds)
             assertEquals(10, bounds.outWidth)
             assertEquals(20, bounds.outHeight)
-            org.junit.Assert.assertNull(android.media.ExifInterface(target.absolutePath).getAttribute(android.media.ExifInterface.TAG_GPS_LATITUDE))
+            org.junit.Assert.assertNull(ExifInterface(target.absolutePath).getAttribute(ExifInterface.TAG_GPS_LATITUDE))
         } finally { source.delete(); target?.delete() }
     }
 
