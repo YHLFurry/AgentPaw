@@ -34,11 +34,17 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
         with:
+          cmdline-tools-version: '16111833'
           packages: platform-tools
           log-accepted-android-sdk-licenses: false
 
       - name: Install compile SDK
-        run: sdkmanager "platforms;android-37"
+        run: |
+          sdkmanager "platforms;android-37.0"
+          # AGP 8.x looks for the legacy integer directory name.
+          if [ -d "$ANDROID_HOME/platforms/android-37.0" ] && [ ! -e "$ANDROID_HOME/platforms/android-37" ]; then
+            ln -s android-37.0 "$ANDROID_HOME/platforms/android-37"
+          fi
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -103,11 +109,17 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
         with:
+          cmdline-tools-version: '16111833'
           packages: platform-tools
           log-accepted-android-sdk-licenses: false
 
       - name: Install compile SDK
-        run: sdkmanager "platforms;android-37"
+        run: |
+          sdkmanager "platforms;android-37.0"
+          # AGP 8.x looks for the legacy integer directory name.
+          if [ -d "$ANDROID_HOME/platforms/android-37.0" ] && [ ! -e "$ANDROID_HOME/platforms/android-37" ]; then
+            ln -s android-37.0 "$ANDROID_HOME/platforms/android-37"
+          fi
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
