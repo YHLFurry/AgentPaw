@@ -40,4 +40,9 @@ interface LlmClient {
      * request and reports success or the failure reason.
      */
     suspend fun testConnection(config: LlmConfig): Result<Unit>
+
+    /**
+     * 联网拉取当前配置端点支持的模型列表 (GET /v1/models)
+     */
+    suspend fun listModels(config: LlmConfig): Result<List<String>> = Result.success(emptyList())
 }

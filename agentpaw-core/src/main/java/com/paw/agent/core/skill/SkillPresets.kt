@@ -168,12 +168,12 @@ object SkillPresets {
 
     fun find(key: String): SkillDefinition? = builtIns.firstOrNull { it.key == key }
 
-    /** 新建技能的空白模板：给一个能立刻跑通的最小步骤，降低上手门槛。 */
+    /** 新建技能的空白模板：给一个能立刻跑通的最小步骤与合法名称，降低上手门槛。 */
     fun blankTemplate(now: Long = System.currentTimeMillis()): SkillDefinition = SkillDefinition(
         id = "",
-        key = "",
-        displayName = "",
-        description = "",
+        key = "skill_custom_1",
+        displayName = "新建技能",
+        description = "点击桌面主页的快捷技能操作，可在下方编辑具体步骤",
         emoji = "🧩",
         category = "通用",
         steps = listOf(

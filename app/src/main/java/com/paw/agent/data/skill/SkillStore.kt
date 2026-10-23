@@ -36,6 +36,10 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import java.io.File
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
+import java.nio.file.AtomicMoveNotSupportedException
+import kotlinx.coroutines.CancellationException
 import java.util.UUID
 
 /**
@@ -48,8 +52,9 @@ import java.util.UUID
  * - 提供导入/导出，技能可以像文本一样分享与版本管理。
  */
 class SkillStore(
-    private val context: Context,
+    context: Context? = null,
     private val scope: CoroutineScope = CoroutineScope(Dispatchers.IO),
+    storageDirectory: File? = null,
 ) {
     private val json = Json {
         prettyPrint = true
@@ -57,7 +62,7 @@ class SkillStore(
         encodeDefaults = true
     }
 
-    private val dir: File = File(context.filesDir, "skills").apply { mkdirs() }
+    private val dir: File = (storageDirectory ?: File(requireNotNull(context).filesDir, "skills")).apply { mkdirs() }
     private val storageFile = File(dir, "skills_v2.json")
     private val legacyFile = File(dir, "custom_skills.json")
     private val mutex = Mutex()
@@ -122,23 +127,23 @@ class SkillStore(
         val current = _skills.value.toMutableList()
         val index = current.indexOfFirst { it.id == normalized.id }
         if (index >= 0) current[index] = normalized else current.add(normalized)
-        _skills.value = current
         persist(current)
+        _skills.value = current
         normalized
     }
 
     suspend fun delete(id: String) = mutex.withLock {
         val current = _skills.value.filterNot { it.id == id }
-        _skills.value = current
         persist(current)
+        _skills.value = current
     }
 
     suspend fun setEnabled(id: String, enabled: Boolean) = mutex.withLock {
         val current = _skills.value.map {
             if (it.id == id) it.copy(enabled = enabled, updatedAt = System.currentTimeMillis()) else it
         }
-        _skills.value = current
         persist(current)
+        _skills.value = current
     }
 
     suspend fun duplicate(id: String): SkillDefinition? = mutex.withLock {
@@ -162,21 +167,28 @@ class SkillStore(
             updatedAt = System.currentTimeMillis(),
         )
         val current = _skills.value + copy
-        _skills.value = current
         persist(current)
+        _skills.value = current
         copy
     }
 
     private suspend fun persist(list: List<SkillDefinition>) = withContext(Dispatchers.IO) {
-        runCatching {
-            val temp = File.createTempFile("skills_v2_", ".tmp", dir)
+        val temp = File.createTempFile("skills_v2_", ".tmp", dir)
+        try {
             temp.writeText(json.encodeToString(list))
-            if (!temp.renameTo(storageFile)) {
-                temp.copyTo(storageFile, overwrite = true)
-                temp.delete()
+            try {
+                Files.move(temp.toPath(), storageFile.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+            } catch (_: AtomicMoveNotSupportedException) {
+                Files.move(temp.toPath(), storageFile.toPath(), StandardCopyOption.REPLACE_EXISTING)
             }
-        }.onFailure { error ->
+            _loadError.value = null
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
             _loadError.value = "技能保存失败：${error.message ?: "未知错误"}"
+            throw error
+        } finally {
+            temp.delete()
         }
     }
 
@@ -245,8 +257,8 @@ class SkillStore(
 
         if (imported.isNotEmpty()) {
             val current = _skills.value + imported
-            _skills.value = current
             persist(current)
+            _skills.value = current
         }
         ImportResult(imported, errors)
     }

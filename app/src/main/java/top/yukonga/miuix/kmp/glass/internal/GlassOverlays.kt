@@ -3,6 +3,8 @@
 
 package top.yukonga.miuix.kmp.glass.internal
 
+import android.os.Build
+import androidx.annotation.RequiresApi
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.BlendMode
@@ -59,6 +61,7 @@ internal fun DrawScope.drawGlassRim(
     surface: Color,
     alpha: Float,
 ) {
+    if (Build.VERSION.SDK_INT < 33) return
     val shader = rimShader ?: return
     if (alpha <= 0f || size.width <= 0f || size.height <= 0f) return
     if (style.background.unShade >= 0.999f) return
@@ -95,6 +98,7 @@ internal fun DrawScope.drawGlassStroke(
     stroke: GlassStroke,
     alpha: Float,
 ) {
+    if (Build.VERSION.SDK_INT < 33) return
     val shader = strokeShader ?: return
     if (alpha <= 0f || size.width <= 0f || size.height <= 0f) return
 
@@ -122,6 +126,7 @@ internal fun DrawScope.drawGlassStroke(
  * @param layoutDirection Resolves the shape's start and end corners.
  */
 internal fun DrawScope.drawGlassMask(shape: GlassShape, layoutDirection: LayoutDirection) {
+    if (Build.VERSION.SDK_INT < 33) return
     val shader = maskShader ?: return
     if (size.width <= 0f || size.height <= 0f) return
     shader.setSilhouetteUniforms(shape, layoutDirection, size, this)
@@ -129,6 +134,7 @@ internal fun DrawScope.drawGlassMask(shape: GlassShape, layoutDirection: LayoutD
 }
 
 /** Uploads the size, corner radii and smoothing that `GLASS_SDF_SOURCE` reads. */
+@RequiresApi(33)
 private fun RuntimeShader.setSilhouetteUniforms(
     shape: GlassShape,
     layoutDirection: LayoutDirection,
@@ -154,6 +160,7 @@ private fun RuntimeShader.setSilhouetteUniforms(
 }
 
 /** Turns a light's position into the unit direction and weight the stroke shader wants. */
+@RequiresApi(33)
 private fun RuntimeShader.setLightUniforms(
     directionName: String,
     colorName: String,
@@ -185,6 +192,7 @@ internal fun DrawScope.drawGlassShadow(
     shadow: GlassShadow,
     alpha: Float,
 ) {
+    if (Build.VERSION.SDK_INT < 33) return
     val shader = shadowShader ?: return
     if (alpha <= 0f || size.width <= 0f || size.height <= 0f) return
 

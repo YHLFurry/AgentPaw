@@ -38,6 +38,7 @@ data class UiElementInfo(
     val className: String = "",
     val isClickable: Boolean = false,
     val isEditable: Boolean = false,
+    val isPassword: Boolean = false,
     val bounds: RectBounds = RectBounds(0, 0, 0, 0),
 )
 

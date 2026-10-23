@@ -17,6 +17,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -26,6 +27,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleEventEffect
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import com.paw.agent.R
 import com.paw.agent.data.settings.AppSettings
 import com.paw.agent.data.settings.HighRiskToggle
@@ -60,6 +63,7 @@ fun ExpertSettingsPage(
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
+    val resources = androidx.compose.ui.platform.LocalResources.current
     val scope = rememberCoroutineScope()
     val permTick = remember { mutableIntStateOf(0) }
     var pendingRisk by remember { mutableStateOf<HighRiskToggle?>(null) }
@@ -76,8 +80,10 @@ fun ExpertSettingsPage(
         }
     }
 
-    val isRootGranted = remember(permTick.intValue) {
-        DevicePermissionManager.isRootAvailable()
+    val isRootGranted by produceState(initialValue = false, permTick.intValue) {
+        value = withContext(Dispatchers.IO) {
+            DevicePermissionManager.isRootAvailable()
+        }
     }
 
     // 低频心跳：用户停留在本页时，“剩余 N 分钟”也能自然衰减，而不是定格在进入时的值。
@@ -111,7 +117,7 @@ fun ExpertSettingsPage(
         snackbarHostState = snackbarHostState,
     ) {
         // ---- 视觉与语言分离显示模式 ----
-        SettingsGroupLabel("交互与视图模式")
+        SettingsGroupLabel(stringResource(R.string.settings_interaction_group))
         SettingsCard {
             SettingsSwitchRow(
                 title = stringResource(R.string.settings_split_vision_language),
@@ -124,7 +130,7 @@ fun ExpertSettingsPage(
         Spacer(Modifier.height(20.dp))
 
         // ---- ROOT 模式与提权 ----
-        SettingsGroupLabel("ROOT 高级执行通道")
+        SettingsGroupLabel(stringResource(R.string.settings_root_group))
         SettingsCard {
             SettingsSwitchRow(
                 title = stringResource(R.string.settings_root_mode),
@@ -149,7 +155,7 @@ fun ExpertSettingsPage(
                     scope.launch {
                         val ok = DevicePermissionManager.requestOrTestRoot()
                         permTick.intValue++
-                        val msg = if (ok) "已成功检测并获取 ROOT 权限！" else "未能获取 ROOT 权限，请确认设备已 ROOT 并授权"
+                        val msg = if (ok) resources.getString(R.string.settings_root_confirmed) else resources.getString(R.string.settings_root_denied)
                         Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
                     }
                 },
@@ -159,7 +165,7 @@ fun ExpertSettingsPage(
         Spacer(Modifier.height(20.dp))
 
         // ---- AI 自适应操作节奏 ----
-        SettingsGroupLabel("操作节奏智能识别")
+        SettingsGroupLabel(stringResource(R.string.settings_pacing_group))
         SettingsCard {
             SettingsSwitchRow(
                 title = stringResource(R.string.settings_adaptive_pacing),

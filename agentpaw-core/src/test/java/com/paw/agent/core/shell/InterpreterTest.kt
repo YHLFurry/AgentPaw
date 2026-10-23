@@ -4,6 +4,7 @@ import com.paw.agent.core.shell.command.CommandRegistry
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeNoException
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
@@ -14,6 +15,41 @@ import java.io.File
  * no mocks, so the path guards are genuinely exercised.
  */
 class InterpreterTest {
+    @Test(timeout = 5000) fun `nested regex quantifiers cannot stall the sandbox`() {
+        val root = temp.newFolder()
+        File(root, "input").writeText("a".repeat(20_000) + "!")
+        val result = Interpreter(CommandRegistry()).execute("grep '/(a+)+$/' input", ShellEnvironment(root.absolutePath))
+        assertEquals(1, result.exitCode)
+    }
+
+    @Test fun `unsupported regex returns an actionable error`() {
+        assertTrue(run("echo a | grep '/(?=a)/'").stderr.contains("unsupported regex"))
+    }
+    @Test
+    fun `interrupted thread cannot execute sandbox side effects`() {
+        val env = ShellEnvironment(temp.newFolder().absolutePath)
+        var interrupted = false
+        Thread.currentThread().interrupt()
+        try {
+            Interpreter(CommandRegistry()).execute("touch cancelled.txt", env)
+        } catch (_: InterruptedException) {
+            interrupted = true
+        } finally {
+            Thread.interrupted()
+        }
+        assertTrue(interrupted)
+        assertTrue(!File(env.rootDir, "cancelled.txt").exists())
+    }
+    @Test
+    fun `reused interpreter resets its time budget for each execution`() {
+        var now = 0L
+        val interpreter = Interpreter(CommandRegistry(), SandboxLimits(timeoutMillis = 10), clockNanos = { now })
+        val env = ShellEnvironment(temp.newFolder().absolutePath)
+        now = 50_000_000L
+        assertEquals(0, interpreter.execute("echo first", env).exitCode)
+        now = 100_000_000L
+        assertEquals(0, interpreter.execute("echo second", env).exitCode)
+    }
 
     @get:Rule
     val temp = TemporaryFolder()
@@ -49,6 +85,27 @@ class InterpreterTest {
         val result = run("echo 'unterminated")
         assertNotEquals(0, result.exitCode)
         assertTrue(result.stderr.contains("syntax error"))
+    }
+
+    @Test
+    fun `file commands cannot follow symlinks outside sandbox`() {
+        val root = temp.newFolder("sandbox")
+        val outside = temp.newFile("outside.txt").apply { writeText("secret") }
+        val link = File(root, "outside-link")
+        try {
+            java.nio.file.Files.createSymbolicLink(link.toPath(), outside.toPath())
+        } catch (e: Exception) {
+            assumeNoException("Symbolic links are unavailable on this test filesystem", e)
+        }
+
+        val env = ShellEnvironment(rootDir = root.absolutePath)
+        val result = Interpreter(CommandRegistry()).execute("cat outside-link", env)
+        assertNotEquals(0, result.exitCode)
+        assertTrue(result.stderr.contains("symbolic link"))
+
+        val redirectResult = Interpreter(CommandRegistry()).execute("echo overwritten > outside-link", env)
+        assertNotEquals(0, redirectResult.exitCode)
+        assertEquals("secret", outside.readText())
     }
 
     // ---- arithmetic -------------------------------------------------------

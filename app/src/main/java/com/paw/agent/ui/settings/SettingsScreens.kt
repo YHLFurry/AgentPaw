@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.outlined.AutoAwesome
@@ -31,11 +32,14 @@ import androidx.compose.material.icons.outlined.PhoneAndroid
 import androidx.compose.material.icons.outlined.Security
 import androidx.compose.material.icons.outlined.Tune
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -109,6 +113,8 @@ data class LlmSettingsActions(
     val onStartRiskBypass: () -> Unit = {},
     val onStopRiskBypass: () -> Unit = {},
     val onConsumeRiskNotice: () -> Unit = {},
+    // ---- 联网拉取模型 ----
+    val onFetchModels: () -> Unit = {},
 )
 
 /**
@@ -200,7 +206,7 @@ fun SettingsHomeScreen(
                     icon = Icons.Outlined.AutoAwesome,
                     title = stringResource(R.string.settings_group_expert),
                     summary = stringResource(R.string.settings_group_expert_summary),
-                    trailing = "已解锁",
+                    trailing = stringResource(R.string.settings_expert_unlocked),
                     onClick = onOpenExpert,
                 )
             }
@@ -212,7 +218,7 @@ fun SettingsHomeScreen(
             SettingsNavRow(
                 icon = Icons.Outlined.Info,
                 title = stringResource(R.string.about_title),
-                summary = "版本、开发者信息与开源许可",
+                summary = stringResource(R.string.settings_about_summary),
                 onClick = onOpenAbout,
             )
         }
@@ -323,17 +329,82 @@ fun LlmServicePage(
         SettingsGroupLabel(stringResource(R.string.settings_section_model))
         SettingsCard {
             SettingsBlock {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    AppText(
+                        text = stringResource(R.string.settings_model),
+                        style = AppTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = AppTheme.colors.onSurface,
+                    )
+                    AppOutlinedButton(
+                        onClick = actions.onFetchModels,
+                        enabled = !state.isFetchingModels && state.baseUrl.isNotBlank(),
+                    ) {
+                        if (state.isFetchingModels) {
+                            AppCircularProgressIndicator(size = 14.dp)
+                            Spacer(Modifier.width(6.dp))
+                            AppText(stringResource(R.string.settings_models_fetching), style = AppTheme.typography.labelSmall)
+                        } else {
+                            AppIcon(
+                                imageVector = Icons.Default.Refresh,
+                                contentDescription = null,
+                                modifier = Modifier.size(14.dp),
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            AppText(stringResource(R.string.settings_models_fetch), style = AppTheme.typography.labelSmall)
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(8.dp))
+
                 AppTextField(
                     value = state.model,
                     onValueChange = actions.onModelChange,
                     label = stringResource(R.string.settings_model),
                     singleLine = true,
-                    isError = state.modelError != null,
-                    supportingText = state.modelError?.let { errorText(it) },
+                    isError = state.modelError != null || state.fetchModelsError != null,
+                    supportingText = state.modelError?.let { errorText(it) }
+                        ?: state.fetchModelsSuccessMessage
+                        ?: state.fetchModelsError,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                     modifier = Modifier.fillMaxWidth(),
                 )
 
+                // 1. 联网拉取到的实时可用模型
+                if (state.fetchedModels.isNotEmpty()) {
+                    Spacer(Modifier.height(10.dp))
+                    AppText(
+                        text = stringResource(R.string.settings_models_fetched_title, state.fetchedModels.size),
+                        style = AppTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Medium,
+                        color = AppTheme.colors.primary,
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        state.fetchedModels.forEach { name ->
+                            val isSelected = state.model.trim().equals(name, ignoreCase = true)
+                            SelectableCell(
+                                label = name,
+                                isSelected = isSelected,
+                                onClick = { actions.onModelChange(name) },
+                                height = 32,
+                                corner = 6,
+                            )
+                        }
+                    }
+                }
+
+                // 2. 预设建议模型
                 val suggestions = state.provider.suggestedModels
                 if (suggestions.isNotEmpty()) {
                     Spacer(Modifier.height(8.dp))
@@ -516,6 +587,7 @@ fun AgentControlPage(
     SavedEffect(state.savedAt, savedMessage, snackbarHostState)
 
     val context = androidx.compose.ui.platform.LocalContext.current
+    val resources = androidx.compose.ui.platform.LocalResources.current
     val permRefreshTick = remember { mutableIntStateOf(0) }
     LifecycleEventEffect(androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
         permRefreshTick.intValue++
@@ -541,8 +613,10 @@ fun AgentControlPage(
         permRefreshTick.intValue++
     }
     val coroutineScope = androidx.compose.runtime.rememberCoroutineScope()
-    val isRootGranted = remember(permRefreshTick.intValue) {
-        com.paw.agent.device.DevicePermissionManager.isRootAvailable()
+    val isRootGranted by produceState(initialValue = false, permRefreshTick.intValue) {
+        value = withContext(Dispatchers.IO) {
+            com.paw.agent.device.DevicePermissionManager.isRootAvailable()
+        }
     }
 
     SettingsPageScaffold(
@@ -603,14 +677,14 @@ fun AgentControlPage(
                     )
                     Spacer(Modifier.width(10.dp))
                     AppText(
-                        text = "系统兼容提示：当前设备为 Android ${android.os.Build.VERSION.RELEASE} (API ${android.os.Build.VERSION.SDK_INT})。无障碍截图需 Android 11+ (API 30+)。在 Android 8–10 下，视觉感知与多模态截图功能需开启 Shizuku 或 Root 模式。",
+                        text = stringResource(R.string.settings_device_compatibility, android.os.Build.VERSION.RELEASE, android.os.Build.VERSION.SDK_INT),
                         style = AppTheme.typography.bodySmall,
                     )
                 }
             }
         }
 
-        SettingsGroupLabel("系统执行通道与权限 (优先级: ROOT > Shizuku > 无障碍)")
+        SettingsGroupLabel(stringResource(R.string.settings_execution_channels))
         SettingsCard {
             PermissionRow(
                 title = stringResource(R.string.permission_root),
@@ -624,7 +698,7 @@ fun AgentControlPage(
                 actionText = if (!isRootGranted) {
                     stringResource(R.string.permission_root_request)
                 } else if (!isAccessibilityEnabled) {
-                    "ROOT 激活无障碍"
+                    stringResource(R.string.settings_root_accessibility)
                 } else null,
                 onAction = {
                     coroutineScope.launch {
@@ -632,17 +706,17 @@ fun AgentControlPage(
                             val ok = com.paw.agent.device.DevicePermissionManager.requestOrTestRoot()
                             permRefreshTick.intValue++
                             if (ok) {
-                                snackbarHostState.showSnackbar("ROOT 权限授权成功")
+                                snackbarHostState.showSnackbar(resources.getString(R.string.settings_root_success))
                             } else {
-                                snackbarHostState.showSnackbar("未能获取 ROOT 授权，请检查 Magisk/KernelSU/APatch")
+                                snackbarHostState.showSnackbar(resources.getString(R.string.settings_root_failure))
                             }
                         } else if (!isAccessibilityEnabled) {
                             val ok = com.paw.agent.device.DevicePermissionManager.enableAccessibilityViaRoot(context)
                             permRefreshTick.intValue++
                             if (ok) {
-                                snackbarHostState.showSnackbar("已通过 ROOT 成功激活无障碍服务")
+                                snackbarHostState.showSnackbar(resources.getString(R.string.settings_accessibility_success))
                             } else {
-                                snackbarHostState.showSnackbar("ROOT 激活无障碍服务失败")
+                                snackbarHostState.showSnackbar(resources.getString(R.string.settings_accessibility_failure))
                             }
                         }
                     }
@@ -746,7 +820,7 @@ fun AgentControlPage(
         }
         if (isXiaomiDevice) {
             Spacer(Modifier.height(20.dp))
-            SettingsGroupLabel("小米澎湃OS (HyperOS) 专属适配与排障")
+            SettingsGroupLabel(stringResource(R.string.settings_hyperos_title))
             AppCard(
                 cornerRadius = 12.dp,
                 containerColor = AppTheme.colors.surfaceContainerHigh,
@@ -755,18 +829,18 @@ fun AgentControlPage(
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     AppText(
-                        text = "澎湃OS / MIUI 具有极严格的后台管制与专属权限。若 AgentPaw 无法模拟点击、无法拉起目标应用或无障碍开关无法开启，请完成以下配置：",
+                        text = stringResource(R.string.settings_hyperos_help),
                         style = AppTheme.typography.bodySmall,
                         color = AppTheme.colors.onSurfaceVariant,
                     )
                     Spacer(Modifier.height(12.dp))
 
                     AppText(
-                        text = "1. 解除受限设置（针对无障碍开关置灰不可点）",
+                        text = stringResource(R.string.settings_hyperos_restricted_title),
                         style = AppTheme.typography.titleSmall,
                     )
                     AppText(
-                        text = "Android 13+ 澎湃OS 对非应用商店安装的 APK 默认限制无障碍。请点击下方按钮打开应用详情，点击右上角【⋮】并选择【允许受限设置】，验证锁屏密码后即可开启无障碍。",
+                        text = stringResource(R.string.settings_hyperos_restricted_help),
                         style = AppTheme.typography.bodySmall,
                         color = AppTheme.colors.onSurfaceVariant,
                     )
@@ -774,17 +848,17 @@ fun AgentControlPage(
                     AppOutlinedButton(
                         onClick = { com.paw.agent.device.DevicePermissionManager.openAppDetailsSettings(context) },
                     ) {
-                        AppText("打开应用详情（右上角⋮允许受限设置）", style = AppTheme.typography.labelSmall)
+                        AppText(stringResource(R.string.settings_open_app_details), style = AppTheme.typography.labelSmall)
                     }
 
                     Spacer(Modifier.height(14.dp))
 
                     AppText(
-                        text = "2. 开启「后台弹出界面」与「悬浮窗」",
+                        text = stringResource(R.string.settings_hyperos_overlay_title),
                         style = AppTheme.typography.titleSmall,
                     )
                     AppText(
-                        text = "澎湃OS 默认拦截后台启动 Activity。未开启「后台弹出界面」时，Agent 无法在后台或悬浮窗状态下自动打开目标应用。",
+                        text = stringResource(R.string.settings_hyperos_overlay_help),
                         style = AppTheme.typography.bodySmall,
                         color = AppTheme.colors.onSurfaceVariant,
                     )
@@ -792,17 +866,17 @@ fun AgentControlPage(
                     AppOutlinedButton(
                         onClick = { com.paw.agent.device.DevicePermissionManager.openXiaomiPermissionsSettings(context) },
                     ) {
-                        AppText("跳转权限管理（开启后台弹出界面）", style = AppTheme.typography.labelSmall)
+                        AppText(stringResource(R.string.settings_open_permission_manager), style = AppTheme.typography.labelSmall)
                     }
 
                     Spacer(Modifier.height(14.dp))
 
                     AppText(
-                        text = "3. 省电策略设为「无限制」与开启「自启动」",
+                        text = stringResource(R.string.settings_hyperos_battery_title),
                         style = AppTheme.typography.titleSmall,
                     )
                     AppText(
-                        text = "在应用详情中将【省电策略】改为【无限制】，并开启【自启动】，并在多任务后台为 AgentPaw 加锁，防止系统在后台终止无障碍服务。",
+                        text = stringResource(R.string.settings_hyperos_battery_help),
                         style = AppTheme.typography.bodySmall,
                         color = AppTheme.colors.onSurfaceVariant,
                     )
@@ -810,11 +884,11 @@ fun AgentControlPage(
                     Spacer(Modifier.height(14.dp))
 
                     AppText(
-                        text = "4. 开启「USB 调试（安全设置）」（Shizuku 模式必需）",
+                        text = stringResource(R.string.settings_hyperos_debug_title),
                         style = AppTheme.typography.titleSmall,
                     )
                     AppText(
-                        text = "在澎湃OS下使用 Shizuku 免 Root 执行时，必须在开发者选项中开启【USB 调试（安全设置）】（允许模拟点击），否则 input tap 会被系统拦截报错 INJECT_EVENTS。",
+                        text = stringResource(R.string.settings_hyperos_debug_help),
                         style = AppTheme.typography.bodySmall,
                         color = AppTheme.colors.onSurfaceVariant,
                     )
@@ -822,7 +896,7 @@ fun AgentControlPage(
                     AppOutlinedButton(
                         onClick = { com.paw.agent.device.DevicePermissionManager.openDeveloperOptions(context) },
                     ) {
-                        AppText("打开开发者选项（开启USB调试安全设置）", style = AppTheme.typography.labelSmall)
+                        AppText(stringResource(R.string.settings_open_developer_options), style = AppTheme.typography.labelSmall)
                     }
                 }
             }
@@ -1085,12 +1159,13 @@ private fun StepSettingsControl(
     maxToolRounds: Int,
     onMaxToolRoundsChange: (Int) -> Unit,
 ) {
-    val boundedRounds = if (maxToolRounds <= 0) 15 else maxToolRounds.coerceIn(1, 100)
+    val isUnlimited = maxToolRounds <= 0
+    val boundedRounds = if (isUnlimited) 0 else maxToolRounds
     // 计数规则：每 5 步记为 1 格
     val currentGrids = if (boundedRounds % 5 == 0) {
         stringResource(R.string.settings_max_rounds_grids, boundedRounds / 5)
     } else {
-        String.format(java.util.Locale.US, "%.1f 格", boundedRounds / 5.0)
+        stringResource(R.string.settings_rounds_fraction, boundedRounds / 5.0)
     }
 
     var inputText by remember(boundedRounds) {
@@ -1114,11 +1189,15 @@ private fun StepSettingsControl(
             Spacer(Modifier.width(10.dp))
             AppSurface(
                 shape = RoundedCornerShape(8.dp),
-                color = AppTheme.colors.primaryContainer,
-                contentColor = AppTheme.colors.onPrimaryContainer,
+                color = if (isUnlimited) AppTheme.colors.tertiaryContainer else AppTheme.colors.primaryContainer,
+                contentColor = if (isUnlimited) AppTheme.colors.onTertiaryContainer else AppTheme.colors.onPrimaryContainer,
             ) {
                 AppText(
-                    text = stringResource(R.string.settings_max_rounds_value, boundedRounds, currentGrids),
+                    text = if (isUnlimited) {
+                        stringResource(R.string.settings_max_rounds_unlimited)
+                    } else {
+                        stringResource(R.string.settings_max_rounds_value, boundedRounds, currentGrids)
+                    },
                     style = AppTheme.typography.labelMedium,
                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                 )
@@ -1134,14 +1213,14 @@ private fun StepSettingsControl(
 
         Spacer(Modifier.height(12.dp))
 
-        // 自定义步数输入框 (严格限制 1~100 整数)
+        // 自定义步数输入框 (仅允许正整数或0，0表示不限制)
         AppTextField(
             value = inputText,
             onValueChange = { newStr ->
                 val filtered = newStr.filter { it.isDigit() }
                 inputText = filtered
                 val parsed = filtered.toIntOrNull()
-                if (parsed != null && parsed in 1..100) {
+                if (parsed != null && parsed >= 0) {
                     onMaxToolRoundsChange(parsed)
                 }
             },
@@ -1149,13 +1228,16 @@ private fun StepSettingsControl(
             placeholder = stringResource(R.string.settings_max_rounds_custom_hint),
             supportingText = run {
                 val num = inputText.toIntOrNull() ?: boundedRounds
-                val safeNum = num.coerceIn(1, 100)
-                val g = if (safeNum % 5 == 0) {
-                    stringResource(R.string.settings_max_rounds_grids, safeNum / 5)
+                if (num <= 0) {
+                    stringResource(R.string.settings_max_rounds_unlimited_desc)
                 } else {
-                    String.format(java.util.Locale.US, "%.1f 格", safeNum / 5.0)
+                    val g = if (num % 5 == 0) {
+                        stringResource(R.string.settings_max_rounds_grids, num / 5)
+                    } else {
+                        stringResource(R.string.settings_rounds_fraction, num / 5.0)
+                    }
+                    stringResource(R.string.settings_max_rounds_convert, num, g)
                 }
-                stringResource(R.string.settings_max_rounds_convert, safeNum, g)
             },
             keyboardOptions = KeyboardOptions(
                 keyboardType = KeyboardType.Number,
@@ -1167,7 +1249,7 @@ private fun StepSettingsControl(
 
         Spacer(Modifier.height(12.dp))
 
-        // 快速预设按钮 (推荐步数预设，消除无上限)
+        // 快速预设按钮
         AppText(
             text = stringResource(R.string.settings_max_rounds_presets),
             style = AppTheme.typography.labelSmall,
@@ -1175,7 +1257,7 @@ private fun StepSettingsControl(
         )
         Spacer(Modifier.height(6.dp))
         val presets = listOf(
-            5 to R.string.settings_max_rounds_preset_5,
+            0 to R.string.settings_max_rounds_preset_0,
             10 to R.string.settings_max_rounds_preset_10,
             15 to R.string.settings_max_rounds_preset_15,
             25 to R.string.settings_max_rounds_preset_25,

@@ -1,6 +1,10 @@
 package com.paw.agent.core.agent
 
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 
 enum class RiskLevel {
     LOW,
@@ -39,7 +43,7 @@ object RiskActionGuard {
     private val SUBMIT_REGEX = Regex("""(?i)\b(send|submit|post)\b|发送|确定提交|发布|立即发布|发朋友圈|确认发送""")
 
     private val PAYMENT_SCHEMES = listOf(
-        "alipays://", "alipayqr://", "weixin://dl/businessWeb", "upay://", "unionpay://",
+        "alipays://", "alipayqr://", "weixin://dl/businessweb", "upay://", "unionpay://",
     )
 
     private val FORBIDDEN_DEEPLINK_SCHEMES = setOf(
@@ -56,6 +60,7 @@ object RiskActionGuard {
         targetElementText: String = "",
     ): RiskDecision {
         val lowerArgs = arguments.lowercase()
+        val parsedArgs = runCatching { Json.parseToJsonElement(arguments) as? JsonObject }.getOrNull()
         val lowerScreen = screenContextText.lowercase()
         val lowerTarget = targetElementText.lowercase()
         val combinedTargetAndArgs = if (lowerTarget.isNotBlank()) "$lowerArgs $lowerTarget" else lowerArgs
@@ -75,11 +80,7 @@ object RiskActionGuard {
 
         // 1. DeepLink 风险分析
         if (toolName == "open_deeplink") {
-            val uriStr = if (lowerArgs.contains("\"uri\":")) {
-                lowerArgs.substringAfter("\"uri\":").trim().removePrefix("\"").substringBefore("\"")
-            } else {
-                lowerArgs
-            }
+            val uriStr = ((parsedArgs?.get("uri") as? JsonPrimitive)?.content ?: arguments).trim().lowercase()
             val scheme = uriStr.substringBefore("://").substringBefore(":")
             if (scheme in FORBIDDEN_DEEPLINK_SCHEMES || uriStr.startsWith("intent:") || uriStr.startsWith("file:") || uriStr.startsWith("content:")) {
                 return RiskDecision(
@@ -107,7 +108,7 @@ object RiskActionGuard {
 
         // 2. 文本输入风险分析
         if (toolName == "input_text") {
-            val isEnter = lowerArgs.contains("\"press_enter\":true") || lowerArgs.contains("\"press_enter\": true")
+            val isEnter = (parsedArgs?.get("press_enter") as? JsonPrimitive)?.booleanOrNull == true
             val containsPayment = PAYMENT_REGEX.containsMatchIn(lowerScreen) || PAYMENT_REGEX.containsMatchIn(combinedTargetAndArgs)
             if (containsPayment) {
                 return RiskDecision(

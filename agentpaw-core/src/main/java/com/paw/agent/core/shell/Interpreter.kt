@@ -2,6 +2,7 @@ package com.paw.agent.core.shell
 
 import com.paw.agent.core.shell.command.CommandRegistry
 import com.paw.agent.core.shell.command.SandboxCommand
+import com.paw.agent.core.shell.command.FileSupport
 import com.paw.agent.core.shell.parser.Arg
 import com.paw.agent.core.shell.parser.JoinOperator
 import com.paw.agent.core.shell.parser.Node
@@ -9,6 +10,7 @@ import com.paw.agent.core.shell.parser.Parser
 import com.paw.agent.core.shell.parser.Redirection
 import com.paw.agent.core.shell.token.ShellSyntaxException
 import java.io.File
+import com.paw.agent.core.io.BoundedIO
 
 /** Limits that keep a runaway script from hanging or exhausting memory. */
 data class SandboxLimits(
@@ -43,20 +45,19 @@ data class SandboxResult(
 class Interpreter(
     private val registry: CommandRegistry,
     private val limits: SandboxLimits = SandboxLimits(),
+    private val clockNanos: () -> Long = System::nanoTime,
 ) {
 
     private var stepBudget = limits.maxSteps
-    private val deadlineNanos: Long
-
-    init {
-        deadlineNanos = System.nanoTime() + limits.timeoutMillis * 1_000_000
-    }
+    private var deadlineNanos: Long = 0
 
     fun execute(
         source: String,
         env: ShellEnvironment,
     ): CommandResult {
+        if (source.length > BoundedIO.MAX_TEXT_CHARS) return CommandResult.error("sandbox: script exceeds size budget")
         stepBudget = limits.maxSteps
+        deadlineNanos = clockNanos() + limits.timeoutMillis * 1_000_000
 
         val ast = try {
             Parser.parse(source)
@@ -138,13 +139,14 @@ class Interpreter(
             tick()
             val stageIo = ShellIO(stdin = stdin)
             result = evaluate(stage, env, stageIo)
+            appendBounded(io.stderr, stageIo.stderr)
             // Each stage's stdout becomes the next stage's stdin.
             stdin = stageIo.stdout.toString()
         }
 
         // The final stage's output is what the pipeline produces, and it must
         // reach the enclosing scope so top-level scripts see it.
-        io.stdout.append(stdin)
+        appendBounded(io.stdout, stdin)
         return result.copy(stdout = "", stderr = "")
     }
 
@@ -175,7 +177,7 @@ class Interpreter(
             .firstOrNull()
             ?.let { redirection ->
                 val path = resolveFilePath(resolveArg(redirection.file, env), env)
-                runCatching { File(path).readText() }.getOrElse {
+                runCatching { File(path).reader().use { BoundedIO.readText(it) } }.getOrElse {
                     return CommandResult.error("$node.name: cannot read '$path'")
                 }
             }
@@ -215,8 +217,8 @@ class Interpreter(
             .filterIsInstance<Redirection.Output>()
             .any { it.stderr }
 
-        if (!stdoutRedirected) io.stdout.append(commandIo.stdout)
-        if (!stderrRedirected) io.stderr.append(commandIo.stderr)
+        if (!stdoutRedirected) appendBounded(io.stdout, commandIo.stdout)
+        if (!stderrRedirected) appendBounded(io.stderr, commandIo.stderr)
 
         // The produced text has been handed to the enclosing scope, so clear it
         // from the returned result to keep exactly one source of truth.
@@ -268,11 +270,7 @@ class Interpreter(
      * would escape the root.
      */
     private fun resolveFilePath(path: String, env: ShellEnvironment): String {
-        val resolved = env.resolvePath(path)
-        if (!env.isInsideRoot(resolved)) {
-            throw SandboxSecurityException("path escapes the sandbox: $path")
-        }
-        return resolved
+        return FileSupport.resolveFile(path, env).path
     }
 
     private fun resolveArg(arg: Arg, env: ShellEnvironment): String = when (arg) {
@@ -292,12 +290,20 @@ class Interpreter(
 
     /** Enforces the step budget and the wall-clock deadline. */
     private fun tick() {
+        if (Thread.currentThread().isInterrupted) throw InterruptedException("sandbox execution cancelled")
         if (--stepBudget <= 0) {
             throw SandboxTimeoutException("script exceeded ${limits.maxSteps} steps")
         }
-        if (System.nanoTime() > deadlineNanos) {
+        if (clockNanos() > deadlineNanos) {
             throw SandboxTimeoutException("script exceeded ${limits.timeoutMillis}ms")
         }
+    }
+
+    private fun appendBounded(target: StringBuilder, content: CharSequence) {
+        if (target.length.toLong() + content.length > BoundedIO.MAX_TEXT_CHARS) {
+            throw SandboxTimeoutException("stream exceeded ${BoundedIO.MAX_TEXT_CHARS} characters")
+        }
+        target.append(content)
     }
 
     private fun truncate(text: String): String =

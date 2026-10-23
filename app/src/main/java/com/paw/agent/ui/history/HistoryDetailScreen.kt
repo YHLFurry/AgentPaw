@@ -22,6 +22,10 @@ import androidx.compose.material.icons.filled.History
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
+import com.paw.agent.core.model.Conversation
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -53,17 +57,20 @@ fun HistoryDetailScreen(
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
+    val resources = androidx.compose.ui.platform.LocalResources.current
+    val scope = rememberCoroutineScope()
     val historyList by container.conversationRepository.historyList.collectAsStateWithLifecycle()
-    val conv = remember(historyList, conversationId) {
-        historyList.firstOrNull { it.id == conversationId }
+    val loaded by produceState<Pair<Boolean, Conversation?>>(false to null, historyList, conversationId) {
+        value = true to container.conversationRepository.getConversation(conversationId)
     }
+    val conv = loaded.second
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
 
     AppScaffold(
         modifier = modifier.fillMaxSize(),
         topBar = {
             AppTopAppBar(
-                title = conv?.title?.ifBlank { "任务详情" } ?: "任务详情",
+                title = conv?.title?.ifBlank { stringResource(R.string.history_detail) } ?: stringResource(R.string.history_detail),
                 isContentScrolled = listState.canScrollBackward,
                 navigationIcon = {
                     AppTopBarAction(onClick = onBack) {
@@ -76,15 +83,17 @@ fun HistoryDetailScreen(
                 actions = {
                     if (conv != null) {
                         AppTopBarAction(onClick = {
+                          scope.launch {
                             val ok = container.restoreConversation(conv.id)
                             if (ok) {
-                                Toast.makeText(context, "已载入此任务历史上下文！", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, resources.getString(R.string.history_restored), Toast.LENGTH_SHORT).show()
                                 onRestoreToChat()
                             }
+                          }
                         }) {
                             AppIcon(
                                 imageVector = Icons.Default.History,
-                                contentDescription = "回溯此任务",
+                                contentDescription = stringResource(R.string.history_restore_action),
                             )
                         }
                     }
@@ -113,20 +122,22 @@ fun HistoryDetailScreen(
                                 PersistentConversationRepository.computeStats(conv)
                             }
                             AppText(
-                                text = "执行步数: ${stats.stepCount} 步 | 耗时: ${stats.durationMs / 1000f}s",
+                                text = if (stats.durationMs > 0) stringResource(R.string.history_execution_summary, stats.stepCount, stats.durationMs / 1000f) else stringResource(R.string.history_duration_unknown),
                                 style = AppTheme.typography.labelMedium,
                                 color = AppTheme.colors.onSurfaceVariant,
                             )
                         }
                         Spacer(Modifier.width(8.dp))
                         AppButton(onClick = {
+                          scope.launch {
                             val ok = container.restoreConversation(conv.id)
                             if (ok) {
-                                Toast.makeText(context, "已成功回溯此任务上下文！", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, resources.getString(R.string.history_restored_ok), Toast.LENGTH_SHORT).show()
                                 onRestoreToChat()
                             }
+                          }
                         }) {
-                            AppText("回溯并继续任务")
+                            AppText(stringResource(R.string.history_restore_continue))
                         }
                     }
                 }
@@ -136,7 +147,7 @@ fun HistoryDetailScreen(
     ) { innerPadding ->
         if (conv == null) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                AppText("未找到该任务记录")
+                AppText(if (!loaded.first) stringResource(R.string.history_loading) else stringResource(R.string.history_not_found))
             }
         } else {
             LazyColumn(

@@ -27,7 +27,7 @@ interface ConversationRepository {
     fun appendToMessage(id: String, text: String)
     fun removeMessage(id: String)
     fun clear()
-    fun loadConversation(id: String): Boolean = false
+    suspend fun loadConversation(id: String): Boolean = false
     fun observe(): Flow<Conversation> = conversation
 }
 
@@ -90,7 +90,7 @@ class InMemoryConversationRepository : ConversationRepository {
         _conversation.update { it.copy(messages = emptyList(), title = "", updatedAt = now) }
     }
 
-    override fun loadConversation(id: String): Boolean = false
+    override suspend fun loadConversation(id: String): Boolean = false
 
     private companion object {
         const val TITLE_MAX_CHARS = 40

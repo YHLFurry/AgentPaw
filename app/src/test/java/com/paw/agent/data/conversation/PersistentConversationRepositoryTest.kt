@@ -11,6 +11,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -23,6 +25,123 @@ import java.io.File
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class PersistentConversationRepositoryTest {
+    @Test fun `indexed cold start loads only latest body and older pages remain accessible`() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val scope = TestScope(dispatcher)
+        val dir = tempFolder.newFolder("indexed_pages")
+        for (i in 1..120) File(dir, "conv_$i.json").writeText(
+            """{"id":"conv_$i","title":"Task $i","updatedAt":$i,"messages":[{"id":"m$i","role":"user","content":"Goal $i"}]}""",
+        )
+        val initial = PersistentConversationRepository(scope = scope, storageDirectory = dir, ioDispatcher = dispatcher)
+        scope.advanceUntilIdle()
+        assertEquals(100, initial.historyList.value.size)
+        assertTrue(initial.hasMoreHistory.value)
+        assertTrue(initial.historyList.value.all { it.messages.isEmpty() && it.summary != null })
+        val cached = PersistentConversationRepository(scope = scope, storageDirectory = dir, ioDispatcher = dispatcher)
+        scope.advanceUntilIdle()
+        assertEquals(1, cached.historyBodyReads.get())
+        cached.loadMoreHistory()
+        scope.advanceUntilIdle()
+        assertEquals(120, cached.historyList.value.size)
+        assertFalse(cached.hasMoreHistory.value)
+        assertTrue(cached.loadConversation("conv_1"))
+        assertEquals("Goal 1", cached.conversation.value.messages.single().content)
+    }
+
+    @Test fun `streaming updates are persisted in bounded batches and final content survives`() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val scope = TestScope(dispatcher)
+        val dir = tempFolder.newFolder("batched_writes")
+        val repo = PersistentConversationRepository(scope = scope, storageDirectory = dir, ioDispatcher = dispatcher)
+        scope.advanceUntilIdle()
+        val before = repo.conversationWrites.get()
+        repo.addMessage(Message("stream", MessageRole.ASSISTANT, "", status = MessageStatus.STREAMING))
+        repeat(100) {
+            repo.appendToMessage("stream", "x")
+            scope.advanceTimeBy(10)
+            scope.runCurrent()
+        }
+        repo.updateMessage("stream") { it.copy(status = MessageStatus.COMPLETE) }
+        scope.advanceUntilIdle()
+        assertTrue(repo.conversationWrites.get() - before <= 6)
+        assertTrue(File(dir, "${repo.conversation.value.id}.json").readText().contains("x".repeat(100)))
+    }
+
+    @Test fun `media cleanup updates references in active and archived conversations`() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val scope = TestScope(dispatcher)
+        val dir = tempFolder.newFolder("media_references")
+        val repo = PersistentConversationRepository(scope = scope, storageDirectory = dir, ioDispatcher = dispatcher)
+        scope.advanceUntilIdle()
+        val first = repo.conversation.value.id
+        repo.addMessage(Message("image1", MessageRole.USER, "old", images = listOf("aGVsbG8=")))
+        scope.advanceUntilIdle()
+        repo.newConversation()
+        repo.addMessage(Message("image2", MessageRole.USER, "new", images = listOf("aGVsbG8=")))
+        scope.advanceUntilIdle()
+        repo.clearAllMedia()
+        scope.advanceUntilIdle()
+        assertTrue(repo.conversation.value.messages.all { it.images.isEmpty() })
+        assertTrue(repo.getConversation(first)!!.messages.all { it.images.isEmpty() })
+        assertTrue(File(dir, "images").listFiles().orEmpty().isEmpty())
+    }
+
+    @Test fun `legacy timestamps are never reported as active execution duration`() {
+        val stats = PersistentConversationRepository.computeStats(Conversation("old", createdAt = 1, updatedAt = 9_999_999))
+        assertEquals(0L, stats.durationMs)
+    }
+    @Test
+    fun `failed disk save is visible and can be retried without losing content`() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val scope = TestScope(dispatcher)
+        val dir = tempFolder.newFolder("retry_save")
+        val repo = PersistentConversationRepository(scope = scope, storageDirectory = dir, ioDispatcher = dispatcher)
+        scope.advanceUntilIdle()
+        val target = File(dir, "${repo.conversation.value.id}.json")
+        assertTrue(target.delete())
+        assertTrue(target.mkdir())
+        val blocker = File(target, "blocker").apply { writeText("blocked") }
+        repo.addMessage(Message(id = "m1", role = MessageRole.USER, content = "must survive retry"))
+        scope.advanceUntilIdle()
+        assertNotNull(repo.storageError.value)
+        assertTrue(blocker.delete())
+        assertTrue(target.delete())
+        repo.retryFailedSaves()
+        scope.advanceUntilIdle()
+        assertEquals(null, repo.storageError.value)
+        assertTrue(target.readText().contains("must survive retry"))
+    }
+    @Test
+    fun `rapid conversation switches preserve every pending conversation`() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val scope = TestScope(dispatcher)
+        val dir = tempFolder.newFolder("rapid_switch")
+        val repo = PersistentConversationRepository(scope = scope, storageDirectory = dir, ioDispatcher = dispatcher)
+        scope.advanceUntilIdle()
+        val ids = (1..4).map {
+            val id = repo.newConversation()
+            assertEquals(id, repo.conversation.value.id)
+            repo.addMessage(Message(id = "m$it", role = MessageRole.USER, content = "task-$it"))
+            id
+        }
+        scope.advanceUntilIdle()
+        ids.forEachIndexed { i, id -> assertTrue(File(dir, "$id.json").readText().contains("task-${i + 1}")) }
+    }
+
+    @Test
+    fun `pending save cannot resurrect a deleted conversation`() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val scope = TestScope(dispatcher)
+        val dir = tempFolder.newFolder("delete_pending")
+        val repo = PersistentConversationRepository(scope = scope, storageDirectory = dir, ioDispatcher = dispatcher)
+        scope.advanceUntilIdle()
+        val id = repo.conversation.value.id
+        repo.addMessage(Message(id = "m", role = MessageRole.USER, content = "delete me"))
+        repo.deleteConversation(id)
+        scope.advanceUntilIdle()
+        assertFalse(File(dir, "$id.json").exists())
+        assertFalse(repo.historyList.value.any { it.id == id })
+    }
 
     @get:Rule
     val tempFolder = TemporaryFolder()
@@ -173,6 +292,7 @@ class PersistentConversationRepositoryTest {
                     id = "a1",
                     role = MessageRole.ASSISTANT,
                     content = "",
+                    durationMs = 4000L,
                     toolCalls = listOf(
                         ToolCall(id = "tc1", name = "launch_app", arguments = "{}"),
                         ToolCall(id = "tc2", name = "tap", arguments = "{}"),

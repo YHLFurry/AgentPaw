@@ -27,6 +27,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -126,7 +127,7 @@ class SkillsViewModel(
     }
 
     fun toggleEnabled(skill: SkillDefinition) {
-        viewModelScope.launch {
+        launchStoreAction {
             store.setEnabled(skill.id, !skill.enabled)
             sync()
             notify(if (skill.enabled) "已停止「${skill.displayName}」" else "已启用「${skill.displayName}」")
@@ -134,7 +135,7 @@ class SkillsViewModel(
     }
 
     fun delete(skill: SkillDefinition) {
-        viewModelScope.launch {
+        launchStoreAction {
             store.delete(skill.id)
             sync()
             notify("已删除「${skill.displayName}」")
@@ -142,7 +143,7 @@ class SkillsViewModel(
     }
 
     fun duplicate(skill: SkillDefinition) {
-        viewModelScope.launch {
+        launchStoreAction {
             val copy = store.duplicate(skill.id)
             sync()
             notify(if (copy != null) "已复制为「${copy.displayName}」" else "复制失败")
@@ -152,7 +153,7 @@ class SkillsViewModel(
     fun exportAll(): String = store.exportJson()
 
     fun import(text: String, onDone: (Int, List<String>) -> Unit) {
-        viewModelScope.launch {
+        launchStoreAction {
             val result = store.importJson(text)
             sync()
             onDone(result.imported.size, result.errors)
@@ -214,16 +215,19 @@ class SkillsViewModel(
     }
 
     fun onDslChange(text: String) {
-        val base = _uiState.value.editing ?: return
-        val parsed = SkillDsl.parse(text, base)
-        val definition = parsed.definition
-        val issues = parsed.issues + (definition?.let { SkillValidator.validate(it) } ?: emptyList())
+        val base = _uiState.value.editing ?: SkillPresets.blankTemplate()
+        val parsed = runCatching { SkillDsl.parse(text, base) }.getOrNull()
+        val definition = parsed?.definition ?: base
+        val issues = (parsed?.issues ?: emptyList()) + SkillValidator.validate(definition)
+        val serializedJson = runCatching {
+            prettyJson.encodeToString(SkillDefinition.serializer(), definition)
+        }.getOrNull() ?: _uiState.value.jsonText
+
         _uiState.value = _uiState.value.copy(
             dslText = text,
             editing = definition,
             issues = issues,
-            jsonText = definition?.let { prettyJson.encodeToString(SkillDefinition.serializer(), it) }
-                ?: _uiState.value.jsonText,
+            jsonText = serializedJson,
         )
     }
 
@@ -244,7 +248,7 @@ class SkillsViewModel(
         }
         _uiState.value = _uiState.value.copy(
             jsonText = text,
-            editing = decoded ?: _uiState.value.editing,
+            editing = decoded ?: _uiState.value.editing ?: SkillPresets.blankTemplate(),
             issues = issues,
         )
     }
@@ -295,7 +299,7 @@ class SkillsViewModel(
             notify("还有 ${state.issues.count { it.isError }} 处错误需要先修正")
             return
         }
-        viewModelScope.launch {
+        launchStoreAction {
             val normalized = SkillValidator.normalize(
                 draft.copy(
                     // 新建技能时 source 保持空白模板的 MANUAL
@@ -401,7 +405,7 @@ class SkillsViewModel(
             notify("生成的技能还有错误，请先进入编辑器修正")
             return
         }
-        viewModelScope.launch {
+        launchStoreAction {
             val saved = store.save(
                 SkillValidator.normalize(
                     preview.copy(source = SkillSource.WISH, updatedAt = System.currentTimeMillis()),
@@ -421,6 +425,18 @@ class SkillsViewModel(
 
     private fun notify(text: String) {
         _uiState.value = _uiState.value.copy(message = text)
+    }
+
+    private fun launchStoreAction(action: suspend () -> Unit) {
+        viewModelScope.launch {
+            try {
+                action()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                notify("技能操作失败：${e.message ?: "请检查存储空间后重试"}")
+            }
+        }
     }
 
     /** 给界面展示步骤摘要用。 */

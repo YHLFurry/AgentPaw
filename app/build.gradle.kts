@@ -11,14 +11,14 @@ android {
     namespace = "com.paw.agent"
     // Miuix（miuix-core/shader 等 AAR）声明 minCompileSdk=37，故整体提升到 37；
     // SDK 37 平台已安装，AGP 8.13.2 仅会给出"推荐 36"的提示，不影响构建。
-    compileSdk = 37
+    compileSdk = providers.gradleProperty("agentpaw.compileSdk").get().toInt()
 
     defaultConfig {
         applicationId = "com.paw.agent"
         minSdk = 26
         targetSdk = 36
         versionCode = 12
-        versionName = "0.3.1"
+        versionName = rootProject.file("version.txt").readText().trim()
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

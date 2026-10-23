@@ -20,6 +20,21 @@ import org.junit.Test
  * behaviour can be verified without any network access.
  */
 class AgentTest {
+    @Test
+    fun `structured tool errors are failures and assistant ids differ across rounds`() = runTest {
+        val tool = object : AgentTool {
+            override val definition = ToolDefinition("fails", "Failure", "{}")
+            override suspend fun execute(arguments: String, context: AgentContext) = """{"status":"error","message":"permission denied"}"""
+        }
+        val client = ScriptedClient(listOf(
+            listOf(LlmChunk.Delta("trying"), LlmChunk.ToolCalls(listOf(com.paw.agent.core.model.ToolCall("c1", "fails", "{}")))),
+            listOf(LlmChunk.Delta("failed")),
+        ))
+        val events = Agent(client, ToolRegistry(listOf(tool))).run(config, listOf(user("test")), enableAdaptivePacing = false).toList()
+        assertTrue(events.filterIsInstance<AgentEvent.ToolFinished>().single().result.isError)
+        val deltaIds = events.filterIsInstance<AgentEvent.AssistantDelta>().map { it.message.id }
+        assertEquals(2, deltaIds.distinct().size)
+    }
 
     private val config = LlmConfig(
         baseUrl = "https://example.test/v1",
@@ -85,12 +100,19 @@ class AgentTest {
     @Test
     fun `deltas accumulate into the assistant message`() = runTest {
         val client = ScriptedClient(listOf(listOf(LlmChunk.Delta("a"), LlmChunk.Delta("b"), LlmChunk.Delta("c"))))
-        val agent = Agent(client)
+        val agent = Agent(client, streamUpdateIntervalMs = 0)
 
         val events = agent.run(config, listOf(user("hi"))).toList()
         val deltas = events.filterIsInstance<AgentEvent.AssistantDelta>()
 
         assertEquals(listOf("a", "ab", "abc"), deltas.map { it.message.content })
+    }
+
+    @Test fun `stream batching retains the final text while bounding UI emissions`() = runTest {
+        val client = ScriptedClient(listOf((1..1000).map { LlmChunk.Delta("x") }))
+        val events = Agent(client, streamUpdateIntervalMs = 60_000).run(config, listOf(user("hi"))).toList()
+        assertTrue(events.filterIsInstance<AgentEvent.AssistantDelta>().size <= 2)
+        assertEquals("x".repeat(1000), events.filterIsInstance<AgentEvent.Completed>().single().message.content)
     }
 
     @Test
@@ -200,23 +222,22 @@ class AgentTest {
     }
 
     @Test
-    fun `setting maxToolRounds to 0 safely defaults to bounded rounds and prevents infinite loop`() = runTest {
+    fun `setting maxToolRounds to 0 allows unlimited rounds until completed`() = runTest {
         val toolCall = com.paw.agent.core.model.ToolCall("id", "echo", "{}")
-        // 10 turns of tool calls followed by final answer (more than default 8)
+        // 10 turns of tool calls followed by final answer
         val script = List(10) { listOf(LlmChunk.ToolCalls(listOf(toolCall))) } +
             listOf(listOf(LlmChunk.Delta("final answer")))
         val client = ScriptedClient(script)
-        // Passing 0 should be safely bounded to DEFAULT_MAX_TOOL_ROUNDS (8)
+        // Passing 0 should be treated as unlimited steps
         val agent = Agent(client, ToolRegistry(listOf(EchoTool())), maxToolRounds = 0)
 
         val events = agent.run(config, listOf(user("go"))).toList()
 
-        val failed = events.filterIsInstance<AgentEvent.Failed>().singleOrNull()
-        org.junit.Assert.assertNotNull("Should fail safely at max steps instead of looping indefinitely", failed)
-        val errorText = failed!!.message.error ?: failed.message.content
-        assertTrue(errorText.contains("最大执行步数限制"))
-        // 1 initial call + 8 tool rounds
-        assertEquals(9, client.callCount)
+        val completed = events.filterIsInstance<AgentEvent.Completed>().singleOrNull()
+        org.junit.Assert.assertNotNull("Should complete successfully without step cap when set to 0", completed)
+        assertEquals("final answer", completed!!.message.content)
+        // 1 initial call + 10 tool rounds = 11 calls
+        assertEquals(11, client.callCount)
     }
 
     @Test

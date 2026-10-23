@@ -15,6 +15,10 @@ import kotlinx.coroutines.job
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.MediaType.Companion.toMediaType
@@ -23,6 +27,8 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import java.io.IOException
+import java.io.EOFException
+import com.paw.agent.core.io.BoundedIO
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
@@ -82,18 +88,11 @@ class OpenAiCompatibleClient(
         val toolNames = LinkedHashMap<Int, String>()
         val toolIds = LinkedHashMap<Int, String>()
         var sawContent = false
+        var receivedChars = 0L
 
-        val clientForCall = if (config.timeoutSeconds in 5..600) {
-            httpClient.newBuilder()
-                .connectTimeout(config.timeoutSeconds.toLong().coerceAtMost(30), TimeUnit.SECONDS)
-                .readTimeout(config.timeoutSeconds.toLong(), TimeUnit.SECONDS)
-                .writeTimeout(config.timeoutSeconds.toLong(), TimeUnit.SECONDS)
-                .build()
-        } else {
-            httpClient
-        }
+        val clientForCall = clientForConfig(config)
         val call = clientForCall.newCall(httpRequest)
-        currentCoroutineContext().job.invokeOnCompletion { cause ->
+        val cancellationHandle = currentCoroutineContext().job.invokeOnCompletion { cause ->
             if (cause is kotlinx.coroutines.CancellationException) {
                 call.cancel()
             }
@@ -109,7 +108,7 @@ class OpenAiCompatibleClient(
                         }
 
                         override fun onResponse(call: Call, response: Response) {
-                            cont.resume(response)
+                            cont.resume(response) { _, abandoned, _ -> abandoned.close() }
                         }
                     })
                 }
@@ -125,13 +124,13 @@ class OpenAiCompatibleClient(
             response.use {
                 if (!response.isSuccessful) {
                     // Safe to consume the body here: this response is not a stream.
-                    throw response.toLlmException(response.body?.string().orEmpty())
+                    throw response.toLlmException(readBody(response.body))
                 }
 
                 val body = response.body ?: throw LlmException.EmptyResponse()
 
                 if (!config.stream) {
-                    val text = body.string()
+                    val text = readBody(body)
                     val parsed = runCatching {
                         json.decodeFromString(ChatCompletionResponse.serializer(), text)
                     }.getOrElse { throw LlmException.Malformed(it) }
@@ -164,7 +163,12 @@ class OpenAiCompatibleClient(
                 val source = body.source()
                 var malformedCount = 0
                 while (!source.exhausted()) {
-                    val line = source.readUtf8Line() ?: break
+                    val line = try {
+                        source.readUtf8LineStrict(1024L * 1024)
+                    } catch (e: EOFException) {
+                        if (source.buffer.size > 1024L * 1024) throw LlmException.Malformed(IOException("SSE line exceeds 1 MB"))
+                        source.readUtf8Line()
+                    } ?: break
                     if (!line.startsWith(SSE_DATA_PREFIX)) continue
 
                     val data = line.removePrefix(SSE_DATA_PREFIX).trim()
@@ -181,6 +185,11 @@ class OpenAiCompatibleClient(
                     chunk.error?.let { throw LlmException.Http(200, it.describe()) }
 
                     val choice: Choice = chunk.choices.firstOrNull() ?: continue
+                    receivedChars += (choice.delta?.content?.length ?: 0) +
+                        (choice.delta?.toolCalls?.sumOf { it.function?.arguments?.length ?: 0 } ?: 0)
+                    if (receivedChars > 4L * 1024 * 1024 || toolArgs.size > 256) {
+                        throw LlmException.Malformed(IOException("Model response exceeds resource budget"))
+                    }
 
                     choice.delta?.content?.takeIf { it.isNotEmpty() }?.let {
                         sawContent = true
@@ -210,6 +219,7 @@ class OpenAiCompatibleClient(
                 emit(LlmChunk.Done(null, null))
             }
         } finally {
+            cancellationHandle.dispose()
             call.cancel()
         }
     }.flowOn(Dispatchers.IO)
@@ -240,7 +250,7 @@ class OpenAiCompatibleClient(
                     .apply { applyAuth(config) }
                     .build()
 
-                val call = httpClient.newCall(request)
+                val call = clientForConfig(config).newCall(request)
                 val response = try {
                     suspendCancellableCoroutine<Response> { cont ->
                         cont.invokeOnCancellation { call.cancel() }
@@ -250,7 +260,7 @@ class OpenAiCompatibleClient(
                             }
 
                             override fun onResponse(call: Call, response: Response) {
-                                cont.resume(response)
+                                cont.resume(response) { _, abandoned, _ -> abandoned.close() }
                             }
                         })
                     }
@@ -264,12 +274,110 @@ class OpenAiCompatibleClient(
                 }
                 response.use {
                     if (!response.isSuccessful) {
-                        throw response.toLlmException(response.body?.string().orEmpty())
+                        throw response.toLlmException(readBody(response.body))
                     }
                 }
                 Unit
             }
         }
+
+    override suspend fun listModels(config: LlmConfig): Result<List<String>> =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                if (config.baseUrl.isBlank()) {
+                    throw LlmException.NotConfigured("Base URL 不能为空")
+                }
+                val policyDecision = networkPolicy.evaluate(config.baseUrl)
+                if (!policyDecision.allowed) {
+                    throw LlmException.NotConfigured(
+                        policyDecision.reason ?: "网络策略拦截了此地址",
+                    )
+                }
+
+                val url = modelsUrl(config.baseUrl)
+
+                val request = Request.Builder()
+                    .url(url)
+                    .get()
+                    .apply { applyAuth(config) }
+                    .build()
+
+                val clientForCall = clientForConfig(config)
+                val call = clientForCall.newCall(request)
+                val response = suspendCancellableCoroutine<Response> { cont ->
+                    cont.invokeOnCancellation { call.cancel() }
+                    call.enqueue(object : Callback {
+                        override fun onFailure(call: Call, e: IOException) {
+                            if (cont.isActive) cont.resumeWithException(e)
+                        }
+
+                        override fun onResponse(call: Call, response: Response) {
+                            cont.resume(response) { _, abandoned, _ -> abandoned.close() }
+                        }
+                    })
+                }
+
+                val body = response.use { resp ->
+                    if (!resp.isSuccessful) {
+                        throw resp.toLlmException(readBody(resp.body))
+                    }
+                    readBody(resp.body)
+                }
+
+                parseModelsFromJson(body).ifEmpty {
+                    throw LlmException.Http(200, "端点未返回任何可用模型")
+                }
+            }
+        }
+
+    private fun readBody(body: okhttp3.ResponseBody?): String = body?.charStream()?.use {
+        BoundedIO.readText(it, 4 * 1024 * 1024)
+    }.orEmpty()
+
+    private fun clientForConfig(config: LlmConfig): OkHttpClient = httpClient.newBuilder()
+        // 请求中包含凭据和对话；禁止重定向绕过已校验的地址与传输策略。
+        .followRedirects(false)
+        .followSslRedirects(false)
+        .connectTimeout(config.timeoutSeconds.coerceIn(5, 30).toLong(), TimeUnit.SECONDS)
+        .readTimeout(config.timeoutSeconds.coerceIn(5, 600).toLong(), TimeUnit.SECONDS)
+        .writeTimeout(config.timeoutSeconds.coerceIn(5, 600).toLong(), TimeUnit.SECONDS)
+        .callTimeout(config.timeoutSeconds.coerceIn(5, 600).toLong(), TimeUnit.SECONDS)
+        .build()
+
+    private fun parseModelsFromJson(jsonStr: String): List<String> {
+        return runCatching {
+            val root = json.parseToJsonElement(jsonStr).jsonObject
+            val list = mutableListOf<String>()
+
+            // 1. 标准 OpenAI: {"data": [{"id": "gpt-4o"}]}
+            root["data"]?.let { dataElement ->
+                runCatching {
+                    dataElement.jsonArray.forEach { item ->
+                        val obj = item.jsonObject
+                        val id = obj["id"]?.jsonPrimitive?.contentOrNull
+                            ?: obj["name"]?.jsonPrimitive?.contentOrNull
+                        if (!id.isNullOrBlank()) list.add(id)
+                    }
+                }
+            }
+
+            // 2. Ollama / Gemini 兼容: {"models": [{"name": "llama3"}]}
+            if (list.isEmpty()) {
+                root["models"]?.let { modelsElement ->
+                    runCatching {
+                        modelsElement.jsonArray.forEach { item ->
+                            val obj = item.jsonObject
+                            val id = obj["name"]?.jsonPrimitive?.contentOrNull
+                                ?: obj["id"]?.jsonPrimitive?.contentOrNull
+                            if (!id.isNullOrBlank()) list.add(id)
+                        }
+                    }
+                }
+            }
+
+            list.filter { it.isNotBlank() }.distinct().sorted()
+        }.getOrDefault(emptyList())
+    }
 
     private fun Request.Builder.applyAuth(config: LlmConfig): Request.Builder = apply {
         if (config.apiKey.isNotBlank()) {
@@ -325,12 +433,23 @@ class OpenAiCompatibleClient(
 
         /** Joins a user-entered base URL with the completions path. */
         fun completionsUrl(baseUrl: String): String {
-            val trimmed = baseUrl.trimEnd('/')
+            val trimmed = baseUrl.trim().trimEnd('/')
             return if (trimmed.endsWith("/chat/completions")) {
                 trimmed
             } else {
                 "$trimmed/chat/completions"
             }
+        }
+
+        /** Resolves the model-list endpoint from either a base URL or a completions URL. */
+        fun modelsUrl(baseUrl: String): String {
+            val trimmed = baseUrl.trim().trimEnd('/')
+            val base = when {
+                trimmed.endsWith("/chat/completions") -> trimmed.removeSuffix("/chat/completions")
+                trimmed.endsWith("/models") -> return trimmed
+                else -> trimmed
+            }
+            return "$base/models"
         }
 
         fun defaultHttpClient(): OkHttpClient = OkHttpClient.Builder()

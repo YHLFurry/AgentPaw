@@ -54,6 +54,11 @@ data class LlmSettingsUiState(
     val riskBypassUntil: Long = 0L,
     /** 高危开关被拒绝时的原因，展示一次后清空。 */
     val riskNotice: String? = null,
+    // ---- 联网拉取模型列表状态 ----
+    val isFetchingModels: Boolean = false,
+    val fetchedModels: List<String> = emptyList(),
+    val fetchModelsError: String? = null,
+    val fetchModelsSuccessMessage: String? = null,
 ) {
     /** No inline errors: safe to persist. */
     val isValid: Boolean
@@ -112,7 +117,7 @@ class LlmSettingsViewModel(
                         temperature = llm.temperature,
                         topP = llm.topP,
                         maxTokens = llm.maxTokens,
-                        maxToolRounds = (if (llm.maxToolRounds <= 0) 15 else llm.maxToolRounds).coerceIn(1, 100),
+                        maxToolRounds = llm.maxToolRounds.coerceAtLeast(0),
                         visionResolutionMode = llm.visionResolutionMode,
                         pacingProfile = llm.pacingProfile,
                         timeoutSeconds = llm.timeoutSeconds,
@@ -212,7 +217,7 @@ class LlmSettingsViewModel(
     }
 
     fun onMaxToolRoundsChange(value: Int) {
-        val clamped = if (value <= 0) 15 else value.coerceIn(1, 100)
+        val clamped = value.coerceAtLeast(0)
         _uiState.value = _uiState.value.copy(maxToolRounds = clamped)
         viewModelScope.launch {
             settingsRepository.updateLlm { it.copy(maxToolRounds = clamped) }
@@ -284,6 +289,43 @@ class LlmSettingsViewModel(
                     )
                 }
         }
+    }
+
+    /** 联网实时拉取当前端点的可用模型列表 (GET /v1/models) */
+    fun fetchModels() {
+        val state = _uiState.value
+        if (state.baseUrl.isBlank()) {
+            _uiState.value = state.copy(fetchModelsError = "请先填写 Base URL 接口地址")
+            return
+        }
+        _uiState.value = state.copy(
+            isFetchingModels = true,
+            fetchModelsError = null,
+            fetchModelsSuccessMessage = null,
+        )
+        viewModelScope.launch {
+            val config = state.toConfig()
+            llmClient.listModels(config)
+                .onSuccess { models ->
+                    _uiState.value = _uiState.value.copy(
+                        isFetchingModels = false,
+                        fetchedModels = models,
+                        fetchModelsSuccessMessage = "成功拉取到 ${models.size} 个可用模型",
+                        fetchModelsError = null,
+                    )
+                }
+                .onFailure { error ->
+                    _uiState.value = _uiState.value.copy(
+                        isFetchingModels = false,
+                        fetchModelsError = error.message ?: "拉取模型列表失败，请检查网络或鉴权密钥",
+                        fetchModelsSuccessMessage = null,
+                    )
+                }
+        }
+    }
+
+    fun clearFetchModelsMessage() {
+        _uiState.value = _uiState.value.copy(fetchModelsError = null, fetchModelsSuccessMessage = null)
     }
 
     fun resetToDefaults() {

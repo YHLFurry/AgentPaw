@@ -87,7 +87,7 @@ open class RootController {
         if (!suExists) {
             runCatching {
                 val whichProc = ProcessBuilder("sh", "-c", "which su").redirectErrorStream(true).start()
-                whichProc.waitFor(800, TimeUnit.MILLISECONDS)
+                if (!whichProc.waitFor(800, TimeUnit.MILLISECONDS)) whichProc.destroyForcibly()
             }
             // 注意：在 KernelSU / APatch / Magisk Zygisk 环境下，受限应用沙箱可能无法 stat 探测 su 文件，
             // 因此不在此直接 return false，而是直接尝试 ProcessBuilder("su") 进行最终判定。
@@ -95,12 +95,12 @@ open class RootController {
 
         return runCatching {
             val process = ProcessBuilder("su", "-c", "id").redirectErrorStream(true).start()
-            val output = process.inputStream.bufferedReader().use { it.readText() }
             val finished = process.waitFor(timeoutMs, TimeUnit.MILLISECONDS)
             if (!finished) {
                 process.destroyForcibly()
                 return false
             }
+            val output = process.inputStream.bufferedReader().use { com.paw.agent.core.io.BoundedIO.readText(it, 4096) }
             output.contains("uid=0")
         }.getOrDefault(false)
     }
@@ -112,11 +112,10 @@ open class RootController {
         var process: Process? = null
         try {
             withTimeout(timeoutMs) {
-                runInterruptible {
-                    val pb = ProcessBuilder("su", "-c", "$cmd 2>&1")
-                    val p = pb.start()
-                    process = p
-                    val output = p.inputStream.bufferedReader().use { it.readText() }
+                val p = ProcessBuilder("su", "-c", cmd).redirectErrorStream(true).start()
+                process = p
+                com.paw.agent.core.io.ProcessLifetime.read(p) {
+                    val output = p.inputStream.bufferedReader().use { com.paw.agent.core.io.BoundedIO.readText(it) }
                     p.waitFor()
                     val trimmed = output.trim()
                     if (p.exitValue() != 0) {
@@ -156,9 +155,9 @@ open class RootController {
         var process: Process? = null
         try {
             withTimeout(timeoutMs) {
-                runInterruptible {
-                    val p = Runtime.getRuntime().exec(arrayOf("su", "-c", "screencap -p"))
-                    process = p
+                val p = Runtime.getRuntime().exec(arrayOf("su", "-c", "screencap -p"))
+                process = p
+                com.paw.agent.core.io.ProcessLifetime.read(p) {
                     val bytes = readAllBytes(p.inputStream)
                     p.waitFor()
                     if (bytes.isNotEmpty() && p.exitValue() == 0) {
@@ -278,15 +277,7 @@ open class RootController {
         Pair(pkg, activity)
     }
 
-    private fun readAllBytes(input: InputStream): ByteArray {
-        val buffer = ByteArrayOutputStream()
-        val data = ByteArray(16384)
-        var n: Int
-        while (input.read(data, 0, data.size).also { n = it } != -1) {
-            buffer.write(data, 0, n)
-        }
-        return buffer.toByteArray()
-    }
+    private fun readAllBytes(input: InputStream): ByteArray = com.paw.agent.core.io.BoundedIO.readBytes(input)
 
     /**
      * 通过 ROOT 权限静默一键开启无障碍服务，自动穿透受限设置与悬浮窗拦截。

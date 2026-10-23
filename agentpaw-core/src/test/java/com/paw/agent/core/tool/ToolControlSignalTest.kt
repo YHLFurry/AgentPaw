@@ -5,6 +5,14 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ToolControlSignalTest {
+    @Test
+    fun `ordinary text and false flags cannot request confirmation or pause`() {
+        listOf(
+            """{"status":"success","requires_confirmation":false}""",
+            """{"status":"success","message":"[SAFETY PAUSE] is a documented marker"}""",
+            """{"status":"success","example":{"requires_confirmation":true}}""",
+        ).forEach { assertEquals(ToolControlSignal.None, ToolControlSignal.parse(it)) }
+    }
 
     @Test
     fun `parse returns SafetyPause when is_safety_pause is true`() {

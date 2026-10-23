@@ -22,6 +22,7 @@ import androidx.compose.material.icons.outlined.TouchApp
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -60,8 +61,11 @@ fun TaskCompareScreen(
     modifier: Modifier = Modifier,
 ) {
     val historyList by container.conversationRepository.historyList.collectAsStateWithLifecycle()
-    val conv1 = remember(historyList, id1) { historyList.firstOrNull { it.id == id1 } }
-    val conv2 = remember(historyList, id2) { historyList.firstOrNull { it.id == id2 } }
+    val loaded by produceState<Pair<Conversation?, Conversation?>>(null to null, historyList, id1, id2) {
+        value = container.conversationRepository.getConversation(id1) to container.conversationRepository.getConversation(id2)
+    }
+    val conv1 = loaded.first
+    val conv2 = loaded.second
     val scrollState = rememberScrollState()
 
     AppScaffold(
@@ -90,7 +94,7 @@ fun TaskCompareScreen(
                     .padding(innerPadding),
                 contentAlignment = Alignment.Center,
             ) {
-                AppText("对比数据加载失败或部分记录已被删除")
+                AppText(stringResource(R.string.history_compare_missing))
             }
         } else {
             val stats1 = remember(conv1) { PersistentConversationRepository.computeStats(conv1) }
@@ -115,12 +119,12 @@ fun TaskCompareScreen(
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     TaskSummaryBox(
-                        tag = "任务 A",
+                        tag = stringResource(R.string.history_task_a),
                         stats = stats1,
                         modifier = Modifier.weight(1f),
                     )
                     TaskSummaryBox(
-                        tag = "任务 B",
+                        tag = stringResource(R.string.history_task_b),
                         stats = stats2,
                         modifier = Modifier.weight(1f),
                     )
@@ -129,12 +133,12 @@ fun TaskCompareScreen(
                 Spacer(Modifier.height(20.dp))
 
                 // 核心指标量化比对
-                SettingsGroupLabel("核心量化指标对比")
+                SettingsGroupLabel(stringResource(R.string.history_metrics))
                 SettingsCard {
                     CompareMetricRow(
-                        title = "总执行步数",
-                        val1Text = "${stats1.stepCount} 步",
-                        val2Text = "${stats2.stepCount} 步",
+                        title = stringResource(R.string.history_total_steps),
+                        val1Text = stringResource(R.string.history_steps_value, stats1.stepCount),
+                        val2Text = stringResource(R.string.history_steps_value_b, stats2.stepCount),
                         progress = if (stats1.stepCount + stats2.stepCount > 0) {
                             stats1.stepCount.toFloat() / (stats1.stepCount + stats2.stepCount)
                         } else 0.5f,
@@ -143,9 +147,9 @@ fun TaskCompareScreen(
                     SettingsRowDivider()
 
                     CompareMetricRow(
-                        title = "总执行耗时",
-                        val1Text = "${stats1.durationMs / 1000f}s",
-                        val2Text = "${stats2.durationMs / 1000f}s",
+                        title = stringResource(R.string.history_active_duration),
+                        val1Text = if (stats1.durationMs > 0) stringResource(R.string.history_seconds, stats1.durationMs / 1000f) else stringResource(R.string.history_duration_unknown),
+                        val2Text = if (stats2.durationMs > 0) stringResource(R.string.history_seconds, stats2.durationMs / 1000f) else stringResource(R.string.history_duration_unknown),
                         progress = if (stats1.durationMs + stats2.durationMs > 0) {
                             stats1.durationMs.toFloat() / (stats1.durationMs + stats2.durationMs)
                         } else 0.5f,
@@ -155,12 +159,12 @@ fun TaskCompareScreen(
                 Spacer(Modifier.height(20.dp))
 
                 // 工具调用分布对比
-                SettingsGroupLabel("工具调用分布对比 (A vs B)")
+                SettingsGroupLabel(stringResource(R.string.history_tool_distribution))
                 SettingsCard {
                     val allToolNames = (stats1.toolCounts.keys + stats2.toolCounts.keys).distinct().sorted()
                     if (allToolNames.isEmpty()) {
                         Box(modifier = Modifier.padding(16.dp)) {
-                            AppText("两项任务均未发起工具调用", color = AppTheme.colors.onSurfaceVariant)
+                            AppText(stringResource(R.string.history_no_tools), color = AppTheme.colors.onSurfaceVariant)
                         }
                     } else {
                         allToolNames.forEachIndexed { index, toolName ->
@@ -180,7 +184,7 @@ fun TaskCompareScreen(
                                     modifier = Modifier.weight(1.5f),
                                 )
                                 AppText(
-                                    text = "$c1 次",
+                                    text = stringResource(R.string.history_count_a, c1),
                                     style = AppTheme.typography.bodyMedium,
                                     color = AppTheme.colors.primary,
                                     fontWeight = FontWeight.Bold,
@@ -188,7 +192,7 @@ fun TaskCompareScreen(
                                     textAlign = TextAlign.Center,
                                 )
                                 AppText(
-                                    text = "$c2 次",
+                                    text = stringResource(R.string.history_count_b, c2),
                                     style = AppTheme.typography.bodyMedium,
                                     color = AppTheme.colors.outline,
                                     fontWeight = FontWeight.Bold,
@@ -206,7 +210,7 @@ fun TaskCompareScreen(
                 Spacer(Modifier.height(20.dp))
 
                 // 执行步骤轨迹对比
-                SettingsGroupLabel("关键操作执行轨迹对比")
+                SettingsGroupLabel(stringResource(R.string.history_execution_timeline))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -253,7 +257,7 @@ private fun TaskSummaryBox(
             }
             Spacer(Modifier.height(6.dp))
             AppText(
-                text = stats.title.ifBlank { "任务" },
+                text = stats.title.ifBlank { stringResource(R.string.history_task) },
                 style = AppTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold,
                 maxLines = 1,
@@ -316,13 +320,13 @@ private fun StepTimelineColumn(
     ) {
         Column(modifier = Modifier.padding(10.dp)) {
             AppText(
-                text = "步骤序列 (${toolSteps.size})",
+                text = stringResource(R.string.history_step_sequence, toolSteps.size),
                 style = AppTheme.typography.labelMedium,
                 fontWeight = FontWeight.Bold,
             )
             Spacer(Modifier.height(8.dp))
             if (toolSteps.isEmpty()) {
-                AppText("无操作步骤", style = AppTheme.typography.bodySmall, color = AppTheme.colors.onSurfaceVariant)
+                AppText(stringResource(R.string.history_no_steps), style = AppTheme.typography.bodySmall, color = AppTheme.colors.onSurfaceVariant)
             } else {
                 toolSteps.forEachIndexed { idx, msg ->
                     AppText(
