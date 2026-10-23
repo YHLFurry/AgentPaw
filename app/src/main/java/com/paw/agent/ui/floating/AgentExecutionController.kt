@@ -9,17 +9,16 @@ import kotlinx.coroutines.flow.asStateFlow
  */
 object AgentExecutionController {
 
-    const val UNLIMITED_STEPS = 0
+    const val DEFAULT_MAX_STEPS = 15
+    const val HARD_CAP_MAX_STEPS = 100
 
     data class ExecutionState(
         val isRunning: Boolean = false,
         val currentStep: Int = 0,
-        val maxSteps: Int = 15,
+        val maxSteps: Int = DEFAULT_MAX_STEPS,
         val currentAction: String = "",
         val isPaused: Boolean = false,
-    ) {
-        val isUnlimited: Boolean get() = maxSteps <= UNLIMITED_STEPS
-    }
+    )
 
     private val _state = MutableStateFlow(ExecutionState())
     val state: StateFlow<ExecutionState> = _state.asStateFlow()
@@ -77,20 +76,22 @@ object AgentExecutionController {
     }
 
     fun updateProgress(step: Int, maxSteps: Int, action: String) {
+        val safeMax = if (maxSteps <= 0) DEFAULT_MAX_STEPS else maxSteps.coerceIn(1, HARD_CAP_MAX_STEPS)
         _state.value = ExecutionState(
             isRunning = true,
             currentStep = step,
-            maxSteps = maxSteps,
+            maxSteps = safeMax,
             currentAction = action,
             isPaused = false,
         )
     }
 
     fun markStarted(maxSteps: Int) {
+        val safeMax = if (maxSteps <= 0) DEFAULT_MAX_STEPS else maxSteps.coerceIn(1, HARD_CAP_MAX_STEPS)
         _state.value = ExecutionState(
             isRunning = true,
             currentStep = 1,
-            maxSteps = maxSteps,
+            maxSteps = safeMax,
             currentAction = "正在分析屏幕与意图...",
             isPaused = false,
         )

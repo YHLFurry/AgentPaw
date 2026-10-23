@@ -3,7 +3,10 @@ package com.paw.agent.ui.settings
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
+import kotlin.math.roundToInt
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -89,6 +92,8 @@ data class LlmSettingsActions(
     val onMaxTokensChange: (Int) -> Unit,
     val onMaxToolRoundsChange: (Int) -> Unit,
     val onVisionResolutionModeChange: (String) -> Unit,
+    val onTimeoutSecondsChange: (Int) -> Unit = {},
+    val onPacingProfileChange: (String) -> Unit = {},
     val onStreamChange: (Boolean) -> Unit,
     val onSystemPromptChange: (String) -> Unit,
     val onToggleApiKeyVisibility: () -> Unit,
@@ -326,6 +331,51 @@ fun LlmServicePage(
                     isError = state.modelError != null,
                     supportingText = state.modelError?.let { errorText(it) },
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+
+                val suggestions = state.provider.suggestedModels
+                if (suggestions.isNotEmpty()) {
+                    Spacer(Modifier.height(8.dp))
+                    AppText(
+                        text = stringResource(R.string.settings_model_quick_select),
+                        style = AppTheme.typography.labelSmall,
+                        color = AppTheme.colors.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        suggestions.forEach { name ->
+                            val isSelected = state.model.trim().equals(name, ignoreCase = true)
+                            SelectableCell(
+                                label = name,
+                                isSelected = isSelected,
+                                onClick = { actions.onModelChange(name) },
+                                height = 32,
+                                corner = 6,
+                            )
+                        }
+                    }
+                }
+            }
+
+            SettingsRowDivider()
+
+            SettingsBlock {
+                AppTextField(
+                    value = state.timeoutSeconds.toString(),
+                    onValueChange = {
+                        val num = it.filter(Char::isDigit).toIntOrNull()
+                        if (num != null) actions.onTimeoutSecondsChange(num)
+                    },
+                    label = stringResource(R.string.settings_timeout_seconds),
+                    supportingText = stringResource(R.string.settings_timeout_seconds_summary),
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
@@ -1035,19 +1085,16 @@ private fun StepSettingsControl(
     maxToolRounds: Int,
     onMaxToolRoundsChange: (Int) -> Unit,
 ) {
+    val boundedRounds = if (maxToolRounds <= 0) 15 else maxToolRounds.coerceIn(1, 100)
     // 计数规则：每 5 步记为 1 格
-    val currentGrids = if (maxToolRounds <= 0) {
-        stringResource(R.string.settings_max_rounds_unlimited_short)
+    val currentGrids = if (boundedRounds % 5 == 0) {
+        stringResource(R.string.settings_max_rounds_grids, boundedRounds / 5)
     } else {
-        if (maxToolRounds % 5 == 0) {
-            stringResource(R.string.settings_max_rounds_grids, maxToolRounds / 5)
-        } else {
-            String.format(java.util.Locale.US, "%.1f 格", maxToolRounds / 5.0)
-        }
+        String.format(java.util.Locale.US, "%.1f 格", boundedRounds / 5.0)
     }
 
-    var inputText by remember(maxToolRounds) {
-        mutableStateOf(if (maxToolRounds <= 0) "0" else maxToolRounds.toString())
+    var inputText by remember(boundedRounds) {
+        mutableStateOf(boundedRounds.toString())
     }
 
     Column(Modifier.fillMaxWidth()) {
@@ -1067,23 +1114,11 @@ private fun StepSettingsControl(
             Spacer(Modifier.width(10.dp))
             AppSurface(
                 shape = RoundedCornerShape(8.dp),
-                color = if (maxToolRounds <= 0) {
-                    AppTheme.colors.tertiaryContainer
-                } else {
-                    AppTheme.colors.primaryContainer
-                },
-                contentColor = if (maxToolRounds <= 0) {
-                    AppTheme.colors.onTertiaryContainer
-                } else {
-                    AppTheme.colors.onPrimaryContainer
-                },
+                color = AppTheme.colors.primaryContainer,
+                contentColor = AppTheme.colors.onPrimaryContainer,
             ) {
                 AppText(
-                    text = if (maxToolRounds <= 0) {
-                        stringResource(R.string.settings_max_rounds_unlimited)
-                    } else {
-                        stringResource(R.string.settings_max_rounds_value, maxToolRounds, currentGrids)
-                    },
+                    text = stringResource(R.string.settings_max_rounds_value, boundedRounds, currentGrids),
                     style = AppTheme.typography.labelMedium,
                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                 )
@@ -1099,31 +1134,28 @@ private fun StepSettingsControl(
 
         Spacer(Modifier.height(12.dp))
 
-        // 自定义步数输入框
+        // 自定义步数输入框 (严格限制 1~100 整数)
         AppTextField(
             value = inputText,
             onValueChange = { newStr ->
                 val filtered = newStr.filter { it.isDigit() }
                 inputText = filtered
                 val parsed = filtered.toIntOrNull()
-                if (parsed != null && parsed >= 0) {
+                if (parsed != null && parsed in 1..100) {
                     onMaxToolRoundsChange(parsed)
                 }
             },
             label = stringResource(R.string.settings_max_rounds_custom),
             placeholder = stringResource(R.string.settings_max_rounds_custom_hint),
             supportingText = run {
-                val num = inputText.toIntOrNull() ?: 0
-                if (num <= 0) {
-                    stringResource(R.string.settings_max_rounds_convert_unlimited)
+                val num = inputText.toIntOrNull() ?: boundedRounds
+                val safeNum = num.coerceIn(1, 100)
+                val g = if (safeNum % 5 == 0) {
+                    stringResource(R.string.settings_max_rounds_grids, safeNum / 5)
                 } else {
-                    val g = if (num % 5 == 0) {
-                        stringResource(R.string.settings_max_rounds_grids, num / 5)
-                    } else {
-                        String.format(java.util.Locale.US, "%.1f 格", num / 5.0)
-                    }
-                    stringResource(R.string.settings_max_rounds_convert, num, g)
+                    String.format(java.util.Locale.US, "%.1f 格", safeNum / 5.0)
                 }
+                stringResource(R.string.settings_max_rounds_convert, safeNum, g)
             },
             keyboardOptions = KeyboardOptions(
                 keyboardType = KeyboardType.Number,
@@ -1135,20 +1167,18 @@ private fun StepSettingsControl(
 
         Spacer(Modifier.height(12.dp))
 
-        // 快速预设按钮
+        // 快速预设按钮 (推荐步数预设，消除无上限)
         AppText(
             text = stringResource(R.string.settings_max_rounds_presets),
             style = AppTheme.typography.labelSmall,
             color = AppTheme.colors.onSurfaceVariant,
         )
         Spacer(Modifier.height(6.dp))
-        // Three per row: five cells across a phone width squeezed the longer
-        // labels ("50步(10格)") into an ellipsis.
         val presets = listOf(
-            0 to R.string.settings_max_rounds_preset_unlimited,
+            5 to R.string.settings_max_rounds_preset_5,
             10 to R.string.settings_max_rounds_preset_10,
-            20 to R.string.settings_max_rounds_preset_20,
-            30 to R.string.settings_max_rounds_preset_30,
+            15 to R.string.settings_max_rounds_preset_15,
+            25 to R.string.settings_max_rounds_preset_25,
             50 to R.string.settings_max_rounds_preset_50,
         )
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -1158,8 +1188,7 @@ private fun StepSettingsControl(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     rowItems.forEach { (stepVal, labelRes) ->
-                        val isSelected = (stepVal == 0 && maxToolRounds <= 0) ||
-                            (stepVal > 0 && maxToolRounds == stepVal)
+                        val isSelected = boundedRounds == stepVal
                         SelectableCell(
                             label = stringResource(labelRes),
                             isSelected = isSelected,
@@ -1172,8 +1201,9 @@ private fun StepSettingsControl(
                             corner = 8,
                         )
                     }
-                    // Keep the trailing row aligned when it is not full.
-                    repeat(3 - rowItems.size) { Spacer(Modifier.weight(1f)) }
+                    if (rowItems.size < 3) {
+                        Spacer(Modifier.weight((3 - rowItems.size).toFloat()))
+                    }
                 }
             }
         }

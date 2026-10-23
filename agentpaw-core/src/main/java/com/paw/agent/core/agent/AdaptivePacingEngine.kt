@@ -54,28 +54,38 @@ object AdaptivePacingEngine {
         var reason = "常规操作缓冲"
 
         when {
+            // 只读感知类工具（不触发屏幕动画/状态流转，立即返回下步决策，彻底消除时间浪费）
+            toolName.contains("screenshot") ||
+            toolName.contains("screen_state") ||
+            toolName.contains("inspect") ||
+            toolName.contains("query") ||
+            toolName.contains("memory") ||
+            toolName.contains("clipboard") -> {
+                return PacingDecision(0L, "感知工具瞬时响应 (0ms)")
+            }
+
             toolName.contains("launch_app") || toolName.contains("launch") -> {
-                baseDelay = 1800L
+                baseDelay = 1200L
                 reason = "应用启动与界面加载渲染"
             }
 
             toolName.contains("deep_link") -> {
-                baseDelay = 1400L
+                baseDelay = 1000L
                 reason = "跨进程路由跳转过渡"
             }
 
             toolName.contains("swipe") || toolName.contains("scroll") -> {
-                baseDelay = 750L
+                baseDelay = 500L
                 reason = "滑动惯性平息与列表项加载"
             }
 
             toolName.contains("input") || toolName.contains("type") -> {
-                baseDelay = 450L
+                baseDelay = 250L
                 reason = "软键盘输入与文本框焦点响应"
             }
 
             toolName.contains("key") || toolName.contains("back") || toolName.contains("home") -> {
-                baseDelay = 600L
+                baseDelay = 350L
                 reason = "系统按键与窗口过渡动画"
             }
 
@@ -83,10 +93,10 @@ object AdaptivePacingEngine {
                 // 检查点击目标是否可能引起页面路由或网络加载
                 val isNavigational = checkNavigationalClick(args)
                 if (isNavigational) {
-                    baseDelay = 900L
+                    baseDelay = 650L
                     reason = "跳转/提交类点击与异步刷新"
                 } else {
-                    baseDelay = 400L
+                    baseDelay = 220L
                     reason = "轻触反馈与组件状态更新"
                 }
             }
@@ -105,13 +115,13 @@ object AdaptivePacingEngine {
             }
 
             toolName.startsWith("skill_") -> {
-                baseDelay = 650L
-                reason = "自定义技能复合动作稳定"
+                baseDelay = 400L
+                reason = "复合技能子步骤衔接稳定"
             }
 
             else -> {
-                baseDelay = 400L
-                reason = "工具执行反馈"
+                baseDelay = 250L
+                reason = "常规工具执行反馈"
             }
         }
 
@@ -124,9 +134,9 @@ object AdaptivePacingEngine {
 
         // 应用节奏 Profile 缩放系数
         val finalDelay = when (profile) {
-            PacingProfile.FAST -> (baseDelay * 0.65).toLong().coerceAtLeast(150L)
+            PacingProfile.FAST -> (baseDelay * 0.5).toLong().coerceAtLeast(80L)
             PacingProfile.BALANCED -> baseDelay
-            PacingProfile.CAREFUL -> (baseDelay * 1.45).toLong()
+            PacingProfile.CAREFUL -> (baseDelay * 1.4).toLong()
         }
 
         return PacingDecision(finalDelay, "$reason (${finalDelay}ms)")

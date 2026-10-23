@@ -200,19 +200,23 @@ class AgentTest {
     }
 
     @Test
-    fun `setting maxToolRounds to 0 allows unlimited rounds`() = runTest {
+    fun `setting maxToolRounds to 0 safely defaults to bounded rounds and prevents infinite loop`() = runTest {
         val toolCall = com.paw.agent.core.model.ToolCall("id", "echo", "{}")
         // 10 turns of tool calls followed by final answer (more than default 8)
         val script = List(10) { listOf(LlmChunk.ToolCalls(listOf(toolCall))) } +
             listOf(listOf(LlmChunk.Delta("final answer")))
         val client = ScriptedClient(script)
+        // Passing 0 should be safely bounded to DEFAULT_MAX_TOOL_ROUNDS (8)
         val agent = Agent(client, ToolRegistry(listOf(EchoTool())), maxToolRounds = 0)
 
         val events = agent.run(config, listOf(user("go"))).toList()
 
-        val completed = events.filterIsInstance<AgentEvent.Completed>().singleOrNull()
-        org.junit.Assert.assertNotNull(completed)
-        assertEquals("final answer", completed?.message?.content)
+        val failed = events.filterIsInstance<AgentEvent.Failed>().singleOrNull()
+        org.junit.Assert.assertNotNull("Should fail safely at max steps instead of looping indefinitely", failed)
+        val errorText = failed!!.message.error ?: failed.message.content
+        assertTrue(errorText.contains("最大执行步数限制"))
+        // 1 initial call + 8 tool rounds
+        assertEquals(9, client.callCount)
     }
 
     @Test

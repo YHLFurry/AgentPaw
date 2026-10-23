@@ -83,7 +83,16 @@ class OpenAiCompatibleClient(
         val toolIds = LinkedHashMap<Int, String>()
         var sawContent = false
 
-        val call = httpClient.newCall(httpRequest)
+        val clientForCall = if (config.timeoutSeconds in 5..600) {
+            httpClient.newBuilder()
+                .connectTimeout(config.timeoutSeconds.toLong().coerceAtMost(30), TimeUnit.SECONDS)
+                .readTimeout(config.timeoutSeconds.toLong(), TimeUnit.SECONDS)
+                .writeTimeout(config.timeoutSeconds.toLong(), TimeUnit.SECONDS)
+                .build()
+        } else {
+            httpClient
+        }
+        val call = clientForCall.newCall(httpRequest)
         currentCoroutineContext().job.invokeOnCompletion { cause ->
             if (cause is kotlinx.coroutines.CancellationException) {
                 call.cancel()

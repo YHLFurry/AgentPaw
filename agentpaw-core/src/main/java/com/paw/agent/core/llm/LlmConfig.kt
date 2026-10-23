@@ -16,12 +16,14 @@ enum class LlmProvider(
     val requiresApiKey: Boolean,
     val apiKeyHeader: String = "Authorization",
     val apiKeyPrefix: String = "Bearer ",
+    val suggestedModels: List<String> = emptyList(),
 ) {
     OPENAI(
         displayName = "OpenAI",
         defaultBaseUrl = "https://api.openai.com/v1",
         defaultModel = "gpt-4o-mini",
         requiresApiKey = true,
+        suggestedModels = listOf("gpt-4o", "gpt-4o-mini", "o3-mini", "gpt-4-turbo"),
     ),
 
     QWEN(
@@ -29,6 +31,7 @@ enum class LlmProvider(
         defaultBaseUrl = "https://dashscope.aliyuncs.com/compatible-mode/v1",
         defaultModel = "qwen-vl-max",
         requiresApiKey = true,
+        suggestedModels = listOf("qwen-vl-max", "qwen-vl-plus", "qwen-plus", "qwen-turbo", "qwen-max"),
     ),
 
     DEEPSEEK(
@@ -36,6 +39,7 @@ enum class LlmProvider(
         defaultBaseUrl = "https://api.deepseek.com/v1",
         defaultModel = "deepseek-chat",
         requiresApiKey = true,
+        suggestedModels = listOf("deepseek-chat", "deepseek-reasoner"),
     ),
 
     GEMINI(
@@ -43,6 +47,7 @@ enum class LlmProvider(
         defaultBaseUrl = "https://generativelanguage.googleapis.com/v1beta/openai",
         defaultModel = "gemini-2.0-flash",
         requiresApiKey = true,
+        suggestedModels = listOf("gemini-2.0-flash", "gemini-1.5-pro", "gemini-1.5-flash"),
     ),
 
     MOONSHOT(
@@ -50,6 +55,7 @@ enum class LlmProvider(
         defaultBaseUrl = "https://api.moonshot.cn/v1",
         defaultModel = "moonshot-v1-8k",
         requiresApiKey = true,
+        suggestedModels = listOf("moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k"),
     ),
 
     OLLAMA(
@@ -59,6 +65,7 @@ enum class LlmProvider(
         requiresApiKey = false,
         apiKeyHeader = "Authorization",
         apiKeyPrefix = "",
+        suggestedModels = listOf("qwen2.5:7b", "llama3.2-vision", "deepseek-r1:7b", "llava:7b"),
     ),
 
     CUSTOM(
@@ -66,6 +73,7 @@ enum class LlmProvider(
         defaultBaseUrl = "",
         defaultModel = "",
         requiresApiKey = false,
+        suggestedModels = listOf("deepseek-chat", "qwen-vl-max", "gpt-4o", "claude-3-5-sonnet-20241022"),
     ),
     ;
 
@@ -89,6 +97,8 @@ data class LlmConfig(
     val maxTokens: Int = 2048,
     val maxToolRounds: Int = 15,
     val visionResolutionMode: String = "AUTO",
+    val pacingProfile: String = "BALANCED",
+    val timeoutSeconds: Int = 60,
     val stream: Boolean = true,
     val systemPrompt: String = DEFAULT_SYSTEM_PROMPT,
     val tools: List<com.paw.agent.core.model.ToolDefinition> = emptyList(),

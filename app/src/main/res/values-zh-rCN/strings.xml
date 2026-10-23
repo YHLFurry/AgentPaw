@@ -88,23 +88,28 @@
     <string name="settings_vision_fast">极速省流</string>
     <string name="settings_vision_high">高精细节</string>
 
-    <!-- 最大执行步数 -->
-    <string name="settings_max_rounds">最大执行步数 (Max Rounds)</string>
-    <string name="settings_max_rounds_unlimited">不限制（无上限）</string>
-    <string name="settings_max_rounds_unlimited_short">无上限</string>
+    <!-- 最大执行步数 (严格受控，消除无上限死循环隐患) -->
+    <string name="settings_max_rounds">最大执行步数 (Max Steps / Rounds)</string>
     <string name="settings_max_rounds_value">%1$d 步 (%2$s)</string>
     <string name="settings_max_rounds_grids">%1$d 格</string>
-    <string name="settings_max_rounds_hint">计数规则：每 5 步记为 1 格。支持输入数值自定义步数（无上限），输入 0 设为不限制。</string>
-    <string name="settings_max_rounds_custom">自定义步数数值</string>
-    <string name="settings_max_rounds_custom_hint">输入数值，如 25，或 0 为无上限</string>
-    <string name="settings_max_rounds_convert_unlimited">换算结果：不限制步数（无上限）</string>
-    <string name="settings_max_rounds_convert">换算结果：每 5 步记为 1 格，%1$d 步 = %2$s</string>
-    <string name="settings_max_rounds_presets">快速预设：</string>
-    <string name="settings_max_rounds_preset_unlimited">无上限</string>
+    <string name="settings_max_rounds_hint">安全受控规则：单次任务最大执行步数（1~100 步，推荐 15 步），每 5 步折合 1 格。达到步数将自动安全终止，防止死循环无限消耗 Token。</string>
+    <string name="settings_max_rounds_custom">自定义步数上限</string>
+    <string name="settings_max_rounds_custom_hint">输入 1~100 之间的整数，推荐 15</string>
+    <string name="settings_max_rounds_convert">换算结果：每 5 步折算 1 格，%1$d 步 = %2$s（安全上限受控）</string>
+    <string name="settings_max_rounds_presets">推荐步数预设：</string>
+    <string name="settings_max_rounds_preset_5">5步(1格)</string>
     <string name="settings_max_rounds_preset_10">10步(2格)</string>
-    <string name="settings_max_rounds_preset_20">20步(4格)</string>
-    <string name="settings_max_rounds_preset_30">30步(6格)</string>
+    <string name="settings_max_rounds_preset_15">15步(推荐)</string>
+    <string name="settings_max_rounds_preset_25">25步(5格)</string>
     <string name="settings_max_rounds_preset_50">50步(10格)</string>
+    <string name="settings_model_quick_select">常用模型快捷填入：</string>
+    <string name="settings_timeout_seconds">请求超时时间 (秒)</string>
+    <string name="settings_timeout_seconds_summary">LLM API 请求网络超时时长（推荐 60 秒，范围 10~300 秒）</string>
+    <string name="settings_pacing_profile">Agent 执行节奏偏好</string>
+    <string name="settings_pacing_profile_summary">控制自动化动作间歇等待，消除无效停顿，提升执行效率</string>
+    <string name="settings_pacing_fast">极速模式 (FAST，感知零延迟，操作连贯)</string>
+    <string name="settings_pacing_balanced">智能平衡 (BALANCED，兼顾流畅度与动效)</string>
+    <string name="settings_pacing_careful">稳健从容 (CAREFUL，适合老旧低性能设备)</string>
 
     <string name="settings_save">保存</string>
     <string name="settings_saved">设置已保存</string>

@@ -209,7 +209,7 @@ class AgentTaskRunner(
         cancelled = false
         com.paw.agent.device.accessibility.AgentAccessibilityService.clearGlobalStop()
         stepCount = 0
-        maxSteps = config.maxToolRounds
+        maxSteps = (if (config.maxToolRounds <= 0) 15 else config.maxToolRounds).coerceIn(1, 100)
         AgentExecutionController.markStarted(maxSteps)
 
         runJob = scope.launch {
@@ -276,7 +276,7 @@ class AgentTaskRunner(
         cancelled = false
         com.paw.agent.device.accessibility.AgentAccessibilityService.clearGlobalStop()
         stepCount = bp.stoppedAtStep
-        maxSteps = bp.maxSteps
+        maxSteps = (if (bp.maxSteps <= 0) 15 else bp.maxSteps).coerceIn(1, 100)
         AgentExecutionController.markStarted(maxSteps)
         AgentExecutionController.updateProgress(stepCount, maxSteps, "从断点继续执行中...")
 

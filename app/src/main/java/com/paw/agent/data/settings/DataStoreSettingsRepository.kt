@@ -42,6 +42,8 @@ class DataStoreSettingsRepository(
         val MAX_TOKENS = intPreferencesKey("llm_max_tokens")
         val MAX_TOOL_ROUNDS = intPreferencesKey("llm_max_tool_rounds")
         val VISION_RESOLUTION_MODE = stringPreferencesKey("llm_vision_resolution_mode")
+        val PACING_PROFILE = stringPreferencesKey("llm_pacing_profile")
+        val TIMEOUT_SECONDS = intPreferencesKey("llm_timeout_seconds")
         val STREAM = booleanPreferencesKey("llm_stream")
         val SYSTEM_PROMPT = stringPreferencesKey("llm_system_prompt")
         val DYNAMIC_COLOR = booleanPreferencesKey("ui_dynamic_color")
@@ -87,8 +89,10 @@ class DataStoreSettingsRepository(
             prefs[Keys.TEMPERATURE] = updated.temperature
             prefs[Keys.TOP_P] = updated.topP
             prefs[Keys.MAX_TOKENS] = updated.maxTokens
-            prefs[Keys.MAX_TOOL_ROUNDS] = updated.maxToolRounds
+            prefs[Keys.MAX_TOOL_ROUNDS] = (if (updated.maxToolRounds <= 0) 15 else updated.maxToolRounds).coerceIn(1, 100)
             prefs[Keys.VISION_RESOLUTION_MODE] = updated.visionResolutionMode
+            prefs[Keys.PACING_PROFILE] = updated.pacingProfile
+            prefs[Keys.TIMEOUT_SECONDS] = updated.timeoutSeconds
             prefs[Keys.STREAM] = updated.stream
             prefs[Keys.SYSTEM_PROMPT] = updated.systemPrompt
         }
@@ -191,8 +195,10 @@ class DataStoreSettingsRepository(
             temperature = this[Keys.TEMPERATURE] ?: 0.7f,
             topP = this[Keys.TOP_P] ?: 1.0f,
             maxTokens = this[Keys.MAX_TOKENS] ?: 2048,
-            maxToolRounds = this[Keys.MAX_TOOL_ROUNDS] ?: 15,
+            maxToolRounds = (this[Keys.MAX_TOOL_ROUNDS] ?: 15).coerceIn(1, 100),
             visionResolutionMode = this[Keys.VISION_RESOLUTION_MODE] ?: "AUTO",
+            pacingProfile = this[Keys.PACING_PROFILE] ?: "BALANCED",
+            timeoutSeconds = (this[Keys.TIMEOUT_SECONDS] ?: 60).coerceIn(10, 300),
             stream = this[Keys.STREAM] ?: true,
             systemPrompt = this[Keys.SYSTEM_PROMPT] ?: LlmConfig.DEFAULT_SYSTEM_PROMPT,
         )

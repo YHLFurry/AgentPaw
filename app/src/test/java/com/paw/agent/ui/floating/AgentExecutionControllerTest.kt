@@ -39,18 +39,16 @@ class AgentExecutionControllerTest {
     }
 
     @Test
-    fun `unlimited steps (maxSteps = 0) sets state correctly`() {
-        AgentExecutionController.markStarted(maxSteps = AgentExecutionController.UNLIMITED_STEPS)
+    fun `non-positive maxSteps safely falls back to bounded default steps`() {
+        AgentExecutionController.markStarted(maxSteps = 0)
         var state = AgentExecutionController.state.value
         assertTrue(state.isRunning)
-        assertEquals(0, state.maxSteps)
-        assertTrue(state.isUnlimited)
+        assertEquals(AgentExecutionController.DEFAULT_MAX_STEPS, state.maxSteps)
 
-        AgentExecutionController.updateProgress(step = 6, maxSteps = AgentExecutionController.UNLIMITED_STEPS, action = "swipe 500 800")
+        AgentExecutionController.updateProgress(step = 6, maxSteps = -1, action = "swipe 500 800")
         state = AgentExecutionController.state.value
         assertEquals(6, state.currentStep)
-        assertEquals(0, state.maxSteps)
-        assertTrue(state.isUnlimited)
+        assertEquals(AgentExecutionController.DEFAULT_MAX_STEPS, state.maxSteps)
         assertEquals("swipe 500 800", state.currentAction)
 
         AgentExecutionController.markCompleted()

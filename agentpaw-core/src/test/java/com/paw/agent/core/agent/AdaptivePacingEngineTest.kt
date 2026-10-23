@@ -13,8 +13,19 @@ class AdaptivePacingEngineTest {
         val tool = ToolCall("call-1", "launch_app", """{"package_name":"com.tencent.mm"}""")
         val decision = AdaptivePacingEngine.evaluateDelay(tool)
 
-        assertTrue(decision.delayMillis >= 1800L)
+        assertTrue(decision.delayMillis >= 1000L)
         assertTrue(decision.reason.contains("应用启动"))
+    }
+
+    @Test
+    fun `evaluateDelay assigns zero delay for read-only perception tools to maximize efficiency`() {
+        val screenshotTool = ToolCall("call-ss", "take_screenshot", """{"mode":"AUTO"}""")
+        val ssDecision = AdaptivePacingEngine.evaluateDelay(screenshotTool)
+        assertEquals(0L, ssDecision.delayMillis)
+
+        val screenStateTool = ToolCall("call-state", "get_screen_state", "{}")
+        val stateDecision = AdaptivePacingEngine.evaluateDelay(screenStateTool)
+        assertEquals(0L, stateDecision.delayMillis)
     }
 
     @Test
@@ -22,12 +33,12 @@ class AdaptivePacingEngineTest {
         // Parameter key is "search", but value is not navigational
         val nonNavTool = ToolCall("call-2", "tap", """{"search_mode":"coordinate","x":100,"y":200}""")
         val nonNavDecision = AdaptivePacingEngine.evaluateDelay(nonNavTool)
-        assertEquals(400L, nonNavDecision.delayMillis)
+        assertEquals(220L, nonNavDecision.delayMillis)
 
         // Parameter value is "搜索" (navigational)
         val navTool = ToolCall("call-3", "tap", """{"target":"搜索","x":500,"y":500}""")
         val navDecision = AdaptivePacingEngine.evaluateDelay(navTool)
-        assertEquals(900L, navDecision.delayMillis)
+        assertEquals(650L, navDecision.delayMillis)
         assertTrue(navDecision.reason.contains("跳转/提交"))
     }
 

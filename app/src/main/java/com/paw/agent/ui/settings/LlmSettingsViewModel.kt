@@ -32,6 +32,8 @@ data class LlmSettingsUiState(
     val maxTokens: Int = 2048,
     val maxToolRounds: Int = 15,
     val visionResolutionMode: String = "AUTO",
+    val pacingProfile: String = "BALANCED",
+    val timeoutSeconds: Int = 60,
     val stream: Boolean = true,
     val systemPrompt: String = LlmConfig.DEFAULT_SYSTEM_PROMPT,
     val showApiKey: Boolean = false,
@@ -67,6 +69,8 @@ data class LlmSettingsUiState(
         maxTokens = maxTokens,
         maxToolRounds = maxToolRounds,
         visionResolutionMode = visionResolutionMode,
+        pacingProfile = pacingProfile,
+        timeoutSeconds = timeoutSeconds,
         stream = stream,
         systemPrompt = systemPrompt,
     )
@@ -108,8 +112,10 @@ class LlmSettingsViewModel(
                         temperature = llm.temperature,
                         topP = llm.topP,
                         maxTokens = llm.maxTokens,
-                        maxToolRounds = llm.maxToolRounds.coerceIn(0, 100),
+                        maxToolRounds = (if (llm.maxToolRounds <= 0) 15 else llm.maxToolRounds).coerceIn(1, 100),
                         visionResolutionMode = llm.visionResolutionMode,
+                        pacingProfile = llm.pacingProfile,
+                        timeoutSeconds = llm.timeoutSeconds,
                         stream = llm.stream,
                         systemPrompt = llm.systemPrompt,
                         apiKeyError = if (settings.apiKeyDecryptionFailed) "系统密钥解密失败（如修改了锁屏或指纹），请重新输入 API Key" else null,
@@ -206,7 +212,7 @@ class LlmSettingsViewModel(
     }
 
     fun onMaxToolRoundsChange(value: Int) {
-        val clamped = value.coerceIn(0, 100)
+        val clamped = if (value <= 0) 15 else value.coerceIn(1, 100)
         _uiState.value = _uiState.value.copy(maxToolRounds = clamped)
         viewModelScope.launch {
             settingsRepository.updateLlm { it.copy(maxToolRounds = clamped) }
@@ -217,6 +223,21 @@ class LlmSettingsViewModel(
         _uiState.value = _uiState.value.copy(visionResolutionMode = value)
         viewModelScope.launch {
             settingsRepository.updateLlm { it.copy(visionResolutionMode = value) }
+        }
+    }
+
+    fun onTimeoutSecondsChange(value: Int) {
+        val clamped = value.coerceIn(10, 300)
+        _uiState.value = _uiState.value.copy(timeoutSeconds = clamped)
+        viewModelScope.launch {
+            settingsRepository.updateLlm { it.copy(timeoutSeconds = clamped) }
+        }
+    }
+
+    fun onPacingProfileChange(value: String) {
+        _uiState.value = _uiState.value.copy(pacingProfile = value)
+        viewModelScope.launch {
+            settingsRepository.updateLlm { it.copy(pacingProfile = value) }
         }
     }
 

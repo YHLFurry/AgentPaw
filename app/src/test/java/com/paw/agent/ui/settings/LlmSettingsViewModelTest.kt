@@ -91,18 +91,18 @@ class LlmSettingsViewModelTest {
     }
 
     @Test
-    fun `clamps maxToolRounds within 0 to 100 and persists`() = runTest {
+    fun `clamps maxToolRounds within 1 to 100 and defaults non-positive to 15`() = runTest {
         val viewModel = LlmSettingsViewModel(fakeSettingsRepo, fakeLlmClient)
         advanceUntilIdle()
 
         viewModel.onMaxToolRoundsChange(0)
-        assertEquals(0, viewModel.uiState.value.maxToolRounds)
+        assertEquals(15, viewModel.uiState.value.maxToolRounds)
 
         viewModel.onMaxToolRoundsChange(150)
         assertEquals(100, viewModel.uiState.value.maxToolRounds)
 
         viewModel.onMaxToolRoundsChange(-5)
-        assertEquals(0, viewModel.uiState.value.maxToolRounds)
+        assertEquals(15, viewModel.uiState.value.maxToolRounds)
     }
 
     private class FakeLlmClient : LlmClient {

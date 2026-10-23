@@ -89,10 +89,17 @@ class Agent(
         var assistantId: String? = null
         var buffer = StringBuilder()
 
-        val effectiveMaxRounds: Int? = if (this@Agent.maxToolRounds != DEFAULT_MAX_TOOL_ROUNDS) {
-            if (this@Agent.maxToolRounds <= 0) null else this@Agent.maxToolRounds.coerceAtMost(100)
-        } else {
-            if (config.maxToolRounds <= 0) null else config.maxToolRounds.coerceAtMost(100)
+        val effectiveMaxRounds: Int = run {
+            val configured = if (this@Agent.maxToolRounds != DEFAULT_MAX_TOOL_ROUNDS) {
+                this@Agent.maxToolRounds
+            } else {
+                config.maxToolRounds
+            }
+            if (configured <= 0) {
+                DEFAULT_MAX_TOOL_ROUNDS
+            } else {
+                configured.coerceIn(1, MAX_SAFETY_TOOL_ROUNDS)
+            }
         }
         var round = 0
         while (true) {
@@ -155,12 +162,12 @@ class Agent(
                 return@flow
             }
 
-            if (effectiveMaxRounds != null && round >= effectiveMaxRounds) {
+            if (round >= effectiveMaxRounds) {
                 val msg = currentAssistant(
                     buffer,
                     assistantId,
                     MessageStatus.FAILED,
-                    "Stopped after $effectiveMaxRounds tool rounds",
+                    "已达到最大执行步数限制 (${effectiveMaxRounds} 步)，自动化操作已安全停止，防止无限循环",
                 )
                 emit(AgentEvent.Failed(msg))
                 return@flow
@@ -370,7 +377,7 @@ class Agent(
     ): Message = Message(
         id = id ?: NEW_MESSAGE_ID,
         role = MessageRole.ASSISTANT,
-        content = buffer.toString(),
+        content = buffer.toString().ifBlank { error.orEmpty() },
         status = status,
         error = error,
     )
@@ -415,6 +422,7 @@ class Agent(
 
     companion object {
         const val DEFAULT_MAX_TOOL_ROUNDS = 8
+        const val MAX_SAFETY_TOOL_ROUNDS = 100
 
         private const val NEW_MESSAGE_ID = "streaming-assistant"
 

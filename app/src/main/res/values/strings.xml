@@ -93,23 +93,28 @@
     <string name="settings_vision_fast">Fastest</string>
     <string name="settings_vision_high">High detail</string>
 
-    <!-- Max tool rounds -->
-    <string name="settings_max_rounds">Max execution rounds</string>
-    <string name="settings_max_rounds_unlimited">Unlimited</string>
-    <string name="settings_max_rounds_unlimited_short">Unlimited</string>
+    <!-- Max tool rounds (strictly bounded, eliminate infinite loop) -->
+    <string name="settings_max_rounds">Max execution rounds (Steps)</string>
     <string name="settings_max_rounds_value">%1$d rounds (%2$s)</string>
     <string name="settings_max_rounds_grids">%1$d cells</string>
-    <string name="settings_max_rounds_hint">Counting rule: every 5 rounds is 1 cell. Enter a custom value, or 0 for unlimited.</string>
-    <string name="settings_max_rounds_custom">Custom round count</string>
-    <string name="settings_max_rounds_custom_hint">A number such as 25, or 0 for unlimited</string>
-    <string name="settings_max_rounds_convert_unlimited">Result: unlimited rounds</string>
-    <string name="settings_max_rounds_convert">Result: %1$d rounds = %2$s (5 rounds per cell)</string>
-    <string name="settings_max_rounds_presets">Presets:</string>
-    <string name="settings_max_rounds_preset_unlimited">Unlimited</string>
+    <string name="settings_max_rounds_hint">Safety rule: maximum rounds allowed per task (1..100, default 15). 5 rounds = 1 cell. Terminates safely once reached to prevent infinite loops.</string>
+    <string name="settings_max_rounds_custom">Custom round limit</string>
+    <string name="settings_max_rounds_custom_hint">Integer between 1 and 100, default 15</string>
+    <string name="settings_max_rounds_convert">Result: %1$d rounds = %2$s (bounded)</string>
+    <string name="settings_max_rounds_presets">Recommended presets:</string>
+    <string name="settings_max_rounds_preset_5">5 (1)</string>
     <string name="settings_max_rounds_preset_10">10 (2)</string>
-    <string name="settings_max_rounds_preset_20">20 (4)</string>
-    <string name="settings_max_rounds_preset_30">30 (6)</string>
+    <string name="settings_max_rounds_preset_15">15 (rec)</string>
+    <string name="settings_max_rounds_preset_25">25 (5)</string>
     <string name="settings_max_rounds_preset_50">50 (10)</string>
+    <string name="settings_model_quick_select">Quick select model:</string>
+    <string name="settings_timeout_seconds">Request Timeout (seconds)</string>
+    <string name="settings_timeout_seconds_summary">LLM API request timeout duration (recommended 60s, range 10..300s)</string>
+    <string name="settings_pacing_profile">Agent Execution Pacing</string>
+    <string name="settings_pacing_profile_summary">Controls inter-step delays to eliminate idle waiting and maximize efficiency</string>
+    <string name="settings_pacing_fast">Fast (FAST, zero delay on perception, swift actions)</string>
+    <string name="settings_pacing_balanced">Balanced (BALANCED, adaptive transitions)</string>
+    <string name="settings_pacing_careful">Careful (CAREFUL, relaxed for slower devices)</string>
 
     <string name="settings_save">Save</string>
     <string name="settings_saved">Settings saved</string>
