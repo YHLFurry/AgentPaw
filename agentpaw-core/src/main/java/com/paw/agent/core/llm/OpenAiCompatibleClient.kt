@@ -11,6 +11,7 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.job
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
@@ -19,6 +20,7 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.intOrNull
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.MediaType.Companion.toMediaType
@@ -58,7 +60,7 @@ class OpenAiCompatibleClient(
     ): Flow<LlmChunk> = flow {
         if (!config.isUsable) {
             throw LlmException.NotConfigured(
-                "Base URL, model and (where required) an API key must be set",
+                config.validationErrors().joinToString("；"),
             )
         }
 
@@ -70,9 +72,11 @@ class OpenAiCompatibleClient(
         val wire = request.copy(
             model = config.model.ifBlank { request.model },
             stream = config.stream,
-            temperature = config.temperature,
-            topP = config.topP,
-            maxTokens = config.maxTokens,
+            temperature = config.temperature.takeUnless { config.isReasoningModel },
+            topP = config.topP.takeUnless { config.isReasoningModel },
+            maxTokens = config.maxTokens.takeUnless { config.isReasoningModel || config.provider == LlmProvider.OPENAI },
+            maxCompletionTokens = config.maxTokens.takeIf { config.isReasoningModel || config.provider == LlmProvider.OPENAI },
+            reasoningEffort = config.reasoningEffort.takeUnless { it == "AUTO" }?.lowercase(),
         )
 
         val httpRequest = Request.Builder()
@@ -139,19 +143,23 @@ class OpenAiCompatibleClient(
 
                     val message = parsed.choices.firstOrNull()?.message
                         ?: throw LlmException.EmptyResponse()
+                    if (message.content?.asString().isNullOrBlank() && message.toolCalls.isNullOrEmpty() &&
+                        parsed.choices.firstOrNull()?.finishReason !in setOf("length", "content_filter")) {
+                        throw LlmException.EmptyResponse()
+                    }
 
                     message.content?.asString()?.takeIf { it.isNotEmpty() }?.let { emit(LlmChunk.Delta(it)) }
 
-                    message.toolCalls?.takeIf { it.isNotEmpty() }?.let { calls ->
+                    message.toolCalls?.takeIf { it.isNotEmpty() && parsed.choices.firstOrNull()?.finishReason !in setOf("length", "content_filter") }?.let { calls ->
                         emit(
                             LlmChunk.ToolCalls(
-                                calls.map { call ->
+                                validateToolCalls(calls.map { call ->
                                     ToolCall(
                                         id = call.id,
                                         name = call.function.name,
                                         arguments = call.function.arguments,
                                     )
-                                },
+                                }),
                             ),
                         )
                     }
@@ -162,6 +170,9 @@ class OpenAiCompatibleClient(
                 // ---- streaming (SSE) ----
                 val source = body.source()
                 var malformedCount = 0
+                var finishReason: String? = null
+                var usage: com.paw.agent.core.llm.dto.Usage? = null
+                var sawDone = false
                 while (!source.exhausted()) {
                     val line = try {
                         source.readUtf8LineStrict(1024L * 1024)
@@ -173,7 +184,10 @@ class OpenAiCompatibleClient(
 
                     val data = line.removePrefix(SSE_DATA_PREFIX).trim()
                     if (data.isEmpty()) continue
-                    if (data == SSE_DONE) break
+                    if (data == SSE_DONE) {
+                        sawDone = true
+                        break
+                    }
 
                     val chunk = runCatching {
                         json.decodeFromString(ChatCompletionResponse.serializer(), data)
@@ -183,6 +197,7 @@ class OpenAiCompatibleClient(
                     } ?: continue
 
                     chunk.error?.let { throw LlmException.Http(200, it.describe()) }
+                    chunk.usage?.let { usage = it }
 
                     val choice: Choice = chunk.choices.firstOrNull() ?: continue
                     receivedChars += (choice.delta?.content?.length ?: 0) +
@@ -199,24 +214,27 @@ class OpenAiCompatibleClient(
                     choice.delta?.toolCalls?.forEach {
                         accumulate(it, toolArgs, toolNames, toolIds)
                     }
+                    if (toolArgs.size > 256) throw LlmException.Malformed(IOException("Too many tool calls"))
 
                     if (choice.finishReason != null) {
-                        if (toolArgs.isNotEmpty()) emit(LlmChunk.ToolCalls(toolCalls(toolArgs, toolNames, toolIds)))
-                        emit(LlmChunk.Done(choice.finishReason, chunk.usage))
-                        return@use
+                        finishReason = choice.finishReason
                     }
                 }
 
-                if (toolArgs.isNotEmpty()) {
+                if (!sawContent && toolArgs.isEmpty() && malformedCount > 0) {
+                    throw LlmException.Malformed(IllegalArgumentException("All $malformedCount SSE chunks failed to parse"))
+                }
+                if (!sawDone && finishReason == null) throw LlmException.IncompleteResponse()
+                if (toolArgs.isNotEmpty() && finishReason !in setOf("length", "content_filter")) {
                     emit(LlmChunk.ToolCalls(toolCalls(toolArgs, toolNames, toolIds)))
-                } else if (!sawContent) {
+                } else if (!sawContent && finishReason !in setOf("length", "content_filter")) {
                     if (malformedCount > 0) {
                         throw LlmException.Malformed(IllegalArgumentException("All $malformedCount SSE chunks failed to parse"))
                     } else {
                         throw LlmException.EmptyResponse()
                     }
                 }
-                emit(LlmChunk.Done(null, null))
+                emit(LlmChunk.Done(finishReason, usage))
             }
         } finally {
             cancellationHandle.dispose()
@@ -226,56 +244,19 @@ class OpenAiCompatibleClient(
 
     override suspend fun testConnection(config: LlmConfig): Result<Unit> =
         withContext(Dispatchers.IO) {
-            runCatching {
+            cancellableResult {
                 if (!config.isUsable) {
                     throw LlmException.NotConfigured("Fill in the required fields first")
-                }
-
-                val decision = networkPolicy.evaluate(config.baseUrl)
-                if (!decision.allowed) {
-                    throw LlmException.NotConfigured(decision.reason)
                 }
 
                 val probe = ChatCompletionRequest(
                     model = config.model,
                     messages = listOf(ChatMessage(role = "user", content = "ping")),
-                    maxTokens = 1,
-                    stream = false,
                 )
-
-                val request = Request.Builder()
-                    .url(completionsUrl(config.baseUrl))
-                    .post(json.encodeToString(ChatCompletionRequest.serializer(), probe)
-                        .toRequestBody(JSON_MEDIA_TYPE))
-                    .apply { applyAuth(config) }
-                    .build()
-
-                val call = clientForConfig(config).newCall(request)
-                val response = try {
-                    suspendCancellableCoroutine<Response> { cont ->
-                        cont.invokeOnCancellation { call.cancel() }
-                        call.enqueue(object : Callback {
-                            override fun onFailure(call: Call, e: IOException) {
-                                if (cont.isActive) cont.resumeWithException(e)
-                            }
-
-                            override fun onResponse(call: Call, response: Response) {
-                                cont.resume(response) { _, abandoned, _ -> abandoned.close() }
-                            }
-                        })
-                    }
-                } catch (e: java.io.IOException) {
-                    if (e.message?.contains("Cleartext HTTP traffic", ignoreCase = true) == true) {
-                        throw LlmException.NotConfigured(
-                            "Cleartext HTTP is disabled to protect API keys. Use HTTPS or localhost/127.0.0.1 for local models.",
-                        )
-                    }
-                    throw e
-                }
-                response.use {
-                    if (!response.isSuccessful) {
-                        throw response.toLlmException(readBody(response.body))
-                    }
+                val probeTokens = minOf(config.maxTokens, if (config.isReasoningModel) 1024 else 32)
+                val chunks = complete(config.copy(maxTokens = probeTokens), probe).toList()
+                if (chunks.none { it is LlmChunk.Delta && it.text.isNotBlank() }) {
+                    throw LlmException.EmptyResponse()
                 }
                 Unit
             }
@@ -283,7 +264,7 @@ class OpenAiCompatibleClient(
 
     override suspend fun listModels(config: LlmConfig): Result<List<String>> =
         withContext(Dispatchers.IO) {
-            runCatching {
+            cancellableResult {
                 if (config.baseUrl.isBlank()) {
                     throw LlmException.NotConfigured("Base URL 不能为空")
                 }
@@ -330,9 +311,61 @@ class OpenAiCompatibleClient(
             }
         }
 
+    override suspend fun detectContextWindow(config: LlmConfig): Result<Int?> = withContext(Dispatchers.IO) {
+        cancellableResult {
+            val decision = networkPolicy.evaluate(config.baseUrl)
+            if (!decision.allowed) throw LlmException.NotConfigured(decision.reason)
+            val modelId = java.net.URLEncoder.encode(config.model, Charsets.UTF_8.name()).replace("+", "%20")
+            val detail = fetchModelMetadata(config, "${modelsUrl(config.baseUrl)}/$modelId")
+            val direct = detail?.let(::contextLength)
+            if (direct != null) return@cancellableResult direct
+            val catalog = fetchModelMetadata(config, modelsUrl(config.baseUrl))
+            val models = (catalog?.get("data") ?: catalog?.get("models")) as? kotlinx.serialization.json.JsonArray
+            models?.firstOrNull {
+                val item = it as? kotlinx.serialization.json.JsonObject
+                ((item?.get("id") ?: item?.get("name")) as? kotlinx.serialization.json.JsonPrimitive)?.content == config.model
+            }?.let { it as? kotlinx.serialization.json.JsonObject }?.let(::contextLength)
+        }
+    }
+
+    private fun contextLength(root: kotlinx.serialization.json.JsonObject): Int? =
+        listOf("context_length", "context_window", "max_model_len", "max_context_length")
+            .firstNotNullOfOrNull { key ->
+                (root[key] as? kotlinx.serialization.json.JsonPrimitive)?.intOrNull?.takeIf { it in 1..LlmConfig.MAX_TOKEN_LIMIT }
+            }
+
+    private suspend fun fetchModelMetadata(config: LlmConfig, url: String): kotlinx.serialization.json.JsonObject? {
+        val request = Request.Builder().url(url).get().apply { applyAuth(config) }.build()
+        val call = clientForConfig(config).newCall(request)
+        val response = suspendCancellableCoroutine<Response> { cont ->
+            cont.invokeOnCancellation { call.cancel() }
+            call.enqueue(object : Callback {
+                override fun onFailure(call: Call, e: IOException) {
+                    if (cont.isActive) cont.resumeWithException(e)
+                }
+                override fun onResponse(call: Call, response: Response) {
+                    cont.resume(response) { _, abandoned, _ -> abandoned.close() }
+                }
+            })
+        }
+        return response.use {
+            if (it.code in setOf(404, 405)) return@use null
+            if (!it.isSuccessful) throw it.toLlmException(readBody(it.body))
+            json.parseToJsonElement(readBody(it.body)) as? kotlinx.serialization.json.JsonObject
+        }
+    }
+
     private fun readBody(body: okhttp3.ResponseBody?): String = body?.charStream()?.use {
         BoundedIO.readText(it, 4 * 1024 * 1024)
     }.orEmpty()
+
+    private suspend fun <T> cancellableResult(block: suspend () -> T): Result<T> = try {
+        Result.success(block())
+    } catch (cancelled: kotlinx.coroutines.CancellationException) {
+        throw cancelled
+    } catch (error: Exception) {
+        Result.failure(error)
+    }
 
     private fun clientForConfig(config: LlmConfig): OkHttpClient = httpClient.newBuilder()
         // 请求中包含凭据和对话；禁止重定向绕过已校验的地址与传输策略。
@@ -408,6 +441,7 @@ class OpenAiCompatibleClient(
         names: LinkedHashMap<Int, String>,
         ids: LinkedHashMap<Int, String>,
     ) {
+        args.getOrPut(delta.index) { StringBuilder() }
         delta.id?.takeIf { it.isNotBlank() }?.let { ids[delta.index] = it }
         delta.function?.name?.takeIf { it.isNotBlank() }?.let { names[delta.index] = it }
         delta.function?.arguments?.let { args.getOrPut(delta.index) { StringBuilder() }.append(it) }
@@ -417,12 +451,21 @@ class OpenAiCompatibleClient(
         args: LinkedHashMap<Int, StringBuilder>,
         names: LinkedHashMap<Int, String>,
         ids: LinkedHashMap<Int, String>,
-    ): List<ToolCall> = args.map { (index, arguments) ->
+    ): List<ToolCall> = validateToolCalls(args.map { (index, arguments) ->
         ToolCall(
             id = ids[index].orEmpty().ifBlank { "call_$index" },
             name = names[index].orEmpty(),
-            arguments = arguments.toString(),
+            arguments = arguments.toString().ifBlank { "{}" },
         )
+    })
+
+    private fun validateToolCalls(calls: List<ToolCall>): List<ToolCall> {
+        if (calls.size > 256 || calls.map { it.id }.distinct().size != calls.size || calls.any {
+                it.id.isBlank() || it.name.isBlank() || runCatching {
+                    json.parseToJsonElement(it.arguments.ifBlank { "{}" }) !is kotlinx.serialization.json.JsonObject
+                }.getOrDefault(true)
+            }) throw LlmException.Malformed(IllegalArgumentException("Model returned invalid or incomplete tool calls"))
+        return calls.map { it.copy(arguments = it.arguments.ifBlank { "{}" }) }
     }
 
     companion object {

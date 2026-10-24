@@ -157,16 +157,31 @@ class PersistentConversationRepository(
                     val raw = if (img.contains(",")) img.substringAfter(",") else img
                     require(raw.length <= (BoundedIO.MAX_IMAGE_BYTES * 4 / 3 + 4)) { "Image exceeds size budget" }
                     val bytes = Base64.getDecoder().decode(raw)
+                    val extension = when {
+                        bytes.size >= 8 && bytes.take(8) == listOf(137, 80, 78, 71, 13, 10, 26, 10).map(Int::toByte) -> "png"
+                        bytes.size >= 3 && bytes[0] == 0xff.toByte() && bytes[1] == 0xd8.toByte() && bytes[2] == 0xff.toByte() -> "jpg"
+                        bytes.size >= 12 && String(bytes, 0, 4, Charsets.US_ASCII) == "RIFF" &&
+                            String(bytes, 8, 4, Charsets.US_ASCII) == "WEBP" -> "webp"
+                        else -> error("Unsupported image format")
+                    }
                     val safeMessageId = UUID.nameUUIDFromBytes(message.id.toByteArray()).toString()
-                    val imgFile = File(imagesDir, "${conversationId}_${safeMessageId}_$index.jpg")
+                    val imgFile = File(imagesDir, "${conversationId}_${safeMessageId}_$index.$extension")
                     val tempFile = File.createTempFile("tmp_img_", ".tmp", imagesDir)
-                    tempFile.writeBytes(bytes)
-                    if (!tempFile.renameTo(imgFile)) {
-                        tempFile.copyTo(imgFile, overwrite = true)
+                    try {
+                        tempFile.writeBytes(bytes)
+                        try {
+                            Files.move(tempFile.toPath(), imgFile.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+                        } catch (_: AtomicMoveNotSupportedException) {
+                            Files.move(tempFile.toPath(), imgFile.toPath(), StandardCopyOption.REPLACE_EXISTING)
+                        }
+                    } finally {
                         tempFile.delete()
                     }
                     "file://${imgFile.absolutePath}"
-                }.getOrDefault(img)
+                }.getOrElse { error ->
+                    _storageError.value = "图片保存失败，已保留原始附件：${error.message.orEmpty().take(120)}"
+                    img
+                }
             }
         }
         return message.copy(images = updatedImages)
@@ -324,7 +339,10 @@ class PersistentConversationRepository(
             persistAsync(source)
             // 在 IO 调度器中异步处理图片解码与落盘
             scope.launch(ioDispatcher) {
-                if (_conversation.value.id != source.id) return@launch
+                mutex.withLock {
+                if (_conversation.value.id != source.id || _conversation.value.messages.none {
+                    it.id == message.id && it.images == message.images
+                }) return@withLock
                 val normalizedMessage = extractImagesToDisk(message, source.id)
                 var nextConv: Conversation? = null
                 _conversation.update { current ->
@@ -337,6 +355,7 @@ class PersistentConversationRepository(
                     updated
                 }
                 nextConv?.let { persistAsync(it) }
+                }
             }
         }
     }
@@ -366,9 +385,11 @@ class PersistentConversationRepository(
             // 保留当前会话的原始版本，避免异步图片处理前切换会话造成更新丢失。
             persistAsync(_conversation.value)
             scope.launch(ioDispatcher) {
-                val currentConvId = sourceConversationId ?: return@launch
-                if (_conversation.value.id != currentConvId) return@launch
-                val targetMsg = transformedMessage ?: return@launch
+                mutex.withLock {
+                val currentConvId = sourceConversationId ?: return@withLock
+                if (_conversation.value.id != currentConvId) return@withLock
+                val targetMsg = transformedMessage ?: return@withLock
+                if (_conversation.value.messages.none { it.id == id && it.images == targetMsg.images }) return@withLock
                 val normalized = extractImagesToDisk(targetMsg, currentConvId)
                 var nextConv: Conversation? = null
                 _conversation.update { current ->
@@ -381,6 +402,7 @@ class PersistentConversationRepository(
                     updated
                 }
                 nextConv?.let { persistAsync(it) }
+                }
             }
         }
     }
@@ -444,7 +466,11 @@ class PersistentConversationRepository(
                     }
                     updateIndex(cleared)
                 }
-                if (savedAll) allImages.forEach { it.delete() }
+                if (savedAll) {
+                    allImages.forEach { if (it.exists() && !it.delete()) savedAll = false }
+                }
+                ImagePreviewDecoder.clearCache()
+                com.paw.agent.core.agent.Agent.clearImageCache()
                 refreshHistory()
                 persistIndex()
                 _storageError.value = if (savedAll) null else "部分历史图片未能清理，请检查存储空间后重试。"

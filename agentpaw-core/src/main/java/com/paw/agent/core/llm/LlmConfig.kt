@@ -95,6 +95,12 @@ data class LlmConfig(
     val temperature: Float = 0.7f,
     val topP: Float = 1.0f,
     val maxTokens: Int = 2048,
+    /** 0 uses the model's known context limit, or a conservative fallback. */
+    val maxTotalTokens: Int = 0,
+    val detectedTotalTokens: Int = 0,
+    val detectedFor: String = "",
+    val reasoningEffort: String = "AUTO",
+    val autoCompress: Boolean = true,
     val maxToolRounds: Int = 15,
     val visionResolutionMode: String = "AUTO",
     val pacingProfile: String = "BALANCED",
@@ -105,10 +111,54 @@ data class LlmConfig(
 ) {
     /** True when the config has enough information to issue a request. */
     val isUsable: Boolean
-        get() = baseUrl.isNotBlank() && model.isNotBlank() &&
-            (!provider.requiresApiKey || apiKey.isNotBlank())
+        get() = validationErrors().isEmpty()
+
+    fun validationErrors(): List<String> = buildList {
+        val validUrl = runCatching { java.net.URI(baseUrl.trim()) }.getOrNull()?.let { uri ->
+            uri.scheme?.lowercase() in setOf("http", "https") &&
+                !uri.host.isNullOrBlank() && uri.rawUserInfo == null && uri.rawFragment == null &&
+                uri.rawQuery == null && (uri.port == -1 || uri.port in 1..65535)
+        } == true
+        if (!validUrl) add("接口地址必须是完整的 HTTP(S) 地址，且不能包含账号、查询参数或片段")
+        if (model.isBlank() || model.any { it.isISOControl() }) add("模型名称不能为空或包含控制字符")
+        if (provider.requiresApiKey && apiKey.isBlank()) add("该服务商需要 API Key")
+        if (apiKey.any { it.isISOControl() }) add("API Key 不能包含换行或控制字符")
+        if (!temperature.isFinite() || temperature !in 0f..2f) add("温度需在 0 到 2 之间")
+        if (!topP.isFinite() || topP !in 0f..1f) add("Top P 需在 0 到 1 之间")
+        if (maxTokens !in 1..MAX_TOKEN_LIMIT) add("最大输出 Token 需在 1 到 $MAX_TOKEN_LIMIT 之间")
+        if (maxTotalTokens !in 0..MAX_TOKEN_LIMIT || effectiveMaxTotalTokens <= maxTokens) {
+            add("最大总 Token 必须大于输出预算，且不超过 $MAX_TOKEN_LIMIT")
+        }
+        if (reasoningEffort !in REASONING_EFFORTS) add("不支持的思考强度")
+        if (timeoutSeconds !in 10..300) add("请求超时需在 10 到 300 秒之间")
+    }
+
+    val isReasoningModel: Boolean
+        get() = Regex("^(o[134](?:-|$)|gpt-[5-9](?:[.\\-]|$))", RegexOption.IGNORE_CASE)
+            .containsMatchIn(model.substringAfterLast('/'))
+
+    /** Local estimate used for budgeting; compatible providers may advertise different limits. */
+    val effectiveMaxTotalTokens: Int
+        get() {
+            if (maxTotalTokens > 0) return maxTotalTokens
+            if (detectedFor == "$baseUrl|$model" && detectedTotalTokens in 1..2_000_000) {
+                return detectedTotalTokens
+            }
+            val id = model.lowercase()
+            val suffix = Regex("(?:^|[-_/])(\\d{1,4})([km])(?:[-_/]|$)").find(id)
+            suffix?.let {
+                val value = it.groupValues[1].toInt() * if (it.groupValues[2] == "m") 1_000_000L else 1_000L
+                if (value in 1L..MAX_TOKEN_LIMIT.toLong()) return value.toInt()
+            }
+            return when {
+                id.startsWith("gpt-4o") -> 128_000
+                else -> 16_000
+            }
+        }
 
     companion object {
+        const val MAX_TOKEN_LIMIT = 2_000_000
+        val REASONING_EFFORTS = listOf("AUTO", "NONE", "MINIMAL", "LOW", "MEDIUM", "HIGH", "XHIGH", "MAX")
         const val DEFAULT_SYSTEM_PROMPT =
             "You are AgentPaw, an autonomous AI assistant operating an Android mobile device.\n" +
             "You can interact with apps, read screen content, and perform multi-step workflows using available Tools and Skills.\n\n" +

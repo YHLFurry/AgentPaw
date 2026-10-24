@@ -23,7 +23,14 @@ sealed class LlmException(message: String, cause: Throwable? = null) : Exception
         val code: Int,
         val body: String?,
         val unauthorized: Boolean = false,
-    ) : LlmException("HTTP $code${if (unauthorized) " (unauthorized)" else ""}: ${body.orEmpty().take(300)}")
+    ) : LlmException("HTTP $code${if (unauthorized) " (unauthorized)" else ""}: ${body.orEmpty().take(300)}") {
+        val isContextOverflow: Boolean
+            get() = code == 413 || (code in setOf(400, 422) && listOf(
+                "context_length_exceeded", "maximum context length", "context length exceeded",
+                "context window", "prompt is too long", "input is too long", "too many tokens",
+                "上下文长度", "上下文超限",
+            ).any { body.orEmpty().contains(it, ignoreCase = true) })
+    }
 
     /** The response could not be parsed. */
     class Malformed(cause: Throwable?) :
@@ -31,4 +38,8 @@ sealed class LlmException(message: String, cause: Throwable? = null) : Exception
 
     /** The provider returned a 200 but the stream carried no content. */
     class EmptyResponse : LlmException("Provider returned an empty response")
+
+    class IncompleteResponse : LlmException("响应意外中断，未收到结束标记，请重试")
+
+    class ContextLimit(reason: String) : LlmException(reason)
 }

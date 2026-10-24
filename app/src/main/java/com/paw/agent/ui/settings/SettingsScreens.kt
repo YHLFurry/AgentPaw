@@ -94,6 +94,11 @@ data class LlmSettingsActions(
     val onTemperatureChange: (Float) -> Unit,
     val onTopPChange: (Float) -> Unit,
     val onMaxTokensChange: (Int) -> Unit,
+    val onMaxTokensInputChange: (String) -> Unit = {},
+    val onMaxTotalTokensInputChange: (String) -> Unit = {},
+    val onMaxTotalTokensChange: (Int) -> Unit = {},
+    val onReasoningEffortChange: (String) -> Unit = {},
+    val onAutoCompressChange: (Boolean) -> Unit = {},
     val onMaxToolRoundsChange: (Int) -> Unit,
     val onVisionResolutionModeChange: (String) -> Unit,
     val onTimeoutSecondsChange: (Int) -> Unit = {},
@@ -103,6 +108,7 @@ data class LlmSettingsActions(
     val onToggleApiKeyVisibility: () -> Unit,
     val onSave: () -> Unit,
     val onTestConnection: () -> Unit,
+    val onRunDiagnostics: () -> Unit = {},
     val onReset: () -> Unit,
     val onToggleExpertMode: (Boolean) -> Unit = {},
     val onToggleSplitVisionLanguage: (Boolean) -> Unit = {},
@@ -242,7 +248,7 @@ fun LlmServicePage(
     modifier: Modifier = Modifier,
 ) {
     val savedMessage = stringResource(R.string.settings_saved)
-    SavedEffect(state.savedAt, savedMessage, snackbarHostState)
+    SavedEffect(state.savedAt, savedMessage, snackbarHostState, state.saveError ?: state.settingsError)
 
     SettingsPageScaffold(
         title = stringResource(R.string.settings_group_model_service),
@@ -466,7 +472,7 @@ fun LlmServicePage(
         // ---- connection test ----
         AppOutlinedButton(
             onClick = actions.onTestConnection,
-            enabled = state.testState !is TestState.Running,
+            enabled = state.testState !is TestState.Running && !state.diagnosticsRunning,
             modifier = Modifier
                 .fillMaxWidth()
                 .heightIn(min = 48.dp),
@@ -484,6 +490,30 @@ fun LlmServicePage(
         }
 
         TestResultBanner(state.testState)
+
+        Spacer(Modifier.height(12.dp))
+        AppOutlinedButton(
+            onClick = actions.onRunDiagnostics,
+            enabled = !state.diagnosticsRunning && state.testState !is TestState.Running,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+        ) {
+            AppText(stringResource(if (state.diagnosticsRunning) R.string.settings_testing else R.string.settings_diagnostics))
+        }
+        AppText(stringResource(R.string.settings_diagnostics_hint), style = AppTheme.typography.bodySmall)
+        state.diagnostics.values.forEach { result ->
+            val label = stringResource(when (result.kind) {
+                com.paw.agent.core.llm.DiagnosticKind.TEXT -> R.string.settings_diagnostic_text
+                com.paw.agent.core.llm.DiagnosticKind.STREAM -> R.string.settings_diagnostic_stream
+                com.paw.agent.core.llm.DiagnosticKind.TOOLS -> R.string.settings_diagnostic_tools
+                com.paw.agent.core.llm.DiagnosticKind.VISION -> R.string.settings_diagnostic_vision
+            })
+            val status = when (result.status) {
+                com.paw.agent.core.llm.DiagnosticStatus.RUNNING -> "…"
+                com.paw.agent.core.llm.DiagnosticStatus.PASSED -> "✓"
+                com.paw.agent.core.llm.DiagnosticStatus.FAILED -> "✕"
+            }
+            AppText("$status $label ${result.detail}", style = AppTheme.typography.bodySmall)
+        }
 
         AppTextButton(
             text = stringResource(R.string.settings_reset),
@@ -506,7 +536,7 @@ fun GenerationPage(
     modifier: Modifier = Modifier,
 ) {
     val savedMessage = stringResource(R.string.settings_saved)
-    SavedEffect(state.savedAt, savedMessage, snackbarHostState)
+    SavedEffect(state.savedAt, savedMessage, snackbarHostState, state.saveError ?: state.settingsError)
 
     SettingsPageScaffold(
         title = stringResource(R.string.settings_group_generation),
@@ -541,16 +571,62 @@ fun GenerationPage(
 
             SettingsBlock {
                 AppTextField(
-                    value = state.maxTokens.toString(),
-                    onValueChange = {
-                        actions.onMaxTokensChange(it.filter(Char::isDigit).toIntOrNull() ?: 0)
-                    },
+                    value = state.maxTokensInput ?: state.maxTokens.takeIf { it > 0 }?.toString().orEmpty(),
+                    onValueChange = actions.onMaxTokensInputChange,
                     label = stringResource(R.string.settings_max_tokens),
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     modifier = Modifier.fillMaxWidth(),
                 )
+                state.tokenError?.let { AppText(errorText(it), color = AppTheme.colors.error) }
             }
+
+            SettingsRowDivider()
+
+            SettingsBlock {
+                AppTextField(
+                    value = state.maxTotalTokensInput ?: state.maxTotalTokens.takeIf { it > 0 }?.toString().orEmpty(),
+                    onValueChange = actions.onMaxTotalTokensInputChange,
+                    label = stringResource(R.string.settings_max_total_tokens),
+                    supportingText = stringResource(R.string.settings_max_total_tokens_hint),
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                if (state.maxTotalTokens == 0) {
+                    val fromProvider = state.detectedFor == "${state.baseUrl.trim()}|${state.model.trim()}" &&
+                        state.detectedTotalTokens > 0
+                    AppText(stringResource(
+                        if (fromProvider) R.string.settings_provider_total_tokens else R.string.settings_detected_total_tokens,
+                        state.toConfig().effectiveMaxTotalTokens,
+                    ))
+                }
+            }
+
+            SettingsRowDivider()
+            SettingsBlock {
+                AppText(stringResource(R.string.settings_reasoning_effort))
+                Row(
+                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    com.paw.agent.core.llm.LlmConfig.REASONING_EFFORTS.forEach { effort ->
+                        AppTextButton(
+                            text = if (state.reasoningEffort == effort) "✓ $effort" else effort,
+                            onClick = { actions.onReasoningEffortChange(effort) },
+                        )
+                    }
+                }
+                AppText(stringResource(R.string.settings_reasoning_hint))
+            }
+
+            SettingsRowDivider()
+            SettingsSwitchRow(
+                title = stringResource(R.string.settings_auto_compress),
+                subtitle = stringResource(R.string.settings_auto_compress_hint),
+                checked = state.autoCompress,
+                onCheckedChange = actions.onAutoCompressChange,
+            )
         }
 
         Spacer(Modifier.height(20.dp))
@@ -584,7 +660,7 @@ fun AgentControlPage(
     modifier: Modifier = Modifier,
 ) {
     val savedMessage = stringResource(R.string.settings_saved)
-    SavedEffect(state.savedAt, savedMessage, snackbarHostState)
+    SavedEffect(state.savedAt, savedMessage, snackbarHostState, state.saveError ?: state.settingsError)
 
     val context = androidx.compose.ui.platform.LocalContext.current
     val resources = androidx.compose.ui.platform.LocalResources.current
@@ -997,7 +1073,9 @@ private fun SavedEffect(
     savedAt: Long?,
     message: String,
     hostState: AppSnackbarHostState,
+    error: String? = null,
 ) {
+    LaunchedEffect(error) { error?.let { hostState.showSnackbar(it) } }
     var lastShown by remember { mutableStateOf(savedAt) }
     LaunchedEffect(savedAt) {
         val at = savedAt ?: return@LaunchedEffect
@@ -1314,6 +1392,7 @@ private fun errorText(key: String): String = when (key) {
     "error_api_key_required" -> stringResource(R.string.error_api_key_required)
     "error_temperature_range" -> stringResource(R.string.error_temperature_range)
     "error_max_tokens_range" -> stringResource(R.string.error_max_tokens_range)
+    "error_total_tokens_range" -> stringResource(R.string.error_total_tokens_range)
     "error_top_p_range" -> stringResource(R.string.error_top_p_range)
     else -> key
 }

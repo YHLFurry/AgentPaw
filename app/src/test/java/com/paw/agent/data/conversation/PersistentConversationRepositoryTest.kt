@@ -25,6 +25,49 @@ import java.io.File
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class PersistentConversationRepositoryTest {
+    @Test fun `media write failure preserves original attachment`() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val scope = TestScope(dispatcher)
+        val dir = tempFolder.newFolder("media_write_failure")
+        val repo = PersistentConversationRepository(scope = scope, storageDirectory = dir, ioDispatcher = dispatcher)
+        scope.advanceUntilIdle()
+        val images = File(dir, "images")
+        assertTrue(images.delete())
+        images.writeText("block image writes")
+        val raw = java.util.Base64.getEncoder().encodeToString(byteArrayOf(0x89.toByte(), 80, 78, 71, 13, 10, 26, 10))
+        repo.addMessage(Message("photo", MessageRole.USER, "image", images = listOf(raw)))
+        scope.advanceUntilIdle()
+        assertEquals(listOf(raw), repo.conversation.value.messages.single().images)
+    }
+
+    @Test fun `media cleanup and queued normalization never resurrect image references`() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val scope = TestScope(dispatcher)
+        val dir = tempFolder.newFolder("media_clear_race")
+        val repo = PersistentConversationRepository(scope = scope, storageDirectory = dir, ioDispatcher = dispatcher)
+        scope.advanceUntilIdle()
+        val raw = java.util.Base64.getEncoder().encodeToString(byteArrayOf(0x89.toByte(), 80, 78, 71, 13, 10, 26, 10))
+        repo.addMessage(Message("photo", MessageRole.USER, "image", images = listOf(raw)))
+        repo.clearAllMedia()
+        scope.advanceUntilIdle()
+        assertTrue(repo.conversation.value.messages.single().images.isEmpty())
+        assertTrue(File(dir, "images").listFiles().orEmpty().isEmpty())
+    }
+    @Test fun `png attachment keeps its actual format on disk`() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val scope = TestScope(dispatcher)
+        val dir = tempFolder.newFolder("png_format")
+        val repo = PersistentConversationRepository(scope = scope, storageDirectory = dir, ioDispatcher = dispatcher)
+        scope.advanceUntilIdle()
+        val pngHeader = byteArrayOf(0x89.toByte(), 80, 78, 71, 13, 10, 26, 10)
+        repo.addMessage(Message("png", MessageRole.USER, "image", images = listOf(
+            java.util.Base64.getEncoder().encodeToString(pngHeader),
+        )))
+        scope.advanceUntilIdle()
+        val image = repo.conversation.value.messages.single().images.single()
+        assertTrue(image.endsWith(".png"))
+        assertTrue(File(image.removePrefix("file://")).isFile)
+    }
     @Test fun `indexed cold start loads only latest body and older pages remain accessible`() = runTest {
         val dispatcher = StandardTestDispatcher(testScheduler)
         val scope = TestScope(dispatcher)
