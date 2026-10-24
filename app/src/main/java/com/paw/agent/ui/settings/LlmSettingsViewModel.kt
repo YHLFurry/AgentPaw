@@ -6,11 +6,19 @@ import androidx.lifecycle.viewModelScope
 import com.paw.agent.core.llm.LlmClient
 import com.paw.agent.core.llm.LlmConfig
 import com.paw.agent.core.llm.LlmProvider
+import com.paw.agent.core.llm.DiagnosticKind
+import com.paw.agent.core.llm.DiagnosticResult
+import com.paw.agent.core.llm.LlmDiagnostics
 import com.paw.agent.data.settings.SettingsRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.withTimeoutOrNull
 import java.net.URI
 
 /** Outcome of the "test connection" action. */
@@ -30,6 +38,13 @@ data class LlmSettingsUiState(
     val temperature: Float = 0.7f,
     val topP: Float = 1.0f,
     val maxTokens: Int = 2048,
+    val maxTokensInput: String? = null,
+    val maxTotalTokens: Int = 0,
+    val maxTotalTokensInput: String? = null,
+    val detectedTotalTokens: Int = 0,
+    val detectedFor: String = "",
+    val reasoningEffort: String = "AUTO",
+    val autoCompress: Boolean = true,
     val maxToolRounds: Int = 15,
     val visionResolutionMode: String = "AUTO",
     val pacingProfile: String = "BALANCED",
@@ -40,8 +55,13 @@ data class LlmSettingsUiState(
     val baseUrlError: String? = null,
     val modelError: String? = null,
     val apiKeyError: String? = null,
+    val tokenError: String? = null,
+    val settingsError: String? = null,
+    val saveError: String? = null,
     val savedAt: Long? = null,
     val testState: TestState = TestState.Idle,
+    val diagnosticsRunning: Boolean = false,
+    val diagnostics: Map<DiagnosticKind, DiagnosticResult> = emptyMap(),
     val expertMode: Boolean = false,
     val splitVisionLanguageMode: Boolean = false,
     val rootModeEnabled: Boolean = false,
@@ -62,7 +82,7 @@ data class LlmSettingsUiState(
 ) {
     /** No inline errors: safe to persist. */
     val isValid: Boolean
-        get() = baseUrlError == null && modelError == null && apiKeyError == null
+        get() = baseUrlError == null && modelError == null && apiKeyError == null && tokenError == null && settingsError == null
 
     fun toConfig(): LlmConfig = LlmConfig(
         provider = provider,
@@ -72,6 +92,11 @@ data class LlmSettingsUiState(
         temperature = temperature,
         topP = topP,
         maxTokens = maxTokens,
+        maxTotalTokens = maxTotalTokens,
+        detectedTotalTokens = detectedTotalTokens,
+        detectedFor = detectedFor,
+        reasoningEffort = reasoningEffort,
+        autoCompress = autoCompress,
         maxToolRounds = maxToolRounds,
         visionResolutionMode = visionResolutionMode,
         pacingProfile = pacingProfile,
@@ -90,6 +115,19 @@ class LlmSettingsViewModel(
     val uiState: StateFlow<LlmSettingsUiState> = _uiState.asStateFlow()
 
     private var seededFromRepository = false
+    private var testJob: Job? = null
+    private var fetchJob: Job? = null
+    private var diagnosticsJob: Job? = null
+
+    private fun invalidateConnection(clearModels: Boolean = true) {
+        testJob?.cancel()
+        fetchJob?.cancel()
+        diagnosticsJob?.cancel()
+        _uiState.value = _uiState.value.copy(testState = TestState.Idle, isFetchingModels = false,
+            fetchedModels = if (clearModels) emptyList() else _uiState.value.fetchedModels,
+            fetchModelsError = null, fetchModelsSuccessMessage = null,
+            diagnosticsRunning = false, diagnostics = emptyMap(), settingsError = null, savedAt = null)
+    }
 
     init {
         viewModelScope.launch {
@@ -117,6 +155,11 @@ class LlmSettingsViewModel(
                         temperature = llm.temperature,
                         topP = llm.topP,
                         maxTokens = llm.maxTokens,
+                        maxTotalTokens = llm.maxTotalTokens,
+                        detectedTotalTokens = llm.detectedTotalTokens,
+                        detectedFor = llm.detectedFor,
+                        reasoningEffort = llm.reasoningEffort,
+                        autoCompress = llm.autoCompress,
                         maxToolRounds = llm.maxToolRounds.coerceAtLeast(0),
                         visionResolutionMode = llm.visionResolutionMode,
                         pacingProfile = llm.pacingProfile,
@@ -179,6 +222,7 @@ class LlmSettingsViewModel(
     }
 
     fun onProviderChange(provider: LlmProvider) {
+        invalidateConnection()
         // Presets carry sensible defaults; keep whatever the user already typed
         // for the fields the preset does not define.
         _uiState.value = _uiState.value.copy(
@@ -188,32 +232,69 @@ class LlmSettingsViewModel(
             baseUrlError = null,
             modelError = null,
             apiKeyError = null,
+            detectedTotalTokens = 0,
+            detectedFor = "",
             testState = TestState.Idle,
         )
     }
 
     fun onBaseUrlChange(value: String) {
-        _uiState.value = _uiState.value.copy(baseUrl = value, baseUrlError = null, testState = TestState.Idle)
+        invalidateConnection()
+        _uiState.value = _uiState.value.copy(baseUrl = value, baseUrlError = null,
+            detectedTotalTokens = 0, detectedFor = "", testState = TestState.Idle)
     }
 
     fun onApiKeyChange(value: String) {
-        _uiState.value = _uiState.value.copy(apiKey = value, apiKeyError = null, testState = TestState.Idle)
+        invalidateConnection()
+        _uiState.value = _uiState.value.copy(apiKey = value, apiKeyError = null,
+            detectedTotalTokens = 0, detectedFor = "", testState = TestState.Idle)
     }
 
     fun onModelChange(value: String) {
-        _uiState.value = _uiState.value.copy(model = value, modelError = null, testState = TestState.Idle)
+        invalidateConnection(clearModels = false)
+        _uiState.value = _uiState.value.copy(model = value, modelError = null,
+            detectedTotalTokens = 0, detectedFor = "", testState = TestState.Idle)
     }
 
     fun onTemperatureChange(value: Float) {
+        invalidateConnection(clearModels = false)
         _uiState.value = _uiState.value.copy(temperature = value.coerceIn(0.0f, 2.0f))
     }
 
     fun onTopPChange(value: Float) {
+        invalidateConnection(clearModels = false)
         _uiState.value = _uiState.value.copy(topP = value.coerceIn(0.0f, 1.0f))
     }
 
     fun onMaxTokensChange(value: Int) {
-        _uiState.value = _uiState.value.copy(maxTokens = value.coerceIn(1, 32768))
+        _uiState.value = _uiState.value.copy(maxTokens = value, maxTokensInput = null, tokenError = null)
+    }
+
+    fun onMaxTotalTokensChange(value: Int) {
+        _uiState.value = _uiState.value.copy(maxTotalTokens = value, maxTotalTokensInput = null, tokenError = null)
+    }
+
+    fun onMaxTokensInputChange(value: String) {
+        invalidateConnection(clearModels = false)
+        _uiState.value = _uiState.value.copy(maxTokensInput = value,
+            maxTokens = value.toIntOrNull() ?: if (value.isEmpty()) 0 else -1, tokenError = null)
+    }
+
+    fun onMaxTotalTokensInputChange(value: String) {
+        invalidateConnection(clearModels = false)
+        _uiState.value = _uiState.value.copy(maxTotalTokensInput = value,
+            maxTotalTokens = value.toIntOrNull() ?: if (value.isEmpty()) 0 else -1, tokenError = null)
+    }
+
+    fun onReasoningEffortChange(value: String) {
+        invalidateConnection(clearModels = false)
+        if (value in LlmConfig.REASONING_EFFORTS) {
+            _uiState.value = _uiState.value.copy(reasoningEffort = value)
+        }
+    }
+
+    fun onAutoCompressChange(value: Boolean) {
+        _uiState.value = _uiState.value.copy(autoCompress = value)
     }
 
     fun onMaxToolRoundsChange(value: Int) {
@@ -247,6 +328,7 @@ class LlmSettingsViewModel(
     }
 
     fun onStreamChange(value: Boolean) {
+        invalidateConnection(clearModels = false)
         _uiState.value = _uiState.value.copy(stream = value)
     }
 
@@ -266,28 +348,80 @@ class LlmSettingsViewModel(
         if (!validated.isValid) return
 
         viewModelScope.launch {
-            settingsRepository.updateLlm { validated.toConfig() }
-            _uiState.value = _uiState.value.copy(savedAt = System.currentTimeMillis())
+            try {
+                settingsRepository.updateLlm { validated.toConfig() }
+                _uiState.value = _uiState.value.copy(savedAt = System.currentTimeMillis(), saveError = null)
+            } catch (error: kotlinx.coroutines.CancellationException) { throw error
+            } catch (error: Exception) {
+                _uiState.value = _uiState.value.copy(savedAt = null, saveError = error.message ?: "设置保存失败")
+            }
         }
     }
 
     fun testConnection() {
+        testJob?.cancel()
+        diagnosticsJob?.cancel()
         val state = _uiState.value
         val validated = validate(state)
         _uiState.value = validated
-        if (!validated.isValid) return
+        if (!validated.isValid) {
+            _uiState.value = validated.copy(testState = TestState.Failure(
+                validated.toConfig().validationErrors().joinToString("；")))
+            return
+        }
 
         _uiState.value = _uiState.value.copy(testState = TestState.Running)
-        viewModelScope.launch {
+        testJob = viewModelScope.launch {
             llmClient.testConnection(validated.toConfig())
                 .onSuccess {
+                    currentCoroutineContext().ensureActive()
                     _uiState.value = _uiState.value.copy(testState = TestState.Success("OK"))
+                    withTimeoutOrNull(5_000) {
+                        llmClient.detectContextWindow(validated.toConfig()).getOrNull()
+                    }?.let { detected ->
+                        if (detected in 1..2_000_000 &&
+                            _uiState.value.baseUrl.trim() == validated.baseUrl.trim() &&
+                            _uiState.value.model.trim() == validated.model.trim() &&
+                            _uiState.value.apiKey.trim() == validated.apiKey.trim()) {
+                            val marker = "${validated.baseUrl.trim()}|${validated.model.trim()}"
+                            _uiState.value = _uiState.value.copy(
+                                detectedTotalTokens = detected,
+                                detectedFor = marker,
+                            )
+                            settingsRepository.updateLlm {
+                                it.copy(detectedTotalTokens = detected, detectedFor = marker)
+                            }
+                        }
+                    }
                 }
                 .onFailure { error ->
+                    currentCoroutineContext().ensureActive()
                     _uiState.value = _uiState.value.copy(
                         testState = TestState.Failure(error.message ?: "Unknown error"),
                     )
                 }
+        }
+    }
+
+    fun runDiagnostics() {
+        diagnosticsJob?.cancel()
+        testJob?.cancel()
+        val validated = validate(_uiState.value)
+        _uiState.value = validated
+        if (!validated.isValid) {
+            _uiState.value = validated.copy(testState = TestState.Failure(validated.toConfig().validationErrors().joinToString("；")))
+            return
+        }
+        _uiState.value = validated.copy(diagnosticsRunning = true, diagnostics = emptyMap(), testState = TestState.Idle)
+        diagnosticsJob = viewModelScope.launch {
+            try {
+                LlmDiagnostics(llmClient).run(validated.toConfig()).collect { result ->
+                    currentCoroutineContext().ensureActive()
+                    _uiState.value = _uiState.value.copy(diagnostics = _uiState.value.diagnostics + (result.kind to result))
+                }
+            } finally {
+                if (currentCoroutineContext().isActive) _uiState.value = _uiState.value.copy(diagnosticsRunning = false)
+            }
         }
     }
 
@@ -303,10 +437,12 @@ class LlmSettingsViewModel(
             fetchModelsError = null,
             fetchModelsSuccessMessage = null,
         )
-        viewModelScope.launch {
+        fetchJob?.cancel()
+        fetchJob = viewModelScope.launch {
             val config = state.toConfig()
             llmClient.listModels(config)
                 .onSuccess { models ->
+                    currentCoroutineContext().ensureActive()
                     _uiState.value = _uiState.value.copy(
                         isFetchingModels = false,
                         fetchedModels = models,
@@ -315,6 +451,7 @@ class LlmSettingsViewModel(
                     )
                 }
                 .onFailure { error ->
+                    currentCoroutineContext().ensureActive()
                     _uiState.value = _uiState.value.copy(
                         isFetchingModels = false,
                         fetchModelsError = error.message ?: "拉取模型列表失败，请检查网络或鉴权密钥",
@@ -329,36 +466,57 @@ class LlmSettingsViewModel(
     }
 
     fun resetToDefaults() {
+        invalidateConnection()
         viewModelScope.launch {
+            try {
             settingsRepository.resetLlm()
             val fresh = LlmConfig()
-            _uiState.value = LlmSettingsUiState(
+            _uiState.value = _uiState.value.copy(
                 provider = fresh.provider,
                 baseUrl = fresh.baseUrl,
+                apiKey = fresh.apiKey,
                 model = fresh.model,
                 temperature = fresh.temperature,
                 topP = fresh.topP,
                 maxTokens = fresh.maxTokens,
+                maxTokensInput = null,
+                maxTotalTokens = fresh.maxTotalTokens,
+                maxTotalTokensInput = null,
+                detectedTotalTokens = fresh.detectedTotalTokens,
+                detectedFor = fresh.detectedFor,
+                reasoningEffort = fresh.reasoningEffort,
+                autoCompress = fresh.autoCompress,
                 maxToolRounds = fresh.maxToolRounds,
                 visionResolutionMode = fresh.visionResolutionMode,
+                timeoutSeconds = fresh.timeoutSeconds,
+                pacingProfile = fresh.pacingProfile,
                 stream = fresh.stream,
                 systemPrompt = fresh.systemPrompt,
+                baseUrlError = null, modelError = null, apiKeyError = null, tokenError = null,
+                settingsError = null, saveError = null, showApiKey = false,
             )
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled
+            } catch (error: Exception) {
+                _uiState.value = _uiState.value.copy(saveError = error.message ?: "恢复默认失败")
+            }
         }
     }
 
     private fun validate(state: LlmSettingsUiState): LlmSettingsUiState {
         val url = state.baseUrl.trim()
+        val parsedUrl = runCatching { URI(url) }.getOrNull()
         val baseUrlError = when {
             url.isEmpty() -> "error_base_url_required"
-            !url.startsWith("http://") && !url.startsWith("https://") -> "error_base_url_invalid"
-            runCatching { URI(url) }.isFailure -> "error_base_url_invalid"
+            parsedUrl == null || parsedUrl.scheme?.lowercase() !in setOf("http", "https") ||
+                parsedUrl.host.isNullOrBlank() || parsedUrl.rawUserInfo != null ||
+                parsedUrl.rawFragment != null || parsedUrl.rawQuery != null ||
+                (parsedUrl.port != -1 && parsedUrl.port !in 1..65535) -> "error_base_url_invalid"
             else -> null
         }
 
-        val modelError = if (state.model.isBlank()) "error_model_required" else null
+        val modelError = if (state.model.isBlank() || state.model.any { it.isISOControl() }) "error_model_required" else null
 
-        val apiKeyError = if (state.provider.requiresApiKey && state.apiKey.isBlank()) {
+        val apiKeyError = if ((state.provider.requiresApiKey && state.apiKey.isBlank()) || state.apiKey.any { it.isISOControl() }) {
             "error_api_key_required"
         } else {
             null
@@ -368,6 +526,12 @@ class LlmSettingsViewModel(
             baseUrlError = baseUrlError,
             modelError = modelError,
             apiKeyError = apiKeyError,
+            settingsError = if (!state.temperature.isFinite() || !state.topP.isFinite() ||
+                state.reasoningEffort !in LlmConfig.REASONING_EFFORTS) "采样参数或思考强度无效" else null,
+            tokenError = if (state.maxTokens !in 1..LlmConfig.MAX_TOKEN_LIMIT ||
+                state.maxTotalTokens !in 0..LlmConfig.MAX_TOKEN_LIMIT ||
+                state.toConfig().effectiveMaxTotalTokens <= state.maxTokens
+            ) "error_total_tokens_range" else null,
         )
     }
 

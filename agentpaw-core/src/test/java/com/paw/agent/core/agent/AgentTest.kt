@@ -3,6 +3,7 @@ package com.paw.agent.core.agent
 import com.paw.agent.core.llm.LlmChunk
 import com.paw.agent.core.llm.LlmClient
 import com.paw.agent.core.llm.LlmConfig
+import com.paw.agent.core.llm.LlmException
 import com.paw.agent.core.llm.dto.ChatCompletionRequest
 import com.paw.agent.core.model.Message
 import com.paw.agent.core.model.MessageRole
@@ -20,6 +21,54 @@ import org.junit.Test
  * behaviour can be verified without any network access.
  */
 class AgentTest {
+    @Test fun `context error retries once with compressed history`() = runTest {
+        val requests = mutableListOf<ChatCompletionRequest>()
+        val client = object : LlmClient {
+            override fun complete(config: LlmConfig, request: ChatCompletionRequest): Flow<LlmChunk> = flow {
+                requests += request
+                if (requests.size == 1) throw LlmException.Http(400, "context length exceeded")
+                emit(LlmChunk.Delta("ok"))
+            }
+            override suspend fun testConnection(config: LlmConfig): Result<Unit> = Result.success(Unit)
+        }
+        val history = listOf(user("original goal").copy(id = "old"),
+            Message("tool_request", MessageRole.ASSISTANT, "", toolCalls = listOf(com.paw.agent.core.model.ToolCall("t", "read", "{}"))),
+            Message("tool_result", MessageRole.TOOL, "observation ".repeat(3000), toolCallId = "t"),
+            user("latest task").copy(id = "latest"))
+        val events = Agent(client).run(config.copy(maxTotalTokens = 4096, maxTokens = 1024), history).toList()
+        assertEquals("ok", events.filterIsInstance<AgentEvent.Completed>().single().message.content)
+        assertEquals(2, requests.size)
+        assertTrue(requests[1].messages.size <= requests[0].messages.size)
+    }
+
+    @Test fun `unsupported token parameter does not trigger compression retries`() = runTest {
+        var requests = 0
+        val client = object : LlmClient {
+            override fun complete(config: LlmConfig, request: ChatCompletionRequest): Flow<LlmChunk> = flow {
+                requests++
+                throw LlmException.Http(400, "unsupported parameter max_tokens")
+            }
+            override suspend fun testConnection(config: LlmConfig): Result<Unit> = Result.success(Unit)
+        }
+        val events = Agent(client).run(config, listOf(user("hi"))).toList()
+        assertEquals(1, requests)
+        assertTrue(events.last() is AgentEvent.Failed)
+    }
+
+    @Test fun `output token cutoff is a visible failure and never executes partial tools`() = runTest {
+        var executed = false
+        val tool = object : AgentTool {
+            override val definition = ToolDefinition("tap", "tap", "{}")
+            override suspend fun execute(arguments: String, context: AgentContext): String { executed = true; return "ok" }
+        }
+        val client = ScriptedClient(listOf(listOf(LlmChunk.Delta("partial"),
+            LlmChunk.ToolCalls(listOf(com.paw.agent.core.model.ToolCall("t", "tap", "{}"))),
+            LlmChunk.Done("length", null))))
+        val events = Agent(client, ToolRegistry(listOf(tool))).run(config, listOf(user("hi"))).toList()
+        assertTrue(events.last() is AgentEvent.Failed)
+        assertTrue(events.filterIsInstance<AgentEvent.Failed>().single().message.error.orEmpty().contains("Token"))
+        assertTrue(!executed)
+    }
     @Test
     fun `structured tool errors are failures and assistant ids differ across rounds`() = runTest {
         val tool = object : AgentTool {

@@ -40,6 +40,11 @@ class DataStoreSettingsRepository(
         val TEMPERATURE = floatPreferencesKey("llm_temperature")
         val TOP_P = floatPreferencesKey("llm_top_p")
         val MAX_TOKENS = intPreferencesKey("llm_max_tokens")
+        val MAX_TOTAL_TOKENS = intPreferencesKey("llm_max_total_tokens")
+        val DETECTED_TOTAL_TOKENS = intPreferencesKey("llm_detected_total_tokens")
+        val DETECTED_FOR = stringPreferencesKey("llm_detected_for")
+        val REASONING_EFFORT = stringPreferencesKey("llm_reasoning_effort")
+        val AUTO_COMPRESS = booleanPreferencesKey("llm_auto_compress")
         val MAX_TOOL_ROUNDS = intPreferencesKey("llm_max_tool_rounds")
         val VISION_RESOLUTION_MODE = stringPreferencesKey("llm_vision_resolution_mode")
         val PACING_PROFILE = stringPreferencesKey("llm_pacing_profile")
@@ -90,6 +95,11 @@ class DataStoreSettingsRepository(
             prefs[Keys.TEMPERATURE] = updated.temperature
             prefs[Keys.TOP_P] = updated.topP
             prefs[Keys.MAX_TOKENS] = updated.maxTokens
+            prefs[Keys.MAX_TOTAL_TOKENS] = updated.maxTotalTokens
+            prefs[Keys.DETECTED_TOTAL_TOKENS] = updated.detectedTotalTokens
+            prefs[Keys.DETECTED_FOR] = updated.detectedFor
+            prefs[Keys.REASONING_EFFORT] = updated.reasoningEffort
+            prefs[Keys.AUTO_COMPRESS] = updated.autoCompress
             prefs[Keys.MAX_TOOL_ROUNDS] = updated.maxToolRounds.coerceAtLeast(0)
             prefs[Keys.VISION_RESOLUTION_MODE] = updated.visionResolutionMode
             prefs[Keys.PACING_PROFILE] = updated.pacingProfile
@@ -177,8 +187,15 @@ class DataStoreSettingsRepository(
             prefs.remove(Keys.TEMPERATURE)
             prefs.remove(Keys.TOP_P)
             prefs.remove(Keys.MAX_TOKENS)
+            prefs.remove(Keys.MAX_TOTAL_TOKENS)
+            prefs.remove(Keys.DETECTED_TOTAL_TOKENS)
+            prefs.remove(Keys.DETECTED_FOR)
+            prefs.remove(Keys.REASONING_EFFORT)
+            prefs.remove(Keys.AUTO_COMPRESS)
             prefs.remove(Keys.MAX_TOOL_ROUNDS)
             prefs.remove(Keys.VISION_RESOLUTION_MODE)
+            prefs.remove(Keys.PACING_PROFILE)
+            prefs.remove(Keys.TIMEOUT_SECONDS)
             prefs.remove(Keys.STREAM)
             prefs.remove(Keys.SYSTEM_PROMPT)
         }
@@ -196,6 +213,11 @@ class DataStoreSettingsRepository(
             temperature = this[Keys.TEMPERATURE] ?: 0.7f,
             topP = this[Keys.TOP_P] ?: 1.0f,
             maxTokens = this[Keys.MAX_TOKENS] ?: 2048,
+            maxTotalTokens = this[Keys.MAX_TOTAL_TOKENS] ?: 0,
+            detectedTotalTokens = this[Keys.DETECTED_TOTAL_TOKENS] ?: 0,
+            detectedFor = this[Keys.DETECTED_FOR] ?: "",
+            reasoningEffort = this[Keys.REASONING_EFFORT] ?: "AUTO",
+            autoCompress = this[Keys.AUTO_COMPRESS] ?: true,
             maxToolRounds = (this[Keys.MAX_TOOL_ROUNDS] ?: 15).coerceAtLeast(0),
             visionResolutionMode = this[Keys.VISION_RESOLUTION_MODE] ?: "AUTO",
             pacingProfile = this[Keys.PACING_PROFILE] ?: "BALANCED",

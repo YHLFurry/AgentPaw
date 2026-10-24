@@ -75,6 +75,14 @@
     <string name="settings_models_fetched_title">端点实时模型 (%1$d 个，点击选择)：</string>
     <string name="settings_temperature">温度</string>
     <string name="settings_max_tokens">最大输出 Token</string>
+    <string name="settings_max_total_tokens">最大总 Token（留空自动识别）</string>
+    <string name="settings_max_total_tokens_hint">每次请求的输入与输出总预算；留空时优先读取端点元数据，未知模型使用保守估算</string>
+    <string name="settings_detected_total_tokens">当前估算：%1$d Token（可手动覆盖）</string>
+    <string name="settings_provider_total_tokens">端点报告：%1$d Token（可手动覆盖）</string>
+    <string name="settings_reasoning_effort">思考强度（兼容端点可能不支持）</string>
+    <string name="settings_reasoning_hint">AUTO 沿用服务端默认；推理模型的输出预算包含思考消耗，并自动省略采样参数。不同模型支持的强度不同，可用连接测试验证。</string>
+    <string name="settings_auto_compress">自动压缩上下文</string>
+    <string name="settings_auto_compress_hint">接近窗口上限时主动压缩，超限后再压缩重试一次</string>
     <string name="settings_top_p">Top P</string>
     <string name="settings_stream">流式输出</string>
     <string name="settings_stream_summary">逐字显示模型返回内容</string>
@@ -120,6 +128,12 @@
     <string name="settings_save">保存</string>
     <string name="settings_saved">设置已保存</string>
     <string name="settings_test_connection">测试连接</string>
+    <string name="settings_diagnostics">综合测试</string>
+    <string name="settings_diagnostics_hint">分别验证文字、流式、工具调用和图片识别；最多发送 4 次小型模型请求，可能产生费用。测试工具不会操作手机。</string>
+    <string name="settings_diagnostic_text">文字回复</string>
+    <string name="settings_diagnostic_stream">流式输出</string>
+    <string name="settings_diagnostic_tools">工具调用</string>
+    <string name="settings_diagnostic_vision">图片输入</string>
     <string name="settings_testing">测试中…</string>
     <string name="settings_test_ok">连接成功</string>
     <string name="settings_test_failed">连接失败</string>
@@ -135,6 +149,7 @@
     <string name="error_api_key_required">该服务商需要填写 API Key</string>
     <string name="error_temperature_range">温度需在 0 到 2 之间</string>
     <string name="error_max_tokens_range">最大 Token 需在 1 到 32768 之间</string>
+    <string name="error_total_tokens_range">输出 Token 需为 1–2000000；总 Token 留空自动识别，实际总预算必须大于输出且不超过 2000000</string>
     <string name="error_top_p_range">Top P 需在 0 到 1 之间</string>
 
     <!-- 权限 -->
