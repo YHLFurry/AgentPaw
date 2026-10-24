@@ -12,6 +12,7 @@ import com.paw.agent.data.settings.AppSettings
 import com.paw.agent.data.settings.SettingsRepository
 import com.paw.agent.data.settings.UiThemeMode
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -22,6 +23,7 @@ import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -105,12 +107,86 @@ class LlmSettingsViewModelTest {
         assertEquals(0, viewModel.uiState.value.maxToolRounds)
     }
 
+    @Test fun `rejects total token budget smaller than output`() = runTest {
+        val viewModel = LlmSettingsViewModel(fakeSettingsRepo, fakeLlmClient)
+        advanceUntilIdle()
+        viewModel.onMaxTokensChange(2048)
+        viewModel.onMaxTotalTokensChange(1024)
+        viewModel.save()
+        advanceUntilIdle()
+        assertFalse(viewModel.uiState.value.isValid)
+        assertEquals("error_total_tokens_range", viewModel.uiState.value.tokenError)
+    }
+
+    @Test fun `connection test stores provider context metadata for the current model`() = runTest {
+        val viewModel = LlmSettingsViewModel(fakeSettingsRepo, fakeLlmClient)
+        advanceUntilIdle()
+        viewModel.testConnection()
+        advanceUntilIdle()
+        assertEquals(65_536, viewModel.uiState.value.toConfig().effectiveMaxTotalTokens)
+        assertEquals(65_536, fakeSettingsRepo.settings.value.llm.detectedTotalTokens)
+    }
+
+    @Test fun `overflowing token input remains visible and cannot become automatic mode`() = runTest {
+        val viewModel = LlmSettingsViewModel(fakeSettingsRepo, fakeLlmClient)
+        advanceUntilIdle()
+        viewModel.onMaxTotalTokensInputChange("999999999999999999")
+        viewModel.save()
+        advanceUntilIdle()
+        assertEquals("999999999999999999", viewModel.uiState.value.maxTotalTokensInput)
+        assertFalse(viewModel.uiState.value.isValid)
+        assertTrue(viewModel.uiState.value.maxTotalTokens != 0)
+    }
+
+    @Test fun `changing model cancels old connection result`() = runTest {
+        val viewModel = LlmSettingsViewModel(fakeSettingsRepo, fakeLlmClient)
+        advanceUntilIdle()
+        fakeLlmClient.probeDelay = 1000
+        viewModel.testConnection()
+        runCurrent()
+        viewModel.onModelChange("another-model")
+        advanceUntilIdle()
+        assertEquals(TestState.Idle, viewModel.uiState.value.testState)
+        assertEquals(0, viewModel.uiState.value.detectedTotalTokens)
+    }
+
+    @Test fun `save failure is shown without reporting success`() = runTest {
+        val viewModel = LlmSettingsViewModel(fakeSettingsRepo, fakeLlmClient)
+        advanceUntilIdle()
+        fakeSettingsRepo.failWrites = true
+        viewModel.save()
+        advanceUntilIdle()
+        assertEquals(null, viewModel.uiState.value.savedAt)
+        assertTrue(viewModel.uiState.value.saveError.orEmpty().contains("disk full"))
+    }
+
+    @Test fun `reset restores LLM defaults while preserving expert mode`() = runTest {
+        val viewModel = LlmSettingsViewModel(fakeSettingsRepo, fakeLlmClient)
+        advanceUntilIdle()
+        viewModel.onToggleExpertMode(true)
+        viewModel.onTimeoutSecondsChange(120)
+        viewModel.onPacingProfileChange("FAST")
+        advanceUntilIdle()
+        viewModel.resetToDefaults()
+        advanceUntilIdle()
+        assertTrue(viewModel.uiState.value.expertMode)
+        assertEquals(60, viewModel.uiState.value.timeoutSeconds)
+        assertEquals("BALANCED", viewModel.uiState.value.pacingProfile)
+        assertEquals(0, viewModel.uiState.value.maxTotalTokens)
+    }
+
     private class FakeLlmClient : LlmClient {
+        var probeDelay = 0L
         override fun complete(config: LlmConfig, request: ChatCompletionRequest): Flow<LlmChunk> = emptyFlow()
-        override suspend fun testConnection(config: LlmConfig): Result<Unit> = Result.success(Unit)
+        override suspend fun testConnection(config: LlmConfig): Result<Unit> {
+            delay(probeDelay)
+            return Result.success(Unit)
+        }
+        override suspend fun detectContextWindow(config: LlmConfig): Result<Int?> = Result.success(65_536)
     }
 
     private class FakeSettingsRepository : SettingsRepository {
+        var failWrites = false
         private val _settings = MutableStateFlow(
             AppSettings(
                 llm = LlmConfig(
@@ -123,6 +199,7 @@ class LlmSettingsViewModelTest {
         override val settings = _settings.asStateFlow()
 
         override suspend fun updateLlm(transform: (LlmConfig) -> LlmConfig) {
+            if (failWrites) throw java.io.IOException("disk full")
             _settings.update { it.copy(llm = transform(it.llm)) }
         }
 

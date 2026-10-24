@@ -80,6 +80,14 @@
     <string name="settings_models_fetched_title">Live Models (%1$d, tap to select):</string>
     <string name="settings_temperature">Temperature</string>
     <string name="settings_max_tokens">Max output tokens</string>
+    <string name="settings_max_total_tokens">Max total tokens (blank = auto)</string>
+    <string name="settings_max_total_tokens_hint">Input plus output budget per request; blank uses provider metadata or a conservative estimate</string>
+    <string name="settings_detected_total_tokens">Current estimate: %1$d tokens (editable)</string>
+    <string name="settings_provider_total_tokens">Provider reports: %1$d tokens (editable)</string>
+    <string name="settings_reasoning_effort">Reasoning effort (may be unsupported by compatible endpoints)</string>
+    <string name="settings_reasoning_hint">AUTO uses the server default. Reasoning consumes the output budget; sampling parameters are omitted for reasoning models. Test the connection to check supported effort levels.</string>
+    <string name="settings_auto_compress">Automatically compress context</string>
+    <string name="settings_auto_compress_hint">Compress near the limit, then retry once with more compression after a context error</string>
     <string name="settings_top_p">Top P</string>
     <string name="settings_stream">Stream responses</string>
     <string name="settings_stream_summary">Show tokens as they arrive</string>
@@ -125,6 +133,12 @@
     <string name="settings_save">Save</string>
     <string name="settings_saved">Settings saved</string>
     <string name="settings_test_connection">Test connection</string>
+    <string name="settings_diagnostics">Test all capabilities</string>
+    <string name="settings_diagnostics_hint">Checks text, streaming, tool calls and image recognition with up to 4 small model requests. Charges may apply. Test tools never operate your phone.</string>
+    <string name="settings_diagnostic_text">Text responses</string>
+    <string name="settings_diagnostic_stream">Streaming</string>
+    <string name="settings_diagnostic_tools">Tool calls</string>
+    <string name="settings_diagnostic_vision">Image input</string>
     <string name="settings_testing">Testing…</string>
     <string name="settings_test_ok">Connection successful</string>
     <string name="settings_test_failed">Connection failed</string>
@@ -141,6 +155,7 @@
     <string name="error_api_key_required">API key is required for this provider</string>
     <string name="error_temperature_range">Temperature must be between 0 and 2</string>
     <string name="error_max_tokens_range">Max tokens must be between 1 and 32768</string>
+    <string name="error_total_tokens_range">Output must be 1–2000000; total may be blank for auto detection, but the effective total must exceed output and be at most 2000000</string>
     <string name="error_top_p_range">Top P must be between 0 and 1</string>
 
     <!-- Accessibility & Permissions -->

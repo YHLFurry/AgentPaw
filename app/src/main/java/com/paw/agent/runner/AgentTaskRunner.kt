@@ -412,6 +412,10 @@ class AgentTaskRunner(
 
     private fun handleEvent(event: AgentEvent) {
         when (event) {
+            is AgentEvent.ContextCompressed -> AgentExecutionController.updateProgress(
+                stepCount, maxSteps,
+                "上下文已${if (event.passive) "在超限后" else "自动"}压缩：约 ${event.beforeTokens} → ${event.afterTokens} Token",
+            )
             is AgentEvent.AssistantDelta -> {
                 val currentId = activeAssistantId
                 if (currentId == null) {
@@ -496,6 +500,10 @@ class AgentTaskRunner(
                         )
                     }
                     activeAssistantId = null
+                } else {
+                    conversationRepository.addMessage(event.message.copy(
+                        id = UUID.randomUUID().toString(), createdAt = System.currentTimeMillis(),
+                    ))
                 }
                 AgentExecutionController.markFailed(event.message.error ?: "执行失败")
             }

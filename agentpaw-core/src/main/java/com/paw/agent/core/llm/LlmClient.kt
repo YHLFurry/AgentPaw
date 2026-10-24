@@ -45,4 +45,7 @@ interface LlmClient {
      * 联网拉取当前配置端点支持的模型列表 (GET /v1/models)
      */
     suspend fun listModels(config: LlmConfig): Result<List<String>> = Result.success(emptyList())
+
+    /** Optional provider-reported context window. Null means metadata is unavailable. */
+    suspend fun detectContextWindow(config: LlmConfig): Result<Int?> = Result.success(null)
 }

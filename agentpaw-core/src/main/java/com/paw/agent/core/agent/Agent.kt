@@ -22,7 +22,6 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import java.io.File
-import java.util.Base64
 
 /**
  * Events emitted by [Agent.run] while it works through a turn.
@@ -48,6 +47,8 @@ sealed interface AgentEvent {
 
     /** AI 智能识别的步间等待延时与节奏调整 */
     data class AdaptivePaced(val call: ToolCall, val delayMillis: Long, val reason: String) : AgentEvent
+
+    data class ContextCompressed(val beforeTokens: Int, val afterTokens: Int, val passive: Boolean) : AgentEvent
 
     /** The turn ended normally. */
     data class Completed(val message: Message) : AgentEvent
@@ -121,37 +122,61 @@ class Agent(
             var lastEmissionAt = 0L
             var emittedLength = 0
 
-            try {
-                llmClient.complete(config, buildRequest(config, workingHistory, sanitizedTools))
-                    .collect { chunk ->
-                        when (chunk) {
-                            is LlmChunk.Delta -> {
-                                buffer.append(chunk.text)
-                                val now = System.nanoTime()
-                                if (emittedLength == 0 || now - lastEmissionAt >= streamUpdateIntervalMs * 1_000_000) {
-                                  emit(
-                                    AgentEvent.AssistantDelta(
-                                        currentAssistant(buffer, assistantId, MessageStatus.STREAMING),
-                                    ),
-                                )
-                                  emittedLength = buffer.length
-                                  lastEmissionAt = now
+            var previousEstimate = Int.MAX_VALUE
+            val schemaTokens = toolRegistry.definitions.sumOf {
+                ContextBudget.estimateText(it.name + it.description + it.parametersSchema) + 16
+            }
+            for (attempt in 0..1) {
+                try {
+                    val normalized = ContextHistory.retainImages(ContextHistory.normalize(workingHistory))
+                    val compacted = ContextBudget.compact(normalized, config,
+                        aggressive = attempt > 0, toolSchemaTokens = schemaTokens,
+                        targetTokens = if (attempt > 0) (previousEstimate * 0.6).toInt() else null)
+                    val before = normalized.sumOf(ContextBudget::estimate)
+                    val after = compacted.sumOf(ContextBudget::estimate)
+                    if (attempt > 0 && after >= previousEstimate) {
+                        throw LlmException.ContextLimit("服务端上下文限制低于当前预算，已无法继续压缩；请调低最大总 Token 或减少当前任务附件")
+                    }
+                    previousEstimate = after
+                    if (after < before) emit(AgentEvent.ContextCompressed(before, after, attempt > 0))
+                    sanitizedTools.keys.retainAll(compacted.toSet())
+                    llmClient.complete(config, buildRequest(config, compacted, sanitizedTools))
+                        .collect { chunk ->
+                            when (chunk) {
+                                is LlmChunk.Delta -> {
+                                    buffer.append(chunk.text)
+                                    val now = System.nanoTime()
+                                    if (emittedLength == 0 || now - lastEmissionAt >= streamUpdateIntervalMs * 1_000_000) {
+                                        emit(AgentEvent.AssistantDelta(
+                                            currentAssistant(buffer, assistantId, MessageStatus.STREAMING)))
+                                        emittedLength = buffer.length
+                                        lastEmissionAt = now
+                                    }
+                                }
+                                is LlmChunk.ToolCalls -> pendingToolCalls += chunk.calls
+                                is LlmChunk.Done -> when (chunk.finishReason) {
+                                    "length" -> throw LlmException.ContextLimit("回复达到输出 Token 上限，内容可能不完整；请增加最大输出 Token 后重试")
+                                    "content_filter" -> throw LlmException.ContextLimit("服务端过滤了回复，未执行后续工具")
+                                    else -> Unit
                                 }
                             }
-
-                            is LlmChunk.ToolCalls -> pendingToolCalls += chunk.calls
-
-                            is LlmChunk.Done -> Unit
                         }
+                    break
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: LlmException) {
+                    if (attempt == 0 && config.autoCompress && buffer.isEmpty() &&
+                        e is LlmException.Http && e.isContextOverflow) {
+                        pendingToolCalls.clear()
+                        continue
                     }
-            } catch (e: LlmException) {
-                failure = e
-            } catch (e: kotlinx.coroutines.CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                failure = LlmException.Malformed(e)
+                    failure = e
+                    break
+                } catch (e: Exception) {
+                    failure = LlmException.Malformed(e)
+                    break
+                }
             }
-
             if (buffer.length != emittedLength) emit(AgentEvent.AssistantDelta(currentAssistant(buffer, assistantId, MessageStatus.STREAMING)))
             val roundDurationMs = ((System.nanoTime() - roundStartedAt) / 1_000_000).coerceAtLeast(0L)
 
@@ -207,6 +232,7 @@ class Agent(
                 val result = executeTool(call, context)
                 emit(AgentEvent.ToolFinished(result))
                 workingHistory = workingHistory + result.toMessages()
+                workingHistory = ContextHistory.retainImages(workingHistory)
 
                 if (enableAdaptivePacing && !isCancelled() && !call.name.lowercase().contains("wait")) {
                     val decision = AdaptivePacingEngine.evaluateDelay(call, assistantMessage.content)
@@ -281,27 +307,16 @@ class Agent(
                 if (config.systemPrompt.isNotBlank()) {
                     add(WireMessage(role = "system", content = config.systemPrompt))
                 }
-                // Retain only the latest 2 observations with full images to prevent token bloat
-                val allImageIndices = history.mapIndexedNotNull { index, msg ->
-                    if (msg.images.isNotEmpty()) index else null
-                }
-                val keepImageIndices = allImageIndices.takeLast(2).toSet()
-
-                history.forEachIndexed { index, message ->
+                history.forEach { message ->
                     when (message.role) {
                         MessageRole.SYSTEM -> add(
                             WireMessage(role = "system", content = message.content),
                         )
 
                         MessageRole.USER -> {
-                            val shouldSendImages = message.images.isNotEmpty() && index in keepImageIndices
+                            val shouldSendImages = message.images.isNotEmpty()
                             if (!shouldSendImages) {
-                                val textContent = if (message.images.isNotEmpty() && index !in keepImageIndices) {
-                                    "${message.content} (Previous screenshot omitted to preserve context)"
-                                } else {
-                                    message.content
-                                }
-                                add(WireMessage(role = "user", content = textContent))
+                                add(WireMessage(role = "user", content = message.content))
                             } else {
                                 val parts = buildList {
                                     if (message.content.isNotBlank()) {
@@ -316,9 +331,7 @@ class Agent(
                                                 val ext = f.extension.lowercase()
                                                 // 严格校验必须为常规图片文件且大小合理，杜绝目录穿越越权读取非图片私有敏感文件
                                                 if (f.exists() && f.isFile && ext in validExts && f.length() <= 10 * 1024 * 1024) {
-                                                    val b64 = Base64.getEncoder().encodeToString(f.inputStream().use { com.paw.agent.core.io.BoundedIO.readBytes(it) })
-                                                    val mime = when (ext) { "png" -> "image/png"; "webp" -> "image/webp"; "bmp" -> "image/bmp"; else -> "image/jpeg" }
-                                                    "data:$mime;base64,$b64"
+                                                    runCatching { FileImageCache.dataUrl(f) }.getOrNull()
                                                 } else null
                                             }
                                             else -> "data:image/jpeg;base64,$img"
@@ -442,6 +455,7 @@ class Agent(
     }
 
     companion object {
+        fun clearImageCache() = FileImageCache.clear()
         const val DEFAULT_MAX_TOOL_ROUNDS = 8
         const val MAX_SAFETY_TOOL_ROUNDS = 100
 
