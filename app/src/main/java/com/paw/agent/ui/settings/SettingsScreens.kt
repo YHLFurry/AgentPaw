@@ -683,9 +683,7 @@ fun AgentControlPage(
     val hasNotificationPermission = remember(permRefreshTick.intValue) {
         com.paw.agent.device.DevicePermissionManager.hasNotificationPermission(context)
     }
-    val notificationPermissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
-        contract = androidx.activity.result.contract.ActivityResultContracts.RequestPermission(),
-    ) { _ ->
+    val requestNotifications = com.paw.agent.ui.components.rememberNotificationPermissionAction {
         permRefreshTick.intValue++
     }
     val coroutineScope = androidx.compose.runtime.rememberCoroutineScope()
@@ -881,13 +879,7 @@ fun AgentControlPage(
                     stringResource(R.string.permission_not_granted)
                 },
                 actionText = stringResource(R.string.permission_open_settings),
-                onAction = {
-                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
-                        notificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
-                    } else {
-                        com.paw.agent.device.DevicePermissionManager.openNotificationSettings(context)
-                    }
-                },
+                onAction = requestNotifications,
             )
         }
 
