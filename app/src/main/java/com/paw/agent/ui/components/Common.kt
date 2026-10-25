@@ -71,6 +71,13 @@ fun EmptyChatState(
             textAlign = TextAlign.Center,
         )
         if (!configured) {
+            Spacer(Modifier.height(12.dp))
+            AppText(
+                text = stringResource(R.string.chat_setup_help),
+                style = AppTheme.typography.bodySmall,
+                color = AppTheme.colors.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
             Spacer(Modifier.height(24.dp))
             AppSurface(
                 onClick = onOpenSettings,
@@ -89,7 +96,7 @@ fun EmptyChatState(
                     )
                     Spacer(Modifier.width(8.dp))
                     AppText(
-                        text = stringResource(R.string.chat_open_settings),
+                        text = stringResource(R.string.chat_configure_model),
                         style = AppTheme.typography.labelLarge,
                         fontWeight = FontWeight.Medium,
                     )

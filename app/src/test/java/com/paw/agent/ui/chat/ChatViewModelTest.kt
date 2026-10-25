@@ -1,5 +1,8 @@
 package com.paw.agent.ui.chat
 
+import androidx.lifecycle.SavedStateHandle
+import com.paw.agent.data.conversation.ConversationRepository
+
 import com.paw.agent.core.agent.Agent
 import com.paw.agent.core.agent.AgentContext
 import com.paw.agent.core.agent.AgentTool
@@ -44,6 +47,86 @@ import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class ChatViewModelTest {
+    @Test fun `text draft waits for conversation restoration before being recovered`() = runTest(testDispatcher) {
+        val ready = MutableStateFlow(false)
+        val repository = object : ConversationRepository by conversationRepository {
+            override val isInitialized = ready
+        }
+        val handle = SavedStateHandle(mapOf(
+            ChatViewModel.DRAFT_CONVERSATION_KEY to conversationRepository.conversation.value.id,
+            ChatViewModel.DRAFT_TEXT_KEY to "unfinished task",
+        ))
+        val viewModel = ChatViewModel(Agent(ScriptedLlmClient(emptyList())), repository, settingsRepository, savedStateHandle = handle)
+        advanceUntilIdle()
+        assertEquals("", viewModel.uiState.value.draft)
+        assertEquals("unfinished task", handle.get<String>(ChatViewModel.DRAFT_TEXT_KEY))
+        ready.value = true
+        advanceUntilIdle()
+        assertEquals("unfinished task", viewModel.uiState.value.draft)
+    }
+
+    @Test fun `draft from another conversation is never restored`() = runTest(testDispatcher) {
+        val handle = SavedStateHandle(mapOf(
+            ChatViewModel.DRAFT_CONVERSATION_KEY to "another-conversation",
+            ChatViewModel.DRAFT_TEXT_KEY to "old task",
+        ))
+        val viewModel = ChatViewModel(Agent(ScriptedLlmClient(emptyList())), conversationRepository, settingsRepository, savedStateHandle = handle)
+        advanceUntilIdle()
+        assertEquals("", viewModel.uiState.value.draft)
+        assertEquals("", handle.get<String>(ChatViewModel.DRAFT_TEXT_KEY))
+    }
+
+    @Test fun `user edit before initialization wins over restored draft`() = runTest(testDispatcher) {
+        val ready = MutableStateFlow(false)
+        val repository = object : ConversationRepository by conversationRepository {
+            override val isInitialized = ready
+        }
+        val handle = SavedStateHandle(mapOf(
+            ChatViewModel.DRAFT_CONVERSATION_KEY to conversationRepository.conversation.value.id,
+            ChatViewModel.DRAFT_TEXT_KEY to "old text",
+        ))
+        val viewModel = ChatViewModel(Agent(ScriptedLlmClient(emptyList())), repository, settingsRepository, savedStateHandle = handle)
+        viewModel.onDraftChange("new text")
+        ready.value = true
+        advanceUntilIdle()
+        assertEquals("new text", viewModel.uiState.value.draft)
+        assertEquals("new text", handle.get<String>(ChatViewModel.DRAFT_TEXT_KEY))
+    }
+
+    @Test fun `sending clears saved draft and a new conversation keeps its new edits`() = runTest(testDispatcher) {
+        val handle = SavedStateHandle()
+        val viewModel = ChatViewModel(Agent(ScriptedLlmClient(listOf(listOf(LlmChunk.Delta("done"))))), conversationRepository, settingsRepository, savedStateHandle = handle)
+        advanceUntilIdle()
+        viewModel.onDraftChange("task")
+        assertEquals("task", handle.get<String>(ChatViewModel.DRAFT_TEXT_KEY))
+        viewModel.onSendOrStop(config)
+        advanceUntilIdle()
+        assertEquals("", handle.get<String>(ChatViewModel.DRAFT_TEXT_KEY))
+        viewModel.onDraftChange("discard this")
+        viewModel.newConversation()
+        viewModel.onDraftChange("keep new draft")
+        advanceUntilIdle()
+        assertEquals("keep new draft", viewModel.uiState.value.draft)
+        assertEquals(conversationRepository.conversation.value.id, handle.get<String>(ChatViewModel.DRAFT_CONVERSATION_KEY))
+        assertEquals("keep new draft", handle.get<String>(ChatViewModel.DRAFT_TEXT_KEY))
+    }
+
+    @Test fun `external conversation switch clears old draft and attachments`() = runTest(testDispatcher) {
+        val handle = SavedStateHandle()
+        val viewModel = ChatViewModel(Agent(ScriptedLlmClient(emptyList())), conversationRepository, settingsRepository, savedStateHandle = handle)
+        val discarded = mutableListOf<String>()
+        advanceUntilIdle()
+        viewModel.onDraftChange("old task")
+        viewModel.importImages(listOf("image"), importer = { _, _ -> "private-image" }, discard = { discarded += it })
+        advanceUntilIdle()
+        conversationRepository.newConversation()
+        advanceUntilIdle()
+        assertEquals("", viewModel.uiState.value.draft)
+        assertTrue(viewModel.uiState.value.images.isEmpty())
+        assertEquals(listOf("private-image"), discarded)
+        assertEquals("", handle.get<String>(ChatViewModel.DRAFT_TEXT_KEY))
+    }
+
     @Test fun `removed local files cannot be sent as invisible attachments`() = runTest(testDispatcher) {
         val viewModel = ChatViewModel(Agent(ScriptedLlmClient(emptyList())), conversationRepository, settingsRepository)
         viewModel.importImages(listOf("missing"), importer = { _, _ -> "file:///definitely-missing-agentpaw.jpg" })

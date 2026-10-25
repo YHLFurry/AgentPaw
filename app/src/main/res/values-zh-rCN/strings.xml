@@ -4,12 +4,33 @@
 
     <string name="nav_chat">对话</string>
     <string name="nav_settings">LLM 设置</string>
+    <string name="floating_running">正在执行</string>
+    <string name="floating_paused">已暂停</string>
+    <string name="floating_finished">任务已结束</string>
+    <string name="floating_preparing">正在准备下一步操作…</string>
+    <string name="floating_step_budget">第 %1$d 步 · 上限 %2$d 步</string>
+    <string name="floating_step_unlimited">第 %1$d 步 · 不限步数</string>
+    <string name="floating_expand">展开任务详情</string>
+    <string name="floating_collapse">收起任务详情</string>
+    <string name="floating_open_chat">打开对话</string>
+    <string name="floating_view">查看</string>
+    <string name="floating_resume">继续</string>
+    <string name="floating_stop_description">停止当前任务</string>
+    <string name="floating_resume_description">继续执行已暂停的任务</string>
 
     <string name="chat_title">AgentPaw</string>
     <string name="chat_input_hint">给 AgentPaw 发消息…</string>
     <string name="chat_send">发送</string>
     <string name="chat_stop">停止</string>
     <string name="chat_new_conversation">新对话</string>
+    <string name="chat_new_confirm_title">开始新对话？</string>
+    <string name="chat_new_confirm_help">当前任务将停止，续操断点及未发送的文字、图片将被清除。已有消息仍保留在历史记录中。</string>
+    <string name="chat_configure_model">配置模型服务</string>
+    <string name="chat_setup_help">1. 选择服务商，填写接口地址与模型，然后保存。\n2. 在模型设置中测试连接。\n3. 如需操控手机，开启无障碍服务，或授权 Shizuku / Root。\n\nAPI Key 在本机加密保存；执行任务时使用的指令和截图会发送至你选择的模型服务。</string>
+    <string name="chat_notification_recovery_title">通知尚未开启</string>
+    <string name="chat_notification_recovery_help">通知可在切换到其他应用时显示任务进度，并提供停止按钮。你可以前往系统设置开启，取消不影响继续聊天。</string>
+    <string name="chat_open_system_settings">前往系统设置</string>
+    <string name="chat_filter_empty">此视图暂无消息，切换到全部消息可查看完整对话。</string>
     <string name="chat_clear">清空对话</string>
     <string name="chat_empty_title">爪印待命</string>
     <string name="chat_empty_subtitle">先在设置里配置 LLM，然后开始对话。</string>
