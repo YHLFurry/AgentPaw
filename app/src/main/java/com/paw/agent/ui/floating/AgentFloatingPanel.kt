@@ -165,8 +165,8 @@ internal class AgentFloatingPanel(
         detail.visibility = if (isExpanded) View.VISIBLE else View.GONE
         steps.text = stepLabel
         footer.visibility = if (isExpanded) View.VISIBLE else View.GONE
-        logo.setImageResource(if (isExpanded) R.drawable.ic_launcher_foreground else R.drawable.ic_floating_chevron)
-        logo.rotation = if (isExpanded) 0f else 180f
+        // Keep the button's coordinate system unchanged for accessibility and UI automation.
+        logo.setImageResource(if (isExpanded) R.drawable.ic_launcher_foreground else R.drawable.ic_floating_expand)
         logo.imageTintList = if (isExpanded) null else ColorStateList.valueOf(accent)
         logo.contentDescription = context.getString(if (isExpanded) R.string.floating_collapse else R.string.floating_expand)
         action.text = context.getString(when {
