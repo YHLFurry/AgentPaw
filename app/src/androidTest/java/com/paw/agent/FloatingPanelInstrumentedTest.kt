@@ -40,6 +40,7 @@ class FloatingPanelInstrumentedTest {
             }
         }
         onView(withId(R.id.floating_collapse)).perform(click())
+        compose.waitForIdle()
         onView(withId(R.id.floating_action)).check(matches(isDisplayed())).perform(click())
         compose.runOnIdle {
             assertFalse(panel.isExpanded)
@@ -47,8 +48,8 @@ class FloatingPanelInstrumentedTest {
             assertEquals(View.GONE, panel.findViewById<View>(R.id.floating_detail).visibility)
         }
         onView(withId(R.id.floating_toggle)).perform(click())
-        onView(withId(R.id.floating_detail)).check(matches(isDisplayed()))
         compose.runOnIdle { assertTrue(panel.isExpanded) }
+        onView(withId(R.id.floating_detail)).check(matches(isDisplayed()))
     }
 
     @Test fun pauseAndFinishUpdateActionLabelsAtLargeFontSize() {
