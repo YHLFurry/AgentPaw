@@ -19,15 +19,16 @@
 git diff --check
 ```
 
-- 最终合并和版本更新后构建成功；222 项任务，31 项执行、191 项 up-to-date。
+- 最终按钮修复后构建成功；222 项任务，49 项执行、2 项来自缓存、171 项 up-to-date。
 - app：Debug/Release 各 70 项测试，全部通过。
 - core：Debug/Release 各 283 项测试，分别 281 通过、2 条件跳过；无失败或错误。跳过项涉及公网搜索及符号链接环境。
 - Lint：app 91 条警告、core 24 条警告，均无错误。
 - Debug、Release 及 Android 仪器测试 APK 编译成功。
+- [云端设备回归](https://github.com/YHLFurry/AgentPaw/actions/runs/40498720870)：API 26/35 各 15 项通过，含双主题聊天与悬浮面板回归。
 - 差异空白检查通过；远端聊天和悬浮窗改动已合并，保留本地调度修复及全部回归测试。
 
 ## 验证边界
 
-ADB 无连接设备，未执行仪器测试；Root/Shizuku、系统授权、OEM 后台限制、悬浮窗旋转和 TalkBack 仍需设备验证。本地校验复用了未变化任务的 Gradle 结果，Actions 将在独立环境重新校验及构建发布产物。
+本机 ADB 无连接设备，仪器测试由云端 API 26/35 模拟器执行；Root/Shizuku、系统授权、OEM 后台限制、悬浮窗旋转和 TalkBack 仍需专门设备验证。本地校验复用了未变化任务的 Gradle 结果，Actions 在独立环境重新校验及构建发布产物。
 
 当前 GitHub OAuth 凭据缺少 `workflow` scope，因此发布分支不包含工作流修改；改为调用已有 CI 工作流验证发布分支，再推送标签触发已有发布工作流。
