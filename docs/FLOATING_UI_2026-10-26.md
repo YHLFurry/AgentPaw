@@ -20,6 +20,4 @@ git diff --check
 adb devices -l
 ```
 
-PR 独立工作树中 app 57 项单元测试通过。新增 `FloatingPanelInstrumentedTest`，覆盖收起后停止/再次展开，以及 200% 字号下暂停到结束的按钮状态；已编译进测试 APK。ADB 无连接设备，因此未实际运行这两项界面测试，也未完成真机截图、旋转/刘海边界与 TalkBack 验证。
-
-PR 范围：本轮独立工作树仅提交体验与悬浮窗改动。原工作区的任务调度修复及其 13 项测试未纳入本 PR；此前原工作区 app 70 项测试通过，本 PR 独立验证 app 57 项。
+app 70 项单元测试通过。新增 `FloatingPanelInstrumentedTest`，覆盖收起后停止/再次展开，以及 200% 字号下暂停到结束的按钮状态；已编译进测试 APK。ADB 无连接设备，因此未实际运行这两项界面测试，也未完成真机截图、旋转/刘海边界与 TalkBack 验证。

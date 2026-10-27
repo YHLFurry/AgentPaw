@@ -49,18 +49,18 @@
 $env:JAVA_HOME='C:\Program Files\Java\jdk-21.0.10'
 .\gradlew.bat :app:compileDebugKotlin --offline --console=plain --max-workers=2
 .\gradlew.bat :app:testDebugUnitTest --offline --console=plain --max-workers=2
-.\gradlew.bat :app:testDebugUnitTest :agentpaw-core:testDebugUnitTest :app:assembleDebug :app:lintDebug :app:assembleDebugAndroidTest --offline --console=plain --max-workers=2
+.\gradlew.bat testDebugUnitTest :app:assembleDebug :app:lintDebug :agentpaw-core:lintDebug :app:assembleDebugAndroidTest --offline --console=plain --max-workers=2
 git diff --check
 adb devices -l
 ```
 
-PR 独立工作树中的最终组合命令返回 **BUILD SUCCESSFUL**。core 测试复用了 Gradle 缓存，包含本轮 5 项草稿回归的 app 测试实际执行。
+最终组合命令返回 **BUILD SUCCESSFUL**。其后仅更新了权限方法的说明注释，无行为代码变更。
 
 | 检查 | 结果 |
 | --- | --- |
-| app Debug JVM 单元测试 | 57 项全部通过；本轮新增 5 项草稿回归测试 |
+| app Debug JVM 单元测试 | 70 项全部通过；本轮新增 5 项草稿回归测试 |
 | core Debug JVM 单元测试 | 283 项：281 通过、2 条件跳过、0 失败 |
-| app Debug Lint | 0 errors, 81 warnings；未为清零既有警告扩大范围 |
+| app / core Debug Lint | 0 错误；分别 104 / 24 条警告，未为清零既有警告扩大范围 |
 | Debug APK | `app/build/outputs/apk/debug/app-debug.apk` 构建成功 |
 | Android 测试 APK | `app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk` 构建成功 |
 | 双主题 UI 回归用例 | 新增 4 个场景 × 2 个主题：新对话确认/取消、保存重试及重复 ID、模型直达、历史加载状态；仅完成编译，未执行设备测试 |
@@ -75,5 +75,3 @@ PR 独立工作树中的最终组合命令返回 **BUILD SUCCESSFUL**。core 测
 - 未自动重跑失败的手机操作。已有任务可能已经点击、发送或修改外部应用，盲目重跑有重复执行风险；继续复用已有断点与显式确认路径。
 - 通知权限拒绝/永久拒绝、系统设置往返、Root/Shizuku、OEM 后台限制、TalkBack、双主题窄屏大字仍需 API 26 与 API 33+ 设备回归。构建成功不能代替实际界面验证。
 - 扫描开始时已经存在 `AgentTaskRunner`、`TaskCheckpointStore`、相关测试及 `AUDIT_2026-10-26.md` 的未提交改动。本轮予以保留；对已有 `ChatViewModelTest` 仅增补草稿测试，不将先前调度修复归为本轮成果。
-
-PR 范围：本轮独立工作树仅提交体验与悬浮窗改动。原工作区的任务调度修复及其 13 项测试未纳入本 PR；此前原工作区 app 70 项测试通过，本 PR 独立验证 app 57 项。

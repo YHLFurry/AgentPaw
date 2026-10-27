@@ -24,6 +24,8 @@ import com.paw.agent.data.settings.AppSettings
 import com.paw.agent.data.settings.SettingsRepository
 import com.paw.agent.data.settings.UiThemeMode
 import com.paw.agent.ui.floating.AgentExecutionController
+import com.paw.agent.core.agent.breakpoint.TaskBreakpoint
+import com.paw.agent.runner.AgentTaskRunner
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
@@ -44,9 +46,16 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import org.junit.Rule
+import org.junit.rules.TemporaryFolder
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
+import java.io.File
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class ChatViewModelTest {
+    @get:Rule val temporaryFolder = TemporaryFolder()
+
     @Test fun `text draft waits for conversation restoration before being recovered`() = runTest(testDispatcher) {
         val ready = MutableStateFlow(false)
         val repository = object : ConversationRepository by conversationRepository {
@@ -126,7 +135,6 @@ class ChatViewModelTest {
         assertEquals(listOf("private-image"), discarded)
         assertEquals("", handle.get<String>(ChatViewModel.DRAFT_TEXT_KEY))
     }
-
     @Test fun `removed local files cannot be sent as invisible attachments`() = runTest(testDispatcher) {
         val viewModel = ChatViewModel(Agent(ScriptedLlmClient(emptyList())), conversationRepository, settingsRepository)
         viewModel.importImages(listOf("missing"), importer = { _, _ -> "file:///definitely-missing-agentpaw.jpg" })
@@ -387,6 +395,140 @@ class ChatViewModelTest {
 
     // --- Helpers ---
     @Test
+    fun `breakpoints isolate user tasks and retain completed steps across resume`() = runTest(testDispatcher) {
+        var requests = 0
+        val client = object : LlmClient {
+            override fun complete(config: LlmConfig, request: ChatCompletionRequest): Flow<LlmChunk> = flow {
+                when (val round = requests++) {
+                    0, 2, 4 -> emit(LlmChunk.ToolCalls(listOf(ToolCall("echo_$round", "echo", "{\"step\":$round}"))))
+                    1 -> emit(LlmChunk.Delta("first task done"))
+                    else -> {
+                        emit(LlmChunk.Delta("waiting"))
+                        kotlinx.coroutines.awaitCancellation()
+                    }
+                }
+            }
+            override suspend fun testConnection(config: LlmConfig): Result<Unit> = Result.success(Unit)
+        }
+        val viewModel = ChatViewModel(Agent(client, ToolRegistry(listOf(EchoTool()))), conversationRepository, settingsRepository)
+        sendMessage(viewModel, "first task")
+        advanceUntilIdle()
+        sendMessage(viewModel, "second task")
+        advanceUntilIdle()
+        viewModel.stop()
+        advanceUntilIdle()
+
+        val breakpoint = viewModel.taskRunner.activeBreakpoint.value!!
+        assertEquals("second task", breakpoint.originalGoal)
+        assertEquals(listOf("{\"step\":2}"), breakpoint.completedSteps.map { it.arguments })
+
+        viewModel.resumeBreakpoint(config = config)
+        advanceUntilIdle()
+        viewModel.stop()
+        advanceUntilIdle()
+        assertEquals(listOf("{\"step\":2}", "{\"step\":4}"),
+            viewModel.taskRunner.activeBreakpoint.value!!.completedSteps.map { it.arguments })
+    }
+
+    @Test
+    fun `late disk recovery cannot replace a newly started task`() = runTest(testDispatcher) {
+        val directory = temporaryFolder.newFolder()
+        File(directory, "active_breakpoint.json").writeText(Json.encodeToString(
+            TaskBreakpoint(originalGoal = "old goal", stoppedAtStep = 4),
+        ))
+        val client = object : LlmClient {
+            override fun complete(config: LlmConfig, request: ChatCompletionRequest): Flow<LlmChunk> = flow {
+                emit(LlmChunk.Delta("new task running"))
+                kotlinx.coroutines.awaitCancellation()
+            }
+            override suspend fun testConnection(config: LlmConfig): Result<Unit> = Result.success(Unit)
+        }
+        val runner = AgentTaskRunner(agent = Agent(client), conversationRepository = conversationRepository,
+            settingsRepository = settingsRepository, scope = backgroundScope,
+            checkpointDirectory = directory, ioDispatcher = testDispatcher)
+        runner.startTask(config, "new goal")
+        testDispatcher.scheduler.runCurrent()
+
+        assertNull(runner.activeBreakpoint.value)
+        assertTrue(runner.isGenerating.value)
+        assertTrue(AgentExecutionController.state.value.isRunning)
+        assertEquals("new goal", File(directory, "running_task.json").readText())
+        runner.stop()
+        testDispatcher.scheduler.runCurrent()
+    }
+
+    @Test
+    fun `dismiss during startup prevents a recovered breakpoint from reappearing`() = runTest(testDispatcher) {
+        val directory = temporaryFolder.newFolder()
+        File(directory, "active_breakpoint.json").writeText(Json.encodeToString(
+            TaskBreakpoint(originalGoal = "discarded goal", stoppedAtStep = 4),
+        ))
+        val runner = AgentTaskRunner(agent = Agent(ScriptedLlmClient(emptyList())), conversationRepository = conversationRepository,
+            settingsRepository = settingsRepository, scope = backgroundScope,
+            checkpointDirectory = directory, ioDispatcher = testDispatcher)
+        runner.dismissBreakpoint()
+        testDispatcher.scheduler.runCurrent()
+
+        assertNull(runner.activeBreakpoint.value)
+        assertFalse(AgentExecutionController.state.value.isPaused)
+        assertFalse(File(directory, "active_breakpoint.json").exists())
+    }
+
+    @Test
+    fun `stopped coroutine cannot cancel the next task started immediately`() = runTest(testDispatcher) {
+        val client = object : LlmClient {
+            override fun complete(config: LlmConfig, request: ChatCompletionRequest): Flow<LlmChunk> = flow {
+                emit(LlmChunk.Delta("running"))
+                kotlinx.coroutines.awaitCancellation()
+            }
+            override suspend fun testConnection(config: LlmConfig): Result<Unit> = Result.success(Unit)
+        }
+        val viewModel = ChatViewModel(Agent(client), conversationRepository, settingsRepository)
+        sendMessage(viewModel, "first task")
+        testDispatcher.scheduler.runCurrent()
+        viewModel.stop()
+        sendMessage(viewModel, "second task")
+        testDispatcher.scheduler.runCurrent()
+
+        assertTrue(viewModel.taskRunner.isGenerating.value)
+        assertTrue(AgentExecutionController.state.value.isRunning)
+        assertEquals(MessageStatus.STREAMING, conversationRepository.conversation.value.messages.last().status)
+        viewModel.stop()
+        advanceUntilIdle()
+    }
+
+    @Test
+    fun `stop after completion does not create a resumable task`() = runTest(testDispatcher) {
+        val viewModel = ChatViewModel(Agent(ScriptedLlmClient(listOf(listOf(LlmChunk.Delta("done"))))), conversationRepository, settingsRepository)
+        sendMessage(viewModel, "finish task")
+        advanceUntilIdle()
+        viewModel.stop()
+
+        assertNull(viewModel.taskRunner.activeBreakpoint.value)
+        assertEquals(MessageStatus.COMPLETE, conversationRepository.conversation.value.messages.last().status)
+        assertFalse(AgentExecutionController.state.value.isPaused)
+    }
+
+    @Test
+    fun `repeated stop preserves the original breakpoint`() = runTest(testDispatcher) {
+        val client = object : LlmClient {
+            override fun complete(config: LlmConfig, request: ChatCompletionRequest): Flow<LlmChunk> = flow {
+                emit(LlmChunk.Delta("running"))
+                kotlinx.coroutines.awaitCancellation()
+            }
+            override suspend fun testConnection(config: LlmConfig): Result<Unit> = Result.success(Unit)
+        }
+        val viewModel = ChatViewModel(Agent(client), conversationRepository, settingsRepository)
+        sendMessage(viewModel, "pause task")
+        testDispatcher.scheduler.runCurrent()
+        viewModel.stop()
+        val breakpoint = viewModel.taskRunner.activeBreakpoint.value
+        viewModel.stop()
+        assertEquals(breakpoint, viewModel.taskRunner.activeBreakpoint.value)
+        advanceUntilIdle()
+    }
+
+    @Test
     fun `confirmation stops when tool reports a new safety pause`() = runTest(testDispatcher) {
         val tool = object : AgentTool {
             override val definition = ToolDefinition("risky", "Risk test tool", """{"type":"object"}""")
@@ -410,6 +552,45 @@ class ChatViewModelTest {
         assertTrue(viewModel.taskRunner.activeBreakpoint.value?.isSafetyPaused == true)
         assertFalse(viewModel.taskRunner.isGenerating.value)
         assertFalse(conversationRepository.conversation.value.messages.any { it.content.contains("must not resume") })
+    }
+
+    @Test
+    fun `confirmed action result reaches the resumed model with a matching call`() = runTest(testDispatcher) {
+        val tool = object : AgentTool {
+            override val definition = ToolDefinition("risky", "Risk test tool", """{"type":"object"}""")
+            override suspend fun execute(arguments: String, context: AgentContext): String =
+                if (context.isGranted("risk_confirmed:risky")) {
+                    """{"status":"success","receipt":"receipt_42"}"""
+                } else {
+                    """{"status":"requires_confirmation","action":"执行操作","tool_name":"risky","arguments":"{}"}"""
+                }
+        }
+        var calls = 0
+        var resumedRequest: ChatCompletionRequest? = null
+        val client = object : LlmClient {
+            override fun complete(config: LlmConfig, request: ChatCompletionRequest): Flow<LlmChunk> = flow {
+                if (calls++ == 0) emit(LlmChunk.ToolCalls(listOf(ToolCall("risk_1", "risky", "{}"))))
+                else {
+                    resumedRequest = request
+                    emit(LlmChunk.Delta("done"))
+                }
+            }
+            override suspend fun testConnection(config: LlmConfig): Result<Unit> = Result.success(Unit)
+        }
+        val viewModel = ChatViewModel(Agent(client, ToolRegistry(listOf(tool))), conversationRepository, settingsRepository)
+        sendMessage(viewModel, "执行任务")
+        advanceUntilIdle()
+        viewModel.confirmRiskAction(config)
+        advanceUntilIdle()
+
+        val confirmedAssistant = conversationRepository.conversation.value.messages.first {
+            it.toolCalls.any { call -> call.id.startsWith("confirmed_") }
+        }
+        val confirmedCall = confirmedAssistant.toolCalls.single()
+        assertTrue(resumedRequest!!.messages.any {
+            it.role == "tool" && it.toolCallId == confirmedCall.id && it.content?.asString()?.contains("receipt_42") == true
+        })
+        assertFalse(viewModel.taskRunner.isGenerating.value)
     }
 
     private class ScriptedLlmClient(
