@@ -477,4 +477,21 @@
     <string name="history_media_cleared">History images cleared</string>
     <string name="history_media_clear_failed">Some images could not be cleared. Check storage and retry.</string>
     <string name="history_clearing_media">Clearing history images…</string>
+    <string name="settings_service_workflow">Enter connection details and a model, then test and save. Tasks use the saved configuration.</string>
+    <string name="settings_base_url_hint">OpenAI-compatible base URL, such as https://host/v1. Do not include /chat/completions.</string>
+    <string name="settings_models_search">Search available models</string>
+    <string name="settings_models_no_match">No matching models. You can enter a model name manually.</string>
+    <string name="settings_loading">Loading settings…</string>
+    <string name="settings_saving">Saving…</string>
+    <string name="settings_unsaved">Unsaved changes · tap Save to apply to new tasks</string>
+    <string name="settings_reset_confirmation">Clear the saved model configuration and current draft, including the API key and generation parameters? Appearance and permissions are kept.</string>
+    <string name="settings_resetting">Restoring defaults…</string>
+    <string name="skills_discard_title">Discard unsaved changes?</string>
+    <string name="skills_discard_help">Your edits have not been saved. Leave this editor and discard them?</string>
+    <string name="skills_discard_action">Discard and leave</string>
+    <string name="settings_provider_change">Change</string>
+    <string name="settings_provider_collapse">Collapse</string>
+    <string name="settings_rounds_invalid">Enter a valid step count</string>
+    <string name="settings_provider_custom">Custom</string>
+    <string name="settings_model_manual_hint">Enter a model or fetch the available list</string>
 </resources>

@@ -7,7 +7,9 @@ import com.paw.agent.data.settings.SettingsRepository
 import com.paw.agent.data.settings.UiThemeMode
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -16,6 +18,7 @@ data class AppearanceUiState(
     val uiTheme: UiThemeMode = UiThemeMode.Default,
     val darkTheme: Boolean = false,
     val dynamicColor: Boolean = true,
+    val saveError: String? = null,
 )
 
 /** Callbacks owned by the appearance section; it never touches LLM state. */
@@ -36,14 +39,16 @@ class AppearanceSettingsViewModel(
     private val settingsRepository: SettingsRepository,
 ) : ViewModel() {
 
-    val uiState: StateFlow<AppearanceUiState> = settingsRepository.settings
-        .map { settings ->
+    private val saveError = MutableStateFlow<String?>(null)
+    val uiState: StateFlow<AppearanceUiState> = combine(settingsRepository.settings, saveError) { settings, error ->
             AppearanceUiState(
                 uiTheme = settings.uiTheme,
                 darkTheme = settings.darkTheme,
                 dynamicColor = settings.dynamicColor,
+                saveError = error,
             )
         }
+        .catch { emit(AppearanceUiState(saveError = it.message ?: "外观设置读取失败")) }
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
@@ -51,15 +56,24 @@ class AppearanceSettingsViewModel(
         )
 
     fun onUiThemeChange(mode: UiThemeMode) {
-        viewModelScope.launch { settingsRepository.setUiTheme(mode) }
+        persist { settingsRepository.setUiTheme(mode) }
     }
 
     fun onDarkThemeChange(enabled: Boolean) {
-        viewModelScope.launch { settingsRepository.setDarkTheme(enabled) }
+        persist { settingsRepository.setDarkTheme(enabled) }
     }
 
     fun onDynamicColorChange(enabled: Boolean) {
-        viewModelScope.launch { settingsRepository.setDynamicColor(enabled) }
+        persist { settingsRepository.setDynamicColor(enabled) }
+    }
+
+    private fun persist(block: suspend () -> Unit) {
+        viewModelScope.launch {
+            saveError.value = null
+            try { block()
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled
+            } catch (error: Exception) { saveError.value = error.message ?: "外观设置保存失败" }
+        }
     }
 
     class Factory(

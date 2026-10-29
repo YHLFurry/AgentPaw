@@ -19,6 +19,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Timer
 import androidx.compose.material.icons.outlined.TouchApp
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -67,6 +68,7 @@ fun TaskCompareScreen(
     val conv1 = loaded.first
     val conv2 = loaded.second
     val scrollState = rememberScrollState()
+    val isContentScrolled by remember(scrollState) { derivedStateOf { scrollState.value > 0 } }
 
     AppScaffold(
         modifier = modifier.fillMaxSize(),
@@ -81,7 +83,7 @@ fun TaskCompareScreen(
                         )
                     }
                 },
-                isContentScrolled = scrollState.value > 0,
+                isContentScrolled = isContentScrolled,
                 color = AppTheme.colors.surfaceContainer,
             )
         },

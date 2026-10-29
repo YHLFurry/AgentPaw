@@ -9,6 +9,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.LayoutDirection
@@ -28,6 +29,9 @@ import kotlin.math.sqrt
 
 private const val LIGHT_REF_X = 0.5f
 private const val LIGHT_REF_Y = 0.7f
+
+// AgentPaw compatibility change: RuntimeShader requires a hardware canvas. Software
+// snapshots and drawing skip the decorative overlays while retaining the base UI.
 
 /**
  * Both overlay shaders are stateless between draws — every uniform is written immediately before
@@ -61,7 +65,7 @@ internal fun DrawScope.drawGlassRim(
     surface: Color,
     alpha: Float,
 ) {
-    if (Build.VERSION.SDK_INT < 33) return
+    if (Build.VERSION.SDK_INT < 33 || !drawContext.canvas.nativeCanvas.isHardwareAccelerated) return
     val shader = rimShader ?: return
     if (alpha <= 0f || size.width <= 0f || size.height <= 0f) return
     if (style.background.unShade >= 0.999f) return
@@ -98,7 +102,7 @@ internal fun DrawScope.drawGlassStroke(
     stroke: GlassStroke,
     alpha: Float,
 ) {
-    if (Build.VERSION.SDK_INT < 33) return
+    if (Build.VERSION.SDK_INT < 33 || !drawContext.canvas.nativeCanvas.isHardwareAccelerated) return
     val shader = strokeShader ?: return
     if (alpha <= 0f || size.width <= 0f || size.height <= 0f) return
 
@@ -126,7 +130,7 @@ internal fun DrawScope.drawGlassStroke(
  * @param layoutDirection Resolves the shape's start and end corners.
  */
 internal fun DrawScope.drawGlassMask(shape: GlassShape, layoutDirection: LayoutDirection) {
-    if (Build.VERSION.SDK_INT < 33) return
+    if (Build.VERSION.SDK_INT < 33 || !drawContext.canvas.nativeCanvas.isHardwareAccelerated) return
     val shader = maskShader ?: return
     if (size.width <= 0f || size.height <= 0f) return
     shader.setSilhouetteUniforms(shape, layoutDirection, size, this)
@@ -192,7 +196,7 @@ internal fun DrawScope.drawGlassShadow(
     shadow: GlassShadow,
     alpha: Float,
 ) {
-    if (Build.VERSION.SDK_INT < 33) return
+    if (Build.VERSION.SDK_INT < 33 || !drawContext.canvas.nativeCanvas.isHardwareAccelerated) return
     val shader = shadowShader ?: return
     if (alpha <= 0f || size.width <= 0f || size.height <= 0f) return
 

@@ -22,7 +22,8 @@ data class InterpolatedText(
 object SkillInterpolator {
 
     private val PATTERN = Regex(
-        """\{\{\s*([a-zA-Z_][a-zA-Z0-9_.]*)\s*(?:\|\s*([^}]*))?}}|\$\{\s*([a-zA-Z_][a-zA-Z0-9_.]*)\s*}""",
+        // Android 使用 ICU，未转义的右花括号会在对象初始化时抛 PatternSyntaxException。
+        """\{\{\s*([a-zA-Z_][a-zA-Z0-9_.]*)\s*(?:\|\s*([^}]*))?\}\}|\$\{\s*([a-zA-Z_][a-zA-Z0-9_.]*)\s*\}""",
     )
 
     fun render(template: String, variables: Map<String, String>): InterpolatedText {

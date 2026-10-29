@@ -124,7 +124,7 @@ class AgentFloatingService : Service() {
         return NotificationCompat.Builder(this, channelId)
             .setContentTitle("AgentPaw 手机智能体运行中")
             .setContentText(contentText)
-            .setSmallIcon(R.mipmap.ic_launcher)
+            .setSmallIcon(R.drawable.ic_paw)
             .setContentIntent(appPendingIntent)
             .addAction(android.R.drawable.ic_media_pause, "⏹ 停止任务", stopIntent)
             .setOngoing(true)

@@ -151,7 +151,7 @@ fun ChatScreen(
                 navigationIcon = {},
                 titleContent = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        PawMark(size = 26.dp, color = AppTheme.colors.onPrimary)
+                        PawMark(size = 26.dp, color = AppTheme.colors.primary)
                         Spacer(Modifier.size(10.dp))
                         Column {
                             AppText(
