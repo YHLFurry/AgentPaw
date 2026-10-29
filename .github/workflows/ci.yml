@@ -123,4 +123,3 @@ jobs:
         with:
           name: device-tests-api-${{ matrix.api }}
           path: app/build/reports/androidTests/
-
