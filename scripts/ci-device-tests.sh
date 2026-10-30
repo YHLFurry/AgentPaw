@@ -15,7 +15,7 @@ monitor_pid=$!
 collect_diagnostics() {
   status=$?
   trap - EXIT
-  if sudo dmesg | grep -Eq 'Out of memory: Killed process.*(qemu|emulator)'; then
+  if sudo dmesg | grep -E 'Out of memory: Killed process.*(qemu|emulator)' > /dev/null; then
     echo 'emulator_oom_killed=true'
   else
     echo 'emulator_oom_killed=false'
