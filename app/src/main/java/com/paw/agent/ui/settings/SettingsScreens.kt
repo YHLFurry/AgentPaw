@@ -414,6 +414,7 @@ fun LlmServicePage(
                     var modelSearch by remember(state.fetchedModels) { mutableStateOf("") }
                     AppTextField(value = modelSearch, onValueChange = { modelSearch = it },
                         label = stringResource(R.string.settings_models_search), singleLine = true,
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                         modifier = Modifier.fillMaxWidth())
                     val matches = remember(state.fetchedModels, modelSearch) {
                         state.fetchedModels.filter { it.contains(modelSearch, ignoreCase = true) }

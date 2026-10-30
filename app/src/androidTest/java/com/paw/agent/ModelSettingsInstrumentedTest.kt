@@ -57,7 +57,9 @@ class ModelSettingsInstrumentedTest(private val theme: UiThemeMode, private val 
         show(LlmSettingsUiState(isLoading = false, provider = LlmProvider.CUSTOM,
             fetchedModels = (0..299).map { "model-$it" }), actions(onModel = { selected = it }))
         compose.onNodeWithText(text(R.string.settings_models_search)).performScrollTo().performTextInput("model-123")
-        compose.onNodeWithText("model-123").performScrollTo().performClick()
+        compose.onNodeWithText(text(R.string.settings_models_search)).performImeAction()
+        compose.onNode(hasScrollToIndexAction() and hasAnyDescendant(hasText("model-123") and isSelectable())).performScrollTo()
+        compose.onNode(hasText("model-123") and isSelectable()).performScrollTo().assertIsDisplayed().performClick()
         compose.runOnIdle { assertEquals("model-123", selected) }
     }
 
