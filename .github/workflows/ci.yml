@@ -7,6 +7,7 @@ on:
   pull_request:
     branches:
       - main
+      - 'release/**'
   workflow_dispatch:
 
 jobs:
@@ -83,7 +84,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        api: [26, 35]
+        api: [26, 35, 36]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -108,17 +109,27 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
       - run: chmod +x gradlew
+      # Build before booting the emulator to avoid overlapping compiler and emulator memory.
+      - name: Build device test APKs
+        run: ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest --no-daemon --stacktrace --max-workers=2
       - name: Run attachment and layout tests
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: ${{ matrix.api }}
           arch: x86_64
           target: google_apis
+          # Keep Android hardware rendering, using supported ANGLE software drivers on CI.
+          emulator-options: -no-window -gpu swangle -feature -Vulkan -no-snapshot -noaudio -no-boot-anim
           disable-animations: true
-          script: ./gradlew :app:connectedDebugAndroidTest --no-daemon --stacktrace --max-workers=2
+          script: bash scripts/ci-device-tests.sh
       - name: Upload device test reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: device-tests-api-${{ matrix.api }}
-          path: app/build/reports/androidTests/
+          path: |
+            app/build/reports/androidTests/
+            app/build/outputs/androidTest-results/connected/debug/TEST-*.xml
+            build/device-diagnostics/
+
+

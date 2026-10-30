@@ -30,6 +30,8 @@ import androidx.compose.material.icons.outlined.Favorite
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.OpenInNew
 import androidx.compose.material.icons.outlined.Security
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -73,6 +75,7 @@ fun AboutScreen(
     val scope = rememberCoroutineScope()
     val scaleAnim = remember { Animatable(1f) }
     val scrollState = rememberScrollState()
+    val isContentScrolled by remember(scrollState) { derivedStateOf { scrollState.value > 0 } }
     val expertUnlockedMessage = stringResource(R.string.about_expert_unlocked)
     val expertLockedMessage = stringResource(R.string.about_expert_locked)
 
@@ -81,7 +84,7 @@ fun AboutScreen(
         topBar = {
             AppTopAppBar(
                 title = stringResource(R.string.about_title),
-                isContentScrolled = scrollState.value > 0,
+                isContentScrolled = isContentScrolled,
                 navigationIcon = {
                     AppTopBarAction(onClick = onBack) {
                         AppIcon(

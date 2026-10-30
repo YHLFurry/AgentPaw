@@ -7,7 +7,7 @@ AgentPaw 的两套品牌图标资源。SVG 为源文件，PNG 为按尺寸预导
 
 | 文件 | 说明 |
 |---|---|
-| `agentpaw-logo.svg` | App 主品牌标识，emoji 风格爪印，品牌渐变填充 |
+| `agentpaw-logo.svg` | App 主品牌标识，手绘轮廓爪印，单色笔触 |
 | `agentpaw-logo-mono.svg` | 单色版爪印，`currentColor` 驱动，随宿主变色 |
 | `agentpaw-logo-wordmark.svg` | 图标 + 「AgentPaw」横排组合（Inter SemiBold 已转轮廓，零字体依赖） |
 | `agentpaw-settings.svg` | 设置图标：五齿齿轮 + 中心爪印，双色（靛蓝齿轮 / 紫色爪印） |
@@ -20,8 +20,8 @@ AgentPaw 的两套品牌图标资源。SVG 为源文件，PNG 为按尺寸预导
 ## APK 启动图标
 
 App Logo 已直接落地为 APK Logo：`app/src/main/res/drawable/ic_launcher_foreground.xml`
-内嵌同一套爪印几何（512 网格按 0.2 缩放居中于 108dp 画布，落在 66dp 安全区内），
-背景层 `ic_launcher_background.xml` 为品牌渐变，`<monochrome>` 复用前景（支持 themed icon）。
+内嵌同一套爪印几何（108dp 画布内的手绘轮廓，落在 66dp 安全区内），
+背景层 `ic_launcher_background.xml` 为纯紫色，`<monochrome>` 复用前景（支持 themed icon）。
 
 ## 在设置相关选项中的典型引用方式
 
@@ -53,7 +53,7 @@ javaClass.classLoader!!
 ```
 
 > 建议：菜单项等小尺寸场景优先用单色版 + `tint`；品牌展示位（关于页、空状态）用
-> 彩色渐变版。
+> 紫色轮廓版。
 
 ## 配色
 
@@ -84,3 +84,8 @@ python build/tmp-icon-gen/gen_wordmark.py
 # 全尺寸 PNG 重导出（需 node + @resvg/resvg-js）
 NODE_PATH=<node_modules> node build/tmp-icon-gen/export.js
 ```
+
+## 更新手绘爪印
+
+App 内图标 `ic_paw.xml` 为导出源，启动前景使用相同路径并保留自适应图标安全边距。
+修改后运行 `python scripts/refresh_paw_icons.py`（需要 Pillow），同步主标识与字标的 SVG/PNG 和预览。

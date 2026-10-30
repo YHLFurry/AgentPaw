@@ -87,9 +87,8 @@ class DataStoreSettingsRepository(
             // 若 API Key 产生变动，或此前解密失败需要重新写入，进行加密存储
             if (updated.apiKey != currentDecrypted.orEmpty() || wasDecryptionFailed ||
                 !currentRawApiKey.startsWith("enc:gcm:") || !prefs.contains(Keys.API_KEY)) {
-                if (updated.apiKey.isNotBlank() || !wasDecryptionFailed) {
-                    prefs[Keys.API_KEY] = com.paw.agent.data.security.KeystoreSecretStorage.encrypt(updated.apiKey)
-                }
+                // 表单显式保存空密钥时也要覆盖损坏的旧密文，允许用户改用无鉴权端点。
+                prefs[Keys.API_KEY] = com.paw.agent.data.security.KeystoreSecretStorage.encrypt(updated.apiKey)
             }
             prefs[Keys.MODEL] = updated.model
             prefs[Keys.TEMPERATURE] = updated.temperature

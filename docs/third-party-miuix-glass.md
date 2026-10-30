@@ -29,6 +29,10 @@ glass 只用到三部分外部能力，本项目按下表补齐：
 
 ## minSdk
 
+2026-10-30：`internal/GlassOverlays.kt` 增加画布能力检查。软件 Canvas 不支持
+`RuntimeShader`，因此跳过阴影、描边、遮罩与边缘光叠层，避免截图或软件绘制时崩溃。
+硬件画布继续使用原有玻璃效果。
+
 `miuix-blur` 声明 `minSdk 32`，而本项目仍要支持到 26，因此在 `AndroidManifest.xml` 里加了
 `tools:overrideLibrary="top.yukonga.miuix.kmp.blur"`。安全前提：该库只在 Miuix 主题下被玻璃
 顶栏用到，且内部按 `SDK_INT` 降级，不支持的设备走 `GlassSmallTopAppBar` 的实色填充分支。

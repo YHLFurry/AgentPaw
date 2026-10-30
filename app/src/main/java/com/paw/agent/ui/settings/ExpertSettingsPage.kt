@@ -65,6 +65,9 @@ fun ExpertSettingsPage(
     val context = LocalContext.current
     val resources = androidx.compose.ui.platform.LocalResources.current
     val scope = rememberCoroutineScope()
+    LaunchedEffect(state.saveError) {
+        state.saveError?.let { snackbarHostState.showSnackbar(it) }
+    }
     val permTick = remember { mutableIntStateOf(0) }
     var pendingRisk by remember { mutableStateOf<HighRiskToggle?>(null) }
     var pendingBypass by remember { mutableStateOf(false) }
