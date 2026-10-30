@@ -155,6 +155,14 @@ class SkillDefinitionTest {
         assertEquals(listOf("nobody"), missing.missing)
     }
 
+    @Test fun `interpolator preserves literal braces and extracts both placeholder forms`() {
+        val template = "{literal} {{ name }} \${profile.name} {{missing|备用}}"
+        assertEquals(listOf("name", "profile.name", "missing"), SkillInterpolator.referencedVariables(template))
+        val result = SkillInterpolator.render(template, mapOf("name" to "小明", "profile.name" to "小红"))
+        assertEquals("{literal} 小明 小红 备用", result.text)
+        assertFalse(result.hasMissing)
+    }
+
     // -------------------------------------------------------------- 速记
 
     @Test

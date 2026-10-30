@@ -1,6 +1,7 @@
 package com.paw.agent.ui
 
 import androidx.compose.runtime.Composable
+import com.paw.agent.R
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -140,6 +141,8 @@ fun AgentPawApp(
                 onConfirmRiskAction = { chatViewModel.confirmRiskAction(settings.llm) },
                 onDismissBreakpoint = chatViewModel::dismissBreakpoint,
                 onOpenSettings = { navController.navigate(Routes.SETTINGS) },
+                onConfigureModel = { navController.navigate(Routes.SETTINGS_MODEL) },
+                onRetrySave = container.conversationRepository::retryFailedSaves,
                 onOpenHistory = { navController.navigate(Routes.HISTORY) },
                 onOpenSkills = { navController.navigate(Routes.SKILLS) },
                 onNewConversation = chatViewModel::newConversation,
@@ -153,9 +156,11 @@ fun AgentPawApp(
             val appearanceState by appearanceViewModel.uiState.collectAsStateWithLifecycle()
 
             SettingsHomeScreen(
-                providerName = llmState.provider.gridLabel,
+                providerName = if (settings.llm.provider == com.paw.agent.core.llm.LlmProvider.CUSTOM)
+                    stringResource(R.string.settings_provider_custom) else settings.llm.provider.gridLabel,
                 themeName = stringResource(appearanceState.uiTheme.themeTitleRes),
                 expertMode = settings.expertMode,
+                hasUnsavedChanges = llmState.hasUnsavedChanges,
                 onOpenModelService = { navController.navigate(Routes.SETTINGS_MODEL) },
                 onOpenGeneration = { navController.navigate(Routes.SETTINGS_GENERATION) },
                 onOpenAgent = { navController.navigate(Routes.SETTINGS_AGENT) },
@@ -354,8 +359,10 @@ private fun LlmSettingsViewModel.toActions(): LlmSettingsActions = LlmSettingsAc
     onReasoningEffortChange = ::onReasoningEffortChange,
     onAutoCompressChange = ::onAutoCompressChange,
     onMaxToolRoundsChange = ::onMaxToolRoundsChange,
+    onMaxToolRoundsInputChange = ::onMaxToolRoundsInputChange,
     onVisionResolutionModeChange = ::onVisionResolutionModeChange,
     onTimeoutSecondsChange = ::onTimeoutSecondsChange,
+    onTimeoutSecondsInputChange = ::onTimeoutSecondsInputChange,
     onPacingProfileChange = ::onPacingProfileChange,
     onStreamChange = ::onStreamChange,
     onSystemPromptChange = ::onSystemPromptChange,

@@ -49,6 +49,10 @@ data class SkillsUiState(
     val editorMode: SkillEditorMode = SkillEditorMode.SIMPLE,
     val dslText: String = "",
     val jsonText: String = "",
+    val originalDslText: String = "",
+    val originalJsonText: String = "",
+    val saving: Boolean = false,
+    val isNewSkill: Boolean = false,
     val issues: List<SkillIssue> = emptyList(),
     val testRunning: Boolean = false,
     val testResult: SkillRunResult? = null,
@@ -77,7 +81,10 @@ data class SkillsUiState(
         get() = issues
 
     val canSave: Boolean
-        get() = editing != null && issues.none { it.isError }
+        get() = editing != null && !saving && issues.none { it.isError }
+
+    val hasUnsavedChanges: Boolean
+        get() = editing != null && (dslText != originalDslText || jsonText != originalJsonText)
 
     val editingRisk: SkillRisk
         get() = editing?.let { SkillCatalog.riskOf(it) } ?: SkillRisk.NONE
@@ -163,8 +170,10 @@ class SkillsViewModel(
     // ---------------------------------------------------------------- 编辑
 
     fun startCreate() {
-        val template = SkillPresets.blankTemplate()
-        openEditor(template)
+        val keys = store.skills.value.map { it.key }.toSet() + SkillPresets.builtInKeys
+        var index = 1
+        while ("skill_custom_$index" in keys) index++
+        openEditor(SkillPresets.blankTemplate().copy(key = "skill_custom_$index"))
     }
 
     fun edit(skill: SkillDefinition) {
@@ -180,11 +189,16 @@ class SkillsViewModel(
 
     private fun openEditor(skill: SkillDefinition) {
         val normalized = SkillValidator.normalize(skill)
+        val dsl = SkillDsl.render(normalized)
+        val json = prettyJson.encodeToString(SkillDefinition.serializer(), normalized)
         _uiState.value = _uiState.value.copy(
             editing = normalized,
             editorMode = SkillEditorMode.SIMPLE,
-            dslText = SkillDsl.render(normalized),
-            jsonText = prettyJson.encodeToString(SkillDefinition.serializer(), normalized),
+            dslText = dsl,
+            jsonText = json,
+            originalDslText = dsl,
+            originalJsonText = json,
+            isNewSkill = store.skills.value.none { it.id == normalized.id },
             issues = SkillValidator.validate(normalized),
             testResult = null,
         )
@@ -197,7 +211,11 @@ class SkillsViewModel(
     fun setEditorMode(mode: SkillEditorMode) {
         val state = _uiState.value
         val editing = state.editing ?: return
-        if (state.editorMode == mode) return
+        if (state.saving || state.editorMode == mode) return
+        if (state.issues.any { it.isError }) {
+            notify("请先修正当前草稿中的错误，再切换编辑模式，以免丢失修改")
+            return
+        }
         _uiState.value = when (mode) {
             // 切到 JSON 时用当前解析结果重新序列化，保证两边看到的是同一份定义。
             SkillEditorMode.ADVANCED -> state.copy(
@@ -215,6 +233,7 @@ class SkillsViewModel(
     }
 
     fun onDslChange(text: String) {
+        if (_uiState.value.saving) return
         val base = _uiState.value.editing ?: SkillPresets.blankTemplate()
         val parsed = runCatching { SkillDsl.parse(text, base) }.getOrNull()
         val definition = parsed?.definition ?: base
@@ -232,6 +251,7 @@ class SkillsViewModel(
     }
 
     fun onJsonChange(text: String) {
+        if (_uiState.value.saving) return
         val decoded = runCatching {
             prettyJson.decodeFromString(SkillDefinition.serializer(), text)
         }.getOrNull()
@@ -255,6 +275,7 @@ class SkillsViewModel(
 
     /** 高级模式里改完 JSON 后，把结构变更带回到速记文本（切回简易模式时自动发生）。 */
     fun formatJson() {
+        if (!structuredEditAllowed()) return
         val editing = _uiState.value.editing ?: return
         _uiState.value = _uiState.value.copy(
             jsonText = prettyJson.encodeToString(SkillDefinition.serializer(), editing),
@@ -269,6 +290,7 @@ class SkillsViewModel(
 
     /** 高级模式：结构化修改守卫，改完立刻重新校验并回写 JSON。 */
     fun updateGuard(transform: (com.paw.agent.core.skill.SkillGuard) -> com.paw.agent.core.skill.SkillGuard) {
+        if (!structuredEditAllowed()) return
         val editing = _uiState.value.editing ?: return
         val updated = editing.copy(guard = transform(editing.guard))
         applyStructuredEdit(updated)
@@ -276,6 +298,7 @@ class SkillsViewModel(
 
     /** 高级模式：启用/禁用单步。 */
     fun toggleStep(stepId: String, enabled: Boolean) {
+        if (!structuredEditAllowed()) return
         val editing = _uiState.value.editing ?: return
         val updated = editing.copy(
             steps = editing.steps.map { if (it.id == stepId) it.copy(enabled = enabled) else it },
@@ -292,30 +315,45 @@ class SkillsViewModel(
         )
     }
 
+    private fun structuredEditAllowed(): Boolean {
+        if (_uiState.value.saving) return false
+        if (_uiState.value.issues.any { it.code == "json_invalid" && it.isError }) {
+            notify("请先修正 JSON，当前修改已保留")
+            return false
+        }
+        return true
+    }
+
     fun save(onSaved: (SkillDefinition) -> Unit = {}) {
         val state = _uiState.value
+        if (state.saving) return
         val draft = state.editing ?: return
         if (state.issues.any { it.isError }) {
             notify("还有 ${state.issues.count { it.isError }} 处错误需要先修正")
             return
         }
+        _uiState.value = state.copy(saving = true)
         launchStoreAction {
-            val normalized = SkillValidator.normalize(
-                draft.copy(
-                    // 新建技能时 source 保持空白模板的 MANUAL
-                    source = if (draft.id.isBlank() || draft.source == SkillSource.PRESET) {
-                        SkillSource.MANUAL
-                    } else {
-                        draft.source
-                    },
-                    builtIn = false,
-                ),
-            )
-            val saved = store.save(normalized)
-            sync()
-            notify("已保存「${saved.displayName}」")
-            _uiState.value = _uiState.value.copy(editing = null, issues = emptyList())
-            onSaved(saved)
+            try {
+                val normalized = SkillValidator.normalize(
+                    draft.copy(
+                        // 新建技能时 source 保持空白模板的 MANUAL
+                        source = if (draft.id.isBlank() || draft.source == SkillSource.PRESET) {
+                            SkillSource.MANUAL
+                        } else {
+                            draft.source
+                        },
+                        builtIn = false,
+                    ),
+                )
+                val saved = store.save(normalized)
+                sync()
+                notify("已保存「${saved.displayName}」")
+                _uiState.value = _uiState.value.copy(editing = null, issues = emptyList())
+                onSaved(saved)
+            } finally {
+                _uiState.value = _uiState.value.copy(saving = false)
+            }
         }
     }
 

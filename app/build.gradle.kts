@@ -17,7 +17,7 @@ android {
         applicationId = "com.paw.agent"
         minSdk = 26
         targetSdk = 36
-        versionCode = 12
+        versionCode = 13
         versionName = rootProject.file("version.txt").readText().trim()
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -109,6 +109,15 @@ android {
         compose = true
     }
 
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+        unitTests.all {
+            it.systemProperty("robolectric.dependency.repo.url", "https://repo.maven.apache.org/maven2")
+            // Android 16's shared-memory shadow accesses FileDescriptor through this JDK module.
+            it.jvmArgs("--add-opens=java.base/jdk.internal.access=ALL-UNNAMED")
+        }
+    }
+
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
@@ -149,6 +158,9 @@ dependencies {
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation("org.robolectric:robolectric:4.17")
+    testImplementation(libs.androidx.ui.test.junit4)
+    testImplementation(libs.androidx.espresso.core)
 
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)

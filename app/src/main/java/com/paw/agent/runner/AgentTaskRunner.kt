@@ -17,6 +17,7 @@ import com.paw.agent.ui.floating.AgentExecutionController
 import com.paw.agent.ui.floating.AgentFloatingService
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.ensureActive
@@ -24,13 +25,11 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import com.paw.agent.core.agent.breakpoint.RiskConfirmationDetails
 import com.paw.agent.core.model.ToolCall
 import com.paw.agent.core.tool.ToolControlSignal
 import kotlinx.serialization.encodeToString
-import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -50,15 +49,14 @@ class AgentTaskRunner(
     private val conversationRepository: ConversationRepository,
     private val settingsRepository: SettingsRepository,
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main),
+    checkpointDirectory: File? = context?.filesDir,
+    ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) {
 
     private val json = Json { ignoreUnknownKeys = true }
-    private val breakpointFile by lazy {
-        File(context?.filesDir ?: File(System.getProperty("java.io.tmpdir") ?: "."), "active_breakpoint.json")
-    }
-    private val runningTaskFile by lazy {
-        File(context?.filesDir ?: File(System.getProperty("java.io.tmpdir") ?: "."), "running_task.json")
-    }
+    private val checkpointStore = checkpointDirectory?.let { TaskCheckpointStore(it, scope, ioDispatcher) }
+    private var checkpointRevision = 0L
+    private var runGeneration = 0L
 
     private val _activeBreakpoint = MutableStateFlow<TaskBreakpoint?>(null)
     val activeBreakpoint: StateFlow<TaskBreakpoint?> = _activeBreakpoint.asStateFlow()
@@ -75,6 +73,8 @@ class AgentTaskRunner(
     private var lastLlmConfig: LlmConfig = LlmConfig()
     private var activeAssistantId: String? = null
     private var sessionOriginalGoal: String? = null
+    private var sessionStartMessageIndex = 0
+    private var previousCompletedSteps: List<StepSnapshot> = emptyList()
     private val activeToolCalls = ConcurrentHashMap<String, ToolCall>()
     private val activeToolMessageIds = ConcurrentHashMap<String, String>()
 
@@ -84,6 +84,21 @@ class AgentTaskRunner(
                 .firstOrNull { it.role == MessageRole.USER && !it.content.startsWith("▶ 继续") }
                 ?.content?.ifBlank { null }
             ?: "手机自动化任务"
+    }
+
+    private fun completedStepSnapshots(): List<StepSnapshot> {
+        val messages = conversationRepository.conversation.value.messages.drop(sessionStartMessageIndex)
+        val calls = messages.flatMap { it.toolCalls }.associateBy { it.id }
+        val completed = messages.filter { it.role == MessageRole.TOOL && it.status == MessageStatus.COMPLETE }
+        return previousCompletedSteps + completed.mapIndexed { index, message ->
+            val call = calls[message.toolCallId]
+            StepSnapshot(
+                stepIndex = previousCompletedSteps.size + index + 1,
+                toolName = call?.name ?: message.content.removePrefix("✔ ").substringBefore(":").trim(),
+                arguments = call?.arguments.orEmpty(),
+                resultSummary = message.content.take(120),
+            )
+        }
     }
 
     init {
@@ -100,66 +115,31 @@ class AgentTaskRunner(
             }
         }
         // 恢复之前持久化的未完成断点，或恢复进程被杀/崩溃中断的任务
-        scope.launch(Dispatchers.IO) {
-            recoverInterruptedTaskOrBreakpoint()
+        scope.launch {
+            val bp = checkpointStore?.recover() ?: return@launch
+            // Recovery can finish after the user has already started or discarded a task.
+            if (checkpointRevision != 0L) return@launch
+            sessionOriginalGoal = bp.originalGoal
+            _activeBreakpoint.value = bp
+            persistBreakpoint(bp)
+            clearTaskRunning()
+            AgentExecutionController.markPaused(bp.stoppedAtStep, "检测到未完成的中断任务，可继续执行")
         }
     }
 
     private fun persistBreakpoint(bp: TaskBreakpoint?) {
-        scope.launch(Dispatchers.IO) {
-            runCatching {
-                if (bp != null) {
-                    val temp = File.createTempFile("bp_", ".tmp", breakpointFile.parentFile ?: File("."))
-                    temp.writeText(json.encodeToString(bp))
-                    if (!temp.renameTo(breakpointFile)) {
-                        temp.copyTo(breakpointFile, overwrite = true)
-                        temp.delete()
-                    }
-                } else {
-                    if (breakpointFile.exists()) breakpointFile.delete()
-                }
-            }
-        }
+        checkpointRevision++
+        checkpointStore?.saveBreakpoint(bp)
     }
 
     private fun markTaskRunning(goal: String) {
-        scope.launch(Dispatchers.IO) {
-            runCatching {
-                runningTaskFile.writeText(goal)
-            }
-        }
+        checkpointRevision++
+        checkpointStore?.markRunning(goal)
     }
 
     private fun clearTaskRunning() {
-        scope.launch(Dispatchers.IO) {
-            runCatching {
-                if (runningTaskFile.exists()) runningTaskFile.delete()
-            }
-        }
-    }
-
-    private fun recoverInterruptedTaskOrBreakpoint() {
-        runCatching {
-            if (breakpointFile.exists()) {
-                val bp = json.decodeFromString<TaskBreakpoint>(breakpointFile.readText())
-                sessionOriginalGoal = bp.originalGoal
-                _activeBreakpoint.value = bp
-                AgentExecutionController.markPaused(bp.stoppedAtStep, "检测到未完成的中断任务，可继续执行")
-            } else if (runningTaskFile.exists()) {
-                val goal = runningTaskFile.readText().trim().ifBlank { "自动化任务" }
-                sessionOriginalGoal = goal
-                val recoveredBp = TaskBreakpoint(
-                    originalGoal = goal,
-                    stoppedAtStep = 1,
-                    maxSteps = 15,
-                    interruptedReason = "任务在执行期间应用被系统中断/进程重启，现场已保存",
-                )
-                _activeBreakpoint.value = recoveredBp
-                persistBreakpoint(recoveredBp)
-                clearTaskRunning()
-                AgentExecutionController.markPaused(1, "任务曾被系统中断，可继续执行")
-            }
-        }
+        checkpointRevision++
+        checkpointStore?.clearRunning()
     }
 
     fun startTask(config: LlmConfig, promptText: String, images: List<String> = emptyList()) {
@@ -178,7 +158,12 @@ class AgentTaskRunner(
             return
         }
 
+        val generation = ++runGeneration
+        activeToolCalls.clear()
+        activeToolMessageIds.clear()
         sessionOriginalGoal = text
+        sessionStartMessageIndex = conversationRepository.conversation.value.messages.size
+        previousCompletedSteps = emptyList()
         _activeBreakpoint.value = null
         persistBreakpoint(null)
         markTaskRunning(text)
@@ -216,27 +201,7 @@ class AgentTaskRunner(
         AgentExecutionController.markStarted(maxSteps)
 
         runJob = scope.launch {
-            try {
-                agent.run(
-                    config = config,
-                    history = conversationRepository.conversation.value.messages.dropLast(1),
-                    isCancelled = { cancelled },
-                    enableAdaptivePacing = isAdaptivePacingEnabled,
-                ).collect { event -> handleEvent(event) }
-            } catch (e: CancellationException) {
-                activeAssistantId?.let { id ->
-                    conversationRepository.updateMessage(id) {
-                        it.copy(status = MessageStatus.CANCELLED)
-                    }
-                }
-                activeAssistantId = null
-                if (!isStopping && _activeBreakpoint.value == null) {
-                    AgentExecutionController.markStopped()
-                }
-                throw e
-            } finally {
-                _isGenerating.value = false
-            }
+            collectAgent(config, generation)
         }
     }
 
@@ -244,7 +209,12 @@ class AgentTaskRunner(
         if (_isGenerating.value) return
         val bp = _activeBreakpoint.value ?: return
         val effectiveConfig = config ?: lastLlmConfig
+        val generation = ++runGeneration
+        activeToolCalls.clear()
+        activeToolMessageIds.clear()
         sessionOriginalGoal = bp.originalGoal
+        sessionStartMessageIndex = conversationRepository.conversation.value.messages.size
+        previousCompletedSteps = bp.completedSteps
         _activeBreakpoint.value = null
         persistBreakpoint(null)
         markTaskRunning(bp.originalGoal)
@@ -293,32 +263,57 @@ class AgentTaskRunner(
         )
 
         runJob = scope.launch {
-            try {
-                agent.run(
-                    config = resumeConfig,
-                    history = conversationRepository.conversation.value.messages.dropLast(1),
-                    isCancelled = { cancelled },
-                    enableAdaptivePacing = isAdaptivePacingEnabled,
-                ).collect { event -> handleEvent(event) }
-            } catch (e: CancellationException) {
+            collectAgent(resumeConfig, generation)
+        }
+    }
+
+    private suspend fun collectAgent(config: LlmConfig, generation: Long) {
+        try {
+            agent.run(
+                config = config,
+                history = conversationRepository.conversation.value.messages.dropLast(1),
+                isCancelled = { cancelled || generation != runGeneration },
+                enableAdaptivePacing = isAdaptivePacingEnabled,
+            ).collect { event ->
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                if (generation == runGeneration) handleEvent(event)
+            }
+        } catch (e: CancellationException) {
+            if (generation == runGeneration) {
                 activeAssistantId?.let { id ->
                     conversationRepository.updateMessage(id) { it.copy(status = MessageStatus.CANCELLED) }
                 }
                 activeAssistantId = null
-                if (!isStopping && _activeBreakpoint.value == null) {
+                if (_activeBreakpoint.value == null) {
+                    clearTaskRunning()
                     AgentExecutionController.markStopped()
                 }
-                throw e
-            } finally {
+            }
+            throw e
+        } catch (e: Exception) {
+            if (generation == runGeneration) {
+                handleEvent(AgentEvent.Failed(Message(
+                    id = UUID.randomUUID().toString(), role = MessageRole.ASSISTANT,
+                    content = "任务执行异常，请检查当前页面后重试。", status = MessageStatus.FAILED,
+                    error = SensitiveDataMasker.mask(e.message ?: "执行失败"),
+                )))
+            }
+        } finally {
+            // A cancelled predecessor may finish after its replacement has already started.
+            if (generation == runGeneration) {
                 _isGenerating.value = false
+                runJob = null
+                activeToolCalls.clear()
+                activeToolMessageIds.clear()
             }
         }
     }
 
     fun stop() {
-        if (isStopping) return
+        if (isStopping || !_isGenerating.value) return
         isStopping = true
         try {
+            runGeneration++
             cancelled = true
             runJob?.cancel()
             runJob = null
@@ -326,12 +321,11 @@ class AgentTaskRunner(
 
             val originalGoal = resolveOriginalGoal()
             val currentConv = conversationRepository.conversation.value
-            val messages = currentConv.messages
+            val messages = currentConv.messages.drop(sessionStartMessageIndex)
             val originalUserMsg = messages.firstOrNull { it.role == MessageRole.USER }
 
             var interruptedSnapshot: StepSnapshot? = null
-            val completedSteps = mutableListOf<StepSnapshot>()
-            var stepIndexCounter = 1
+            val completedSteps = completedStepSnapshots()
 
             messages.forEach { msg ->
                 if (msg.role == MessageRole.TOOL) {
@@ -359,16 +353,6 @@ class AgentTaskRunner(
                                 status = MessageStatus.CANCELLED,
                             )
                         }
-                    } else if (msg.status == MessageStatus.COMPLETE) {
-                        completedSteps.add(
-                            StepSnapshot(
-                                stepIndex = stepIndexCounter++,
-                                toolName = toolName.ifBlank { "action" },
-                                arguments = "",
-                                resultSummary = rawContent.take(120),
-                                isError = false,
-                            ),
-                        )
                     }
                 }
             }
@@ -398,6 +382,8 @@ class AgentTaskRunner(
             }
 
             _isGenerating.value = false
+            activeToolCalls.clear()
+            activeToolMessageIds.clear()
         } finally {
             isStopping = false
         }
@@ -620,6 +606,7 @@ class AgentTaskRunner(
             originalGoal = originalGoal,
             stoppedAtStep = stepCount.coerceAtLeast(1),
             maxSteps = maxSteps,
+            completedSteps = completedStepSnapshots(),
             interruptedStep = StepSnapshot(
                 stepIndex = stepCount.coerceAtLeast(1),
                 toolName = result.name,
@@ -661,6 +648,7 @@ class AgentTaskRunner(
             originalGoal = originalGoal,
             stoppedAtStep = stepCount.coerceAtLeast(1),
             maxSteps = maxSteps,
+            completedSteps = completedStepSnapshots(),
             interruptedStep = StepSnapshot(
                 stepIndex = stepCount.coerceAtLeast(1),
                 toolName = toolName,
@@ -707,14 +695,19 @@ class AgentTaskRunner(
         }
 
         val effectiveConfig = config ?: lastLlmConfig
+        val generation = ++runGeneration
         _isGenerating.value = true
         cancelled = false
+        com.paw.agent.device.accessibility.AgentAccessibilityService.clearGlobalStop()
+        AgentExecutionController.markStarted(bp.maxSteps)
         context?.let { runCatching { AgentFloatingService.start(it) } }
 
         runJob = scope.launch {
             try {
-                val toolResult = agent.executeDirectTool(risk.toolName, confirmedArgs, isCancelled = { cancelled })
+                val toolResult = agent.executeDirectTool(risk.toolName, confirmedArgs,
+                    isCancelled = { cancelled || generation != runGeneration })
                 kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                if (generation != runGeneration) return@launch
                 val call = ToolCall(toolResult.toolCallId, risk.toolName, confirmedArgs)
                 when (val signal = ToolControlSignal.parse(toolResult.content, risk.toolName, confirmedArgs)) {
                     is ToolControlSignal.SafetyPause -> {
@@ -740,12 +733,20 @@ class AgentTaskRunner(
 
                 val toolResultMsgId = UUID.randomUUID().toString()
                 val briefContent = "✔ 已显式授权执行: ${risk.action} (${risk.target})"
+                // Keep the confirmed call/result pair in history so normalization does not
+                // discard the receipt or replace it with an interrupted-action placeholder.
+                conversationRepository.addMessage(Message(
+                    id = UUID.randomUUID().toString(), role = MessageRole.ASSISTANT,
+                    content = "", toolCalls = listOf(call),
+                ))
                 conversationRepository.addMessage(
                     Message(
                         id = toolResultMsgId,
                         role = MessageRole.TOOL,
                         content = briefContent,
-                        toolCallId = toolResultMsgId,
+                        toolCallId = call.id,
+                        fullLog = SensitiveDataMasker.mask(toolResult.content),
+                        durationMs = toolResult.durationMs,
                         status = if (toolResult.isError) MessageStatus.FAILED else MessageStatus.COMPLETE,
                         createdAt = System.currentTimeMillis(),
                     ),
@@ -778,8 +779,15 @@ class AgentTaskRunner(
             } catch (t: CancellationException) {
                 throw t
             } catch (t: Exception) {
-                _isGenerating.value = false
-                AgentExecutionController.markFailed(t.message ?: "授权执行失败")
+                if (generation == runGeneration) {
+                    _isGenerating.value = false
+                    AgentExecutionController.markFailed(t.message ?: "授权执行失败")
+                }
+            } finally {
+                if (generation == runGeneration) {
+                    _isGenerating.value = false
+                    runJob = null
+                }
             }
         }
     }

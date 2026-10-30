@@ -325,67 +325,20 @@ class AgentAccessibilityService : AccessibilityService() {
         val root = rootInActiveWindow ?: return@withContext false
         val targetNode = findTargetInputNode(root) ?: return@withContext false
 
-        // 默认直接键入：优先通过无障碍 ACTION_SET_TEXT 直接输入到聊天框/输入框
-        if (clearBeforeInput) {
-            val emptyBundle = Bundle().apply {
-                putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, "")
-            }
-            targetNode.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, emptyBundle)
-        }
-
+        // 一次 SET_TEXT 完成替换/选区插入；先清空再输入会触发两次文本监听并可能丢失原文。
+        val replacement = TextInputEdit.resolve(targetNode.text?.toString().orEmpty(), text,
+            targetNode.textSelectionStart, targetNode.textSelectionEnd, clearBeforeInput)
         val arguments = Bundle().apply {
-            putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
+            putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, replacement.text)
         }
         val setOk = targetNode.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments)
-        if (setOk) return@withContext true
-
-        // 直接输入辅助尝试：通过系统剪贴板执行 ACTION_PASTE 直接注入文本
-        val clipboard = getSystemService(android.content.Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
-        if (clipboard != null) {
-            clipboard.setPrimaryClip(android.content.ClipData.newPlainText("agent_paw_direct", text))
-            val pasteOk = targetNode.performAction(AccessibilityNodeInfo.ACTION_PASTE)
-            clearClipboardSafely()
-            if (pasteOk) return@withContext true
+        if (setOk) {
+            targetNode.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, Bundle().apply {
+                putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, replacement.cursor)
+                putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, replacement.cursor)
+            })
         }
-
-        false
-    }
-
-    private fun clearClipboardSafely() {
-        runCatching {
-            val clipboard = getSystemService(android.content.Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
-            if (clipboard != null) {
-                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
-                    clipboard.clearPrimaryClip()
-                } else {
-                    clipboard.setPrimaryClip(android.content.ClipData.newPlainText("", ""))
-                }
-            }
-        }
-    }
-
-    /**
-     * 键盘保底逻辑：当直接输入失败时，点击激活输入框软键盘，并借助剪贴板或按键操作保底
-     */
-    suspend fun keyboardFallbackInput(text: String): Boolean = withContext(Dispatchers.Main) {
-        if (isStopRequested) return@withContext false
-        val root = rootInActiveWindow ?: return@withContext false
-        val targetNode = findTargetInputNode(root) ?: return@withContext false
-
-        // 激活目标输入框焦点以调起软键盘
-        targetNode.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-        targetNode.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
-        kotlinx.coroutines.delay(150)
-
-        // 尝试通过激活软键盘环境后的系统剪贴板进行保底键入
-        val clipboard = getSystemService(android.content.Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
-        if (clipboard != null) {
-            clipboard.setPrimaryClip(android.content.ClipData.newPlainText("agent_paw_keyboard_fallback", text))
-            val ok = targetNode.performAction(AccessibilityNodeInfo.ACTION_PASTE)
-            clearClipboardSafely()
-            return@withContext ok
-        }
-        false
+        setOk
     }
 
 
@@ -510,7 +463,7 @@ class AgentAccessibilityService : AccessibilityService() {
 
     private fun findTargetInputNode(root: AccessibilityNodeInfo): AccessibilityNodeInfo? {
         val focused = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
-        if (focused != null && focused.isEditable) return focused
+        if (focused != null && focused.isEditable && focused.isVisibleToUser && focused.isEnabled) return focused
 
         val editable = findEditableNode(root)
         if (editable != null) return editable
@@ -520,7 +473,8 @@ class AgentAccessibilityService : AccessibilityService() {
 
     private fun findChatInputLikeNode(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
         val className = node.className?.toString().orEmpty()
-        if (className.contains("EditText", ignoreCase = true) || className.contains("TextField", ignoreCase = true)) {
+        if (node.isVisibleToUser && node.isEnabled &&
+            (className.contains("EditText", ignoreCase = true) || className.contains("TextField", ignoreCase = true))) {
             return node
         }
         for (i in 0 until node.childCount) {
@@ -532,7 +486,7 @@ class AgentAccessibilityService : AccessibilityService() {
     }
 
     private fun findEditableNode(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
-        if (node.isEditable) return node
+        if (node.isEditable && node.isVisibleToUser && node.isEnabled) return node
         for (i in 0 until node.childCount) {
             val child = node.getChild(i) ?: continue
             val found = findEditableNode(child)

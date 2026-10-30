@@ -8,6 +8,9 @@ import com.paw.agent.device.accessibility.AgentAccessibilityService
 import com.paw.agent.device.shizuku.ShizukuController
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlin.math.roundToInt
 
 open class HybridPhoneController(
@@ -297,107 +300,74 @@ open class HybridPhoneController(
         return false
     }
 
-    override suspend fun inputText(text: String, clearBeforeInput: Boolean): Boolean {
-        if (userStopRequested()) return false
+    private val inputMutex = Mutex()
 
-        // 1. Root 优先执行 (纯 Root 文本输入与剪贴板模拟粘贴保底)
-        if (isRootAllowed) {
-            val rootOk = inputViaRoot(text, clearBeforeInput)
-            if (rootOk) return true
+    /** 文本优先直接设置，避免中文输入在多个引擎之间反复粘贴。 */
+    protected open suspend fun accessibilityInputText(text: String, clearBeforeInput: Boolean): Boolean =
+        AgentAccessibilityService.instance?.inputText(text, clearBeforeInput) == true
+
+    override suspend fun inputText(text: String, clearBeforeInput: Boolean): Boolean = inputMutex.withLock {
+        if (userStopRequested()) return@withLock false
+        if (isAccessibilityAllowed && accessibilityInputText(text, clearBeforeInput)) return@withLock true
+        if (userStopRequested()) return@withLock false
+
+        // 选定一个引擎后只执行一次。失败可能发生在部分输入之后，跨引擎重试会重复文本。
+        val useRoot = isRootAllowed
+        val command: suspend (String) -> String = when {
+            useRoot -> { value -> rootController.executeCommand(value) }
+            isShizukuAllowed -> { value -> shizukuController.executeCommand(value) }
+            else -> return@withLock false
         }
-
-        // 2. Shizuku 次优执行 (纯 Shizuku 模拟输入与剪贴板模拟粘贴保底)
-        if (isShizukuAllowed) {
-            val shizukuOk = inputViaShizuku(text, clearBeforeInput)
-            if (shizukuOk) return true
-        }
-
-        // 3. 无障碍服务兜底 (无障碍 ACTION_SET_TEXT 或软键盘直接键入)
-        if (isAccessibilityAllowed) {
-            val service = AgentAccessibilityService.instance
-            if (service != null) {
-                val directOk = service.inputText(text, clearBeforeInput)
-                if (directOk) return true
-                val fallbackOk = service.keyboardFallbackInput(text)
-                if (fallbackOk) return true
+        // 多行文本不能用 KEYCODE_ENTER 逐行模拟，否则聊天应用可能提前发送。
+        if (com.paw.agent.device.ShellEscape.isPrintableAscii(text) && '%' !in text) {
+            if (clearBeforeInput) {
+                val cleared = command("input keycombination 113 29 && input keyevent 67")
+                if (cleared.startsWith("Error:") || userStopRequested()) return@withLock false
             }
+            return@withLock if (useRoot) rootController.inputText(text) else shizukuController.inputText(text)
         }
-
-        return false
+        pasteOnce(text, clearBeforeInput, command)
     }
 
-    private suspend fun inputViaRoot(text: String, clearBeforeInput: Boolean): Boolean {
-        if (clearBeforeInput) {
-            rootController.executeCommand("input keyevent --meta 113 29 && input keyevent 67")
-        }
-        if (!com.paw.agent.device.root.RootController.hasNonAscii(text)) {
-            val typed = rootController.inputText(text)
-            if (typed) return true
-        }
-        return copyToClipboardAndPasteViaRoot(text)
-    }
-
-    private suspend fun copyToClipboardAndPasteViaRoot(text: String): Boolean {
-        val clipOk = setClipboardText(text)
-        if (!clipOk) return false
-        val res1 = rootController.executeCommand("input keyevent 279")
-        val ok = if (!res1.startsWith("Error:")) {
-            true
-        } else {
-            val res2 = rootController.executeCommand("input keyevent --meta 113 50")
-            !res2.startsWith("Error:")
-        }
-        kotlinx.coroutines.delay(250)
-        clearClipboardText()
-        return ok
-    }
-
-    private suspend fun inputViaShizuku(text: String, clearBeforeInput: Boolean): Boolean {
-        if (clearBeforeInput) {
-            shizukuController.executeCommand("input keyevent --meta 113 29 && input keyevent 67")
-        }
-        if (!com.paw.agent.device.root.RootController.hasNonAscii(text)) {
-            val typed = shizukuController.inputText(text)
-            if (typed) return true
-        }
-        return copyToClipboardAndPasteViaShizuku(text)
-    }
-
-    private suspend fun copyToClipboardAndPasteViaShizuku(text: String): Boolean {
-        val clipOk = setClipboardText(text)
-        if (!clipOk) return false
-        val res1 = shizukuController.executeCommand("input keyevent 279")
-        val ok = if (!res1.startsWith("Error:")) {
-            true
-        } else {
-            val res2 = shizukuController.executeCommand("input keyevent --meta 113 50")
-            !res2.startsWith("Error:")
-        }
-        kotlinx.coroutines.delay(250)
-        clearClipboardText()
-        return ok
-    }
-
-    private suspend fun setClipboardText(text: String): Boolean = withContext(Dispatchers.Main) {
-        runCatching {
-            val clipboard = context?.getSystemService(Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
-            if (clipboard != null) {
-                clipboard.setPrimaryClip(android.content.ClipData.newPlainText("agent_paw_input", text))
-                true
-            } else {
-                false
+    /** 剪贴板仅作一次最终兜底；读回确认内容，避免后台写入受限时误粘贴用户旧剪贴板。 */
+    private suspend fun pasteOnce(text: String, clearBeforeInput: Boolean, command: suspend (String) -> String): Boolean {
+        val clipboard = context?.getSystemService(Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
+            ?: return false
+        val label = "agentpaw-${java.util.UUID.randomUUID()}"
+        var previous: android.content.ClipData? = null
+        var pasteDispatched = false
+        fun ownsClipboard(): Boolean = clipboard.primaryClip?.let {
+            it.description.label?.toString() == label && it.itemCount == 1 && it.getItemAt(0).text?.toString() == text
+        } == true
+        return try {
+            val ready = withContext(Dispatchers.Main) {
+                previous = clipboard.primaryClip
+                clipboard.setPrimaryClip(android.content.ClipData.newPlainText(label, text))
+                ownsClipboard()
             }
-        }.getOrDefault(false)
-    }
-
-    private suspend fun clearClipboardText(): Unit = withContext(Dispatchers.Main) {
-        runCatching {
-            val clipboard = context?.getSystemService(Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
-            if (clipboard != null) {
-                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
-                    clipboard.clearPrimaryClip()
-                } else {
-                    clipboard.setPrimaryClip(android.content.ClipData.newPlainText("", ""))
+            if (!ready || userStopRequested()) return false
+            if (clearBeforeInput) {
+                val cleared = command("input keycombination 113 29 && input keyevent 67")
+                if (cleared.startsWith("Error:") || userStopRequested()) return false
+            }
+            pasteDispatched = true
+            val result = command("input keyevent 279")
+            !result.startsWith("Error:")
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            false
+        } finally {
+            withContext(NonCancellable + Dispatchers.Main) {
+                // 系统异步处理粘贴，取消时也要等待消费，避免立即恢复导致粘贴到旧内容。
+                if (pasteDispatched) kotlinx.coroutines.delay(300)
+                runCatching {
+                    if (ownsClipboard()) {
+                        val original = previous
+                        if (original != null) clipboard.setPrimaryClip(original)
+                        else if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) clipboard.clearPrimaryClip()
+                        else clipboard.setPrimaryClip(android.content.ClipData.newPlainText("", ""))
+                    }
                 }
             }
         }

@@ -190,9 +190,10 @@ object DevicePermissionManager {
         )
     }
     /**
-     * 检测是否拥有通知权限（Android 13+ 前台服务通知需要）
+     * 同时检查应用通知总开关与 Android 13+ 运行时权限。
      */
     fun hasNotificationPermission(context: Context): Boolean =
+        androidx.core.app.NotificationManagerCompat.from(context).areNotificationsEnabled() &&
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             androidx.core.content.ContextCompat.checkSelfPermission(
                 context,
