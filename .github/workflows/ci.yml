@@ -118,6 +118,8 @@ jobs:
           api-level: ${{ matrix.api }}
           arch: x86_64
           target: google_apis
+          # Keep Android hardware rendering, using supported ANGLE software drivers on CI.
+          emulator-options: -no-window -gpu swangle -feature -Vulkan -no-snapshot -noaudio -no-boot-anim
           disable-animations: true
           script: bash scripts/ci-device-tests.sh
       - name: Upload device test reports
@@ -127,6 +129,7 @@ jobs:
           name: device-tests-api-${{ matrix.api }}
           path: |
             app/build/reports/androidTests/
-            app/build/outputs/androidTest-results/
+            app/build/outputs/androidTest-results/connected/debug/TEST-*.xml
             build/device-diagnostics/
+
 
