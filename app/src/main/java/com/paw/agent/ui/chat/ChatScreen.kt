@@ -42,6 +42,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -60,8 +67,11 @@ import com.paw.agent.R
 import com.paw.agent.core.llm.LlmConfig
 import com.paw.agent.ui.components.EmptyChatState
 import com.paw.agent.ui.components.PawMark
+import com.paw.agent.ui.components.rememberNotificationPermissionAction
 import com.paw.agent.ui.components.adaptive.AppButton
+import com.paw.agent.ui.components.adaptive.AppAlertDialog
 import com.paw.agent.ui.components.adaptive.AppCard
+import com.paw.agent.ui.components.adaptive.AppCircularProgressIndicator
 import com.paw.agent.ui.components.adaptive.AppIcon
 import com.paw.agent.ui.components.adaptive.AppIconButton
 import com.paw.agent.ui.components.adaptive.AppOutlinedButton
@@ -100,12 +110,33 @@ fun ChatScreen(
     onOpenSkills: () -> Unit,
     onNewConversation: () -> Unit,
     modifier: Modifier = Modifier,
+    onConfigureModel: () -> Unit = onOpenSettings,
+    onRetrySave: () -> Unit = {},
 ) {
     val listState = rememberLazyListState()
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         onImagesPicked(uris.map { it.toString() })
     }
-    var selectedFilterIndex by androidx.compose.runtime.remember { androidx.compose.runtime.mutableIntStateOf(0) }
+    var selectedFilterIndex by rememberSaveable { mutableIntStateOf(0) }
+    var confirmNewConversation by rememberSaveable { mutableStateOf(false) }
+
+    if (confirmNewConversation) {
+        AppAlertDialog(
+            onDismissRequest = { confirmNewConversation = false },
+            title = { AppText(stringResource(R.string.chat_new_confirm_title)) },
+            text = { AppText(stringResource(R.string.chat_new_confirm_help)) },
+            confirmButton = {
+                AppButton(onClick = { confirmNewConversation = false; onNewConversation() }) {
+                    AppText(stringResource(R.string.chat_new_conversation))
+                }
+            },
+            dismissButton = {
+                AppOutlinedButton(onClick = { confirmNewConversation = false }) {
+                    AppText(stringResource(R.string.action_cancel))
+                }
+            },
+        )
+    }
 
     AppScaffold(
         modifier = modifier.fillMaxSize(),
@@ -120,7 +151,7 @@ fun ChatScreen(
                 navigationIcon = {},
                 titleContent = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        PawMark(size = 26.dp, color = AppTheme.colors.onPrimary)
+                        PawMark(size = 26.dp, color = AppTheme.colors.primary)
                         Spacer(Modifier.size(10.dp))
                         Column {
                             AppText(
@@ -154,7 +185,13 @@ fun ChatScreen(
                             contentDescription = stringResource(R.string.skills_title),
                         )
                     }
-                    AppTopBarAction(onClick = onNewConversation) {
+                    AppTopBarAction(onClick = {
+                        if (isGenerating || activeBreakpoint != null || draft.isNotBlank() || images.isNotEmpty() || importingImages) {
+                            confirmNewConversation = true
+                        } else {
+                            onNewConversation()
+                        }
+                    }) {
                         AppIcon(
                             imageVector = Icons.Outlined.EditNote,
                             contentDescription = stringResource(R.string.chat_new_conversation),
@@ -188,7 +225,7 @@ fun ChatScreen(
                 onResumeBreakpoint = onResumeBreakpoint,
                 onConfirmRiskAction = onConfirmRiskAction,
                 onDismissBreakpoint = onDismissBreakpoint,
-                onOpenSettings = onOpenSettings,
+                onOpenSettings = onConfigureModel,
             )
         },
         containerColor = AppTheme.colors.background,
@@ -197,9 +234,7 @@ fun ChatScreen(
         val resources = androidx.compose.ui.platform.LocalResources.current
         val coroutineScope = rememberCoroutineScope()
         val permTick = remember { mutableIntStateOf(0) }
-        val notificationPermissionLauncher = rememberLauncherForActivityResult(
-            contract = ActivityResultContracts.RequestPermission(),
-        ) { _ ->
+        val requestNotifications = rememberNotificationPermissionAction {
             permTick.intValue++
         }
         androidx.lifecycle.compose.LifecycleEventEffect(
@@ -238,7 +273,7 @@ fun ChatScreen(
         // 得自己让开玻璃顶栏；两者都没有时头部为零高度，消息列表照常从顶栏下方穿过。
         val showRootDashboard = isRootAvailable
         val showTopNotice = (!hasAnyExecutionEngine || !hasOverlayPermission || !hasNotificationPermission) && !showRootDashboard
-        val showTopHeader = showRootDashboard || showTopNotice || storageError != null || (splitVisionLanguageMode && messages.isNotEmpty())
+        val showTopHeader = showRootDashboard || showTopNotice || !hasNotificationPermission || storageError != null || (splitVisionLanguageMode && messages.isNotEmpty())
         val showStreamFilter = splitVisionLanguageMode && messages.isNotEmpty()
         val filteredMessages = remember(messages, selectedFilterIndex, splitVisionLanguageMode) {
             if (!splitVisionLanguageMode) messages
@@ -275,7 +310,12 @@ fun ChatScreen(
                       .padding(top = LocalTopBarClearance.current),
               ) {
             storageError?.let {
-                AppText(it, color = AppTheme.colors.error, modifier = Modifier.fillMaxWidth().padding(12.dp))
+                Column(Modifier.fillMaxWidth().padding(12.dp).semantics { liveRegion = LiveRegionMode.Polite }) {
+                    AppText(it, color = AppTheme.colors.error)
+                    AppOutlinedButton(onClick = onRetrySave) {
+                        AppText(stringResource(R.string.history_retry_save))
+                    }
+                }
             }
             if (showRootDashboard) {
                 RootAuthDashboard(
@@ -440,15 +480,10 @@ fun ChatScreen(
                         }
                     }
                 }
-            } else if (!hasNotificationPermission) {
+            }
+            if (!hasNotificationPermission) {
                 AppCard(
-                    onClick = {
-                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
-                            notificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
-                        } else {
-                            com.paw.agent.device.DevicePermissionManager.openNotificationSettings(context)
-                        }
-                    },
+                    onClick = requestNotifications,
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 12.dp, vertical = 4.dp),
@@ -465,13 +500,7 @@ fun ChatScreen(
                         )
                         Spacer(Modifier.width(8.dp))
                         AppOutlinedButton(
-                            onClick = {
-                                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
-                                    notificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
-                                } else {
-                                    com.paw.agent.device.DevicePermissionManager.openNotificationSettings(context)
-                                }
-                            },
+                            onClick = requestNotifications,
                         ) {
                             AppText(
                                 text = stringResource(R.string.chat_enable_notifications),
@@ -519,11 +548,23 @@ fun ChatScreen(
                     .fillMaxWidth()
                     .weight(1f),
             ) {
-                if (filteredMessages.isEmpty()) {
+                if (!isInitialized) {
+                    Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
+                        AppCircularProgressIndicator()
+                        AppText(stringResource(R.string.chat_loading_history), modifier = Modifier.padding(16.dp))
+                    }
+                } else if (messages.isNotEmpty() && filteredMessages.isEmpty()) {
+                    Column(Modifier.align(Alignment.Center).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        AppText(stringResource(R.string.chat_filter_empty))
+                        AppOutlinedButton(onClick = { selectedFilterIndex = 0 }) {
+                            AppText(stringResource(R.string.chat_stream_all))
+                        }
+                    }
+                } else if (messages.isEmpty()) {
                     EmptyChatState(
                         configured = configReady,
-                        modifier = Modifier.align(Alignment.Center),
-                        onOpenSettings = onOpenSettings,
+                        modifier = Modifier.align(Alignment.Center).verticalScroll(rememberScrollState()),
+                        onOpenSettings = onConfigureModel,
                         onSuggestionClick = { onDraftChange(it) },
                     )
                 } else {
@@ -541,7 +582,7 @@ fun ChatScreen(
                         // 空的 tool-call id，重复 key 会让 LazyColumn 直接抛
                         // "Key was already used" 崩掉整个对话界面。消息列表只追加
                         // 不重排，默认的位置 key 足够且更稳。
-                        items(items = filteredMessages, key = { it.id }) { message: com.paw.agent.core.model.Message ->
+                        items(items = filteredMessages) { message: com.paw.agent.core.model.Message ->
                             if (message.role != com.paw.agent.core.model.MessageRole.ASSISTANT ||
                                 message.content.isNotBlank() ||
                                 message.status == com.paw.agent.core.model.MessageStatus.STREAMING

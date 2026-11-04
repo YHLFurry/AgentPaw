@@ -1,0 +1,9 @@
+<resources>
+    <item name="floating_toggle" type="id" />
+    <item name="floating_status" type="id" />
+    <item name="floating_action" type="id" />
+    <item name="floating_detail" type="id" />
+    <item name="floating_steps" type="id" />
+    <item name="floating_open" type="id" />
+    <item name="floating_collapse" type="id" />
+</resources>

@@ -54,6 +54,8 @@ class AndroidPhoneToolsTest {
         var lastTapAtPixel: Pair<Float, Float>? = null
         var lastSwipe: List<Int>? = null
         var lastInput: String? = null
+        var inputResult = true
+        var enterResult = true
         var lastKeyAction: String? = null
         var lastLaunched: String? = null
         var lastDeepLink: String? = null
@@ -84,7 +86,7 @@ class AndroidPhoneToolsTest {
 
         override suspend fun inputText(text: String, clearBeforeInput: Boolean): Boolean {
             lastInput = text
-            return true
+            return inputResult
         }
 
         override suspend fun pressBack(): Boolean {
@@ -104,7 +106,7 @@ class AndroidPhoneToolsTest {
 
         override suspend fun pressEnter(): Boolean {
             lastKeyAction = "ENTER"
-            return true
+            return enterResult
         }
 
         override suspend fun launchApp(packageNameOrName: String): Boolean {
@@ -162,6 +164,23 @@ class AndroidPhoneToolsTest {
         val res = tool.execute("""{"text": "Hello Android Agent"}""", context)
         assertTrue(res.contains("success"))
         assertEquals("Hello Android Agent", controller.lastInput)
+    }
+
+    @Test fun `enter failure preserves confirmed typing result`() = runTest {
+        controller.enterResult = false
+        val result = InputTextTool(controller).execute("""{"text":"hello","press_enter":true}""", context)
+        val payload = kotlinx.serialization.json.Json.parseToJsonElement(result).jsonObject
+        assertEquals("success", payload["status"]?.jsonPrimitive?.content)
+        assertEquals("false", payload["enter_pressed"]?.jsonPrimitive?.content)
+        assertEquals("hello", payload["typed"]?.jsonPrimitive?.content)
+    }
+
+    @Test fun `uncertain typing failure warns agent against duplicate input`() = runTest {
+        controller.inputResult = false
+        val result = InputTextTool(controller).execute("""{"text":"hello","press_enter":true}""", context)
+        val payload = kotlinx.serialization.json.Json.parseToJsonElement(result).jsonObject
+        assertEquals("false", payload["retry_safe"]?.jsonPrimitive?.content)
+        assertEquals(null, controller.lastKeyAction)
     }
 
     @Test

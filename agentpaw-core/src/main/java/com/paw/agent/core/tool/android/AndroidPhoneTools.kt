@@ -270,17 +270,19 @@ class InputTextTool(
         if (guardBlocked != null) return guardBlocked
 
         val ok = phoneController.inputText(text, clear)
-        if (ok && enter) {
-            phoneController.pressEnter()
-        }
+        val entered = ok && enter && phoneController.pressEnter()
         return if (ok) {
             val responseObj = buildJsonObject {
                 put("status", JsonPrimitive("success"))
                 put("typed", JsonPrimitive(text))
+                if (enter) {
+                    put("enter_pressed", JsonPrimitive(entered))
+                    if (!entered) put("message", JsonPrimitive("Text was entered, but Enter failed. Inspect the screen and retry only key_action ENTER if needed; do not type the text again."))
+                }
             }
             json.encodeToString(JsonObject.serializer(), responseObj)
         } else {
-            """{"status":"error","message":"Input text failed. Make sure an input field is focused."}"""
+            """{"status":"error","input_state":"unknown","retry_safe":false,"message":"Input could not be confirmed and may be partial. Inspect the focused field before any retry; do not repeatedly paste or type the same text."}"""
         }
     }
 }

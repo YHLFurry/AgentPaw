@@ -3,11 +3,14 @@ package com.paw.agent.ui.settings
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
-import kotlin.math.roundToInt
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -17,6 +20,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -42,6 +46,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -60,6 +65,7 @@ import com.paw.agent.R
 import com.paw.agent.core.llm.LlmProvider
 import com.paw.agent.data.settings.UiThemeMode
 import com.paw.agent.ui.components.adaptive.AppCard
+import com.paw.agent.ui.components.adaptive.AppAlertDialog
 import com.paw.agent.ui.components.adaptive.AppCircularProgressIndicator
 import com.paw.agent.ui.components.adaptive.AppIcon
 import com.paw.agent.ui.components.adaptive.AppIconButton
@@ -100,8 +106,10 @@ data class LlmSettingsActions(
     val onReasoningEffortChange: (String) -> Unit = {},
     val onAutoCompressChange: (Boolean) -> Unit = {},
     val onMaxToolRoundsChange: (Int) -> Unit,
+    val onMaxToolRoundsInputChange: (String) -> Unit = {},
     val onVisionResolutionModeChange: (String) -> Unit,
     val onTimeoutSecondsChange: (Int) -> Unit = {},
+    val onTimeoutSecondsInputChange: (String) -> Unit = {},
     val onPacingProfileChange: (String) -> Unit = {},
     val onStreamChange: (Boolean) -> Unit,
     val onSystemPromptChange: (String) -> Unit,
@@ -143,12 +151,16 @@ fun SettingsHomeScreen(
     onOpenExpert: () -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    hasUnsavedChanges: Boolean = false,
 ) {
     SettingsPageScaffold(
         title = stringResource(R.string.settings_title),
         onBack = onBack,
         modifier = modifier,
     ) {
+        if (hasUnsavedChanges) AppText(stringResource(R.string.settings_unsaved),
+            style = AppTheme.typography.bodySmall, color = AppTheme.colors.primary,
+            modifier = Modifier.padding(bottom = 12.dp))
         SettingsCard {
             SettingsNavRow(
                 icon = Icons.Outlined.Cloud,
@@ -255,25 +267,32 @@ fun LlmServicePage(
         onBack = onBack,
         modifier = modifier,
         snackbarHostState = snackbarHostState,
-        actions = { SettingsSaveAction(onClick = actions.onSave) },
+        actions = { SettingsSaveAction(onClick = actions.onSave, enabled = !state.isLoading && !state.isSaving) },
     ) {
+        SettingsDraftStatus(state)
+        if (state.isLoading || state.isResetting) return@SettingsPageScaffold
+        AppText(stringResource(R.string.settings_service_workflow), style = AppTheme.typography.bodySmall,
+            color = AppTheme.colors.onSurfaceVariant, modifier = Modifier.padding(bottom = 16.dp))
         // ---- provider ----
+        var choosingProvider by rememberSaveable(state.provider) { mutableStateOf(state.baseUrl.isBlank()) }
         SettingsGroupLabel(stringResource(R.string.settings_section_provider))
         SettingsCard {
             SettingsBlock {
-                ProviderGrid(
-                    selected = state.provider,
-                    onSelect = actions.onProviderChange,
-                )
-                Spacer(Modifier.height(10.dp))
-                AppText(
-                    text = stringResource(
-                        R.string.settings_current_provider,
-                        state.provider.displayName,
-                    ),
-                    style = AppTheme.typography.bodySmall,
-                    color = AppTheme.colors.onSurfaceVariant,
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    val providerLabel = if (state.provider == LlmProvider.CUSTOM)
+                        stringResource(R.string.settings_provider_custom) else state.provider.gridLabel
+                    AppText(stringResource(R.string.settings_current_provider, providerLabel),
+                        style = AppTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                    AppTextButton(stringResource(if (choosingProvider) R.string.settings_provider_collapse
+                        else R.string.settings_provider_change), { choosingProvider = !choosingProvider })
+                }
+                if (choosingProvider) {
+                    Spacer(Modifier.height(8.dp))
+                    ProviderGrid(selected = state.provider, onSelect = {
+                        actions.onProviderChange(it)
+                        choosingProvider = false
+                    })
+                }
             }
         }
 
@@ -289,7 +308,8 @@ fun LlmServicePage(
                     label = stringResource(R.string.settings_base_url),
                     singleLine = true,
                     isError = state.baseUrlError != null,
-                    supportingText = state.baseUrlError?.let { errorText(it) },
+                    supportingText = state.baseUrlError?.let { errorText(it) }
+                        ?: stringResource(R.string.settings_base_url_hint),
                     keyboardOptions = KeyboardOptions(
                         keyboardType = KeyboardType.Uri,
                         imeAction = ImeAction.Next,
@@ -341,14 +361,14 @@ fun LlmServicePage(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     AppText(
-                        text = stringResource(R.string.settings_model),
-                        style = AppTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold,
-                        color = AppTheme.colors.onSurface,
+                        text = stringResource(R.string.settings_model_manual_hint),
+                        style = AppTheme.typography.bodySmall,
+                        modifier = Modifier.weight(1f).padding(end = 8.dp),
+                        color = AppTheme.colors.onSurfaceVariant,
                     )
                     AppOutlinedButton(
                         onClick = actions.onFetchModels,
-                        enabled = !state.isFetchingModels && state.baseUrl.isNotBlank(),
+                        enabled = !state.isFetchingModels && !state.isLoading && state.baseUrl.isNotBlank(),
                     ) {
                         if (state.isFetchingModels) {
                             AppCircularProgressIndicator(size = 14.dp)
@@ -373,10 +393,10 @@ fun LlmServicePage(
                     onValueChange = actions.onModelChange,
                     label = stringResource(R.string.settings_model),
                     singleLine = true,
-                    isError = state.modelError != null || state.fetchModelsError != null,
+                    isError = state.modelError != null,
                     supportingText = state.modelError?.let { errorText(it) }
-                        ?: state.fetchModelsSuccessMessage
-                        ?: state.fetchModelsError,
+                        ?: state.fetchModelsError
+                        ?: state.fetchModelsSuccessMessage,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -391,21 +411,22 @@ fun LlmServicePage(
                         color = AppTheme.colors.primary,
                     )
                     Spacer(Modifier.height(6.dp))
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        state.fetchedModels.forEach { name ->
-                            val isSelected = state.model.trim().equals(name, ignoreCase = true)
-                            SelectableCell(
-                                label = name,
-                                isSelected = isSelected,
-                                onClick = { actions.onModelChange(name) },
-                                height = 32,
-                                corner = 6,
-                            )
+                    var modelSearch by remember(state.fetchedModels) { mutableStateOf("") }
+                    AppTextField(value = modelSearch, onValueChange = { modelSearch = it },
+                        label = stringResource(R.string.settings_models_search), singleLine = true,
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                        modifier = Modifier.fillMaxWidth())
+                    val matches = remember(state.fetchedModels, modelSearch) {
+                        state.fetchedModels.filter { it.contains(modelSearch, ignoreCase = true) }
+                    }
+                    if (matches.isEmpty()) AppText(stringResource(R.string.settings_models_no_match),
+                        style = AppTheme.typography.bodySmall)
+                    LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 240.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        items(matches, key = { it }) { name ->
+                            SelectableCell(label = name, isSelected = state.model.trim() == name,
+                                onClick = { actions.onModelChange(name) }, height = 48, corner = 8,
+                                modifier = Modifier.fillMaxWidth())
                         }
                     }
                 }
@@ -427,12 +448,12 @@ fun LlmServicePage(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
                         suggestions.forEach { name ->
-                            val isSelected = state.model.trim().equals(name, ignoreCase = true)
+                            val isSelected = state.model.trim() == name
                             SelectableCell(
                                 label = name,
                                 isSelected = isSelected,
                                 onClick = { actions.onModelChange(name) },
-                                height = 32,
+                                height = 48,
                                 corner = 6,
                             )
                         }
@@ -444,13 +465,11 @@ fun LlmServicePage(
 
             SettingsBlock {
                 AppTextField(
-                    value = state.timeoutSeconds.toString(),
-                    onValueChange = {
-                        val num = it.filter(Char::isDigit).toIntOrNull()
-                        if (num != null) actions.onTimeoutSecondsChange(num)
-                    },
+                    value = state.timeoutSecondsInput ?: state.timeoutSeconds.toString(),
+                    onValueChange = actions.onTimeoutSecondsInputChange,
                     label = stringResource(R.string.settings_timeout_seconds),
-                    supportingText = stringResource(R.string.settings_timeout_seconds_summary),
+                    isError = state.timeoutError != null,
+                    supportingText = state.timeoutError ?: stringResource(R.string.settings_timeout_seconds_summary),
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     modifier = Modifier.fillMaxWidth(),
@@ -472,7 +491,7 @@ fun LlmServicePage(
         // ---- connection test ----
         AppOutlinedButton(
             onClick = actions.onTestConnection,
-            enabled = state.testState !is TestState.Running && !state.diagnosticsRunning,
+            enabled = !state.isLoading && state.testState !is TestState.Running && !state.diagnosticsRunning,
             modifier = Modifier
                 .fillMaxWidth()
                 .heightIn(min = 48.dp),
@@ -494,7 +513,7 @@ fun LlmServicePage(
         Spacer(Modifier.height(12.dp))
         AppOutlinedButton(
             onClick = actions.onRunDiagnostics,
-            enabled = !state.diagnosticsRunning && state.testState !is TestState.Running,
+            enabled = !state.isLoading && !state.diagnosticsRunning && state.testState !is TestState.Running,
             modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
         ) {
             AppText(stringResource(if (state.diagnosticsRunning) R.string.settings_testing else R.string.settings_diagnostics))
@@ -515,12 +534,7 @@ fun LlmServicePage(
             AppText("$status $label ${result.detail}", style = AppTheme.typography.bodySmall)
         }
 
-        AppTextButton(
-            text = stringResource(R.string.settings_reset),
-            onClick = actions.onReset,
-            color = AppTheme.colors.error,
-            modifier = Modifier.align(Alignment.CenterHorizontally),
-        )
+        SettingsResetAction(actions.onReset, enabled = !state.isLoading && !state.isSaving)
 
         Spacer(Modifier.height(32.dp))
     }
@@ -543,8 +557,10 @@ fun GenerationPage(
         onBack = onBack,
         modifier = modifier,
         snackbarHostState = snackbarHostState,
-        actions = { SettingsSaveAction(onClick = actions.onSave) },
+        actions = { SettingsSaveAction(onClick = actions.onSave, enabled = !state.isLoading && !state.isSaving) },
     ) {
+        SettingsDraftStatus(state)
+        if (state.isLoading || state.isResetting) return@SettingsPageScaffold
         SettingsGroupLabel(stringResource(R.string.settings_section_sampling))
         SettingsCard {
             SettingsSliderRow(
@@ -683,9 +699,7 @@ fun AgentControlPage(
     val hasNotificationPermission = remember(permRefreshTick.intValue) {
         com.paw.agent.device.DevicePermissionManager.hasNotificationPermission(context)
     }
-    val notificationPermissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
-        contract = androidx.activity.result.contract.ActivityResultContracts.RequestPermission(),
-    ) { _ ->
+    val requestNotifications = com.paw.agent.ui.components.rememberNotificationPermissionAction {
         permRefreshTick.intValue++
     }
     val coroutineScope = androidx.compose.runtime.rememberCoroutineScope()
@@ -700,13 +714,18 @@ fun AgentControlPage(
         onBack = onBack,
         modifier = modifier,
         snackbarHostState = snackbarHostState,
-        actions = { SettingsSaveAction(onClick = actions.onSave) },
+        actions = { SettingsSaveAction(onClick = actions.onSave, enabled = !state.isLoading && !state.isSaving) },
     ) {
+        SettingsDraftStatus(state)
+        if (state.isLoading || state.isResetting) return@SettingsPageScaffold
         SettingsGroupLabel(stringResource(R.string.settings_group_execution))
         SettingsCard {
             SettingsBlock {
                 StepSettingsControl(
                     maxToolRounds = state.maxToolRounds,
+                    rawInput = state.maxToolRoundsInput,
+                    inputError = state.maxToolRoundsError,
+                    onInputChange = actions.onMaxToolRoundsInputChange,
                     onMaxToolRoundsChange = actions.onMaxToolRoundsChange,
                 )
             }
@@ -881,13 +900,7 @@ fun AgentControlPage(
                     stringResource(R.string.permission_not_granted)
                 },
                 actionText = stringResource(R.string.permission_open_settings),
-                onAction = {
-                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
-                        notificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
-                    } else {
-                        com.paw.agent.device.DevicePermissionManager.openNotificationSettings(context)
-                    }
-                },
+                onAction = requestNotifications,
             )
         }
 
@@ -1000,6 +1013,7 @@ fun AppearanceSettingsPage(
         onBack = onBack,
         modifier = modifier,
     ) {
+        state.saveError?.let { ResultBanner(it, isError = true) }
         SettingsGroupLabel(stringResource(R.string.settings_section_theme))
         SettingsCard {
             UiThemeMode.entries.forEachIndexed { index, mode ->
@@ -1086,6 +1100,38 @@ private fun SavedEffect(
 }
 
 @Composable
+private fun SettingsDraftStatus(state: LlmSettingsUiState) {
+    val label = when {
+        state.isLoading -> R.string.settings_loading
+        state.isResetting -> R.string.settings_resetting
+        state.isSaving -> R.string.settings_saving
+        state.hasUnsavedChanges -> R.string.settings_unsaved
+        else -> null
+    }
+    label?.let {
+        AppText(stringResource(it), style = AppTheme.typography.bodySmall,
+            color = AppTheme.colors.primary, modifier = Modifier.padding(bottom = 12.dp))
+    }
+}
+
+@Composable
+private fun SettingsResetAction(onReset: () -> Unit, enabled: Boolean) {
+    var confirming by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+    AppTextButton(text = stringResource(R.string.settings_reset), onClick = { confirming = true },
+        enabled = enabled, color = AppTheme.colors.error)
+    if (confirming) AppAlertDialog(
+        onDismissRequest = { confirming = false },
+        title = { AppText(stringResource(R.string.settings_reset)) },
+        text = { AppText(stringResource(R.string.settings_reset_confirmation)) },
+        confirmButton = { AppTextButton(stringResource(R.string.settings_reset), {
+            confirming = false
+            onReset()
+        }, enabled = enabled, color = AppTheme.colors.error) },
+        dismissButton = { AppTextButton(stringResource(android.R.string.cancel), { confirming = false }) },
+    )
+}
+
+@Composable
 private fun AppIconToggle(
     visible: Boolean,
     onToggle: () -> Unit,
@@ -1161,7 +1207,7 @@ private fun SelectableCell(
                 },
                 shape = shape,
             )
-            .clickable(onClick = onClick)
+            .selectable(selected = isSelected, role = Role.RadioButton, onClick = onClick)
             .padding(horizontal = 4.dp),
         contentAlignment = Alignment.Center,
     ) {
@@ -1235,19 +1281,18 @@ private fun ResultBanner(text: String, isError: Boolean) {
 @Composable
 private fun StepSettingsControl(
     maxToolRounds: Int,
+    rawInput: String?,
+    inputError: String?,
+    onInputChange: (String) -> Unit,
     onMaxToolRoundsChange: (Int) -> Unit,
 ) {
-    val isUnlimited = maxToolRounds <= 0
-    val boundedRounds = if (isUnlimited) 0 else maxToolRounds
+    val isUnlimited = maxToolRounds == 0
+    val boundedRounds = maxToolRounds.coerceAtLeast(0)
     // 计数规则：每 5 步记为 1 格
     val currentGrids = if (boundedRounds % 5 == 0) {
         stringResource(R.string.settings_max_rounds_grids, boundedRounds / 5)
     } else {
         stringResource(R.string.settings_rounds_fraction, boundedRounds / 5.0)
-    }
-
-    var inputText by remember(boundedRounds) {
-        mutableStateOf(boundedRounds.toString())
     }
 
     Column(Modifier.fillMaxWidth()) {
@@ -1266,17 +1311,22 @@ private fun StepSettingsControl(
             )
             Spacer(Modifier.width(10.dp))
             AppSurface(
+                modifier = Modifier.widthIn(max = 180.dp),
                 shape = RoundedCornerShape(8.dp),
                 color = if (isUnlimited) AppTheme.colors.tertiaryContainer else AppTheme.colors.primaryContainer,
                 contentColor = if (isUnlimited) AppTheme.colors.onTertiaryContainer else AppTheme.colors.onPrimaryContainer,
             ) {
                 AppText(
-                    text = if (isUnlimited) {
+                    text = if (maxToolRounds < 0) {
+                        stringResource(R.string.settings_rounds_invalid)
+                    } else if (isUnlimited) {
                         stringResource(R.string.settings_max_rounds_unlimited)
                     } else {
                         stringResource(R.string.settings_max_rounds_value, boundedRounds, currentGrids)
                     },
                     style = AppTheme.typography.labelMedium,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                 )
             }
@@ -1293,19 +1343,13 @@ private fun StepSettingsControl(
 
         // 自定义步数输入框 (仅允许正整数或0，0表示不限制)
         AppTextField(
-            value = inputText,
-            onValueChange = { newStr ->
-                val filtered = newStr.filter { it.isDigit() }
-                inputText = filtered
-                val parsed = filtered.toIntOrNull()
-                if (parsed != null && parsed >= 0) {
-                    onMaxToolRoundsChange(parsed)
-                }
-            },
+            value = rawInput ?: boundedRounds.toString(),
+            onValueChange = onInputChange,
+            isError = inputError != null,
             label = stringResource(R.string.settings_max_rounds_custom),
             placeholder = stringResource(R.string.settings_max_rounds_custom_hint),
-            supportingText = run {
-                val num = inputText.toIntOrNull() ?: boundedRounds
+            supportingText = inputError ?: run {
+                val num = boundedRounds
                 if (num <= 0) {
                     stringResource(R.string.settings_max_rounds_unlimited_desc)
                 } else {
@@ -1352,12 +1396,9 @@ private fun StepSettingsControl(
                         SelectableCell(
                             label = stringResource(labelRes),
                             isSelected = isSelected,
-                            onClick = {
-                                inputText = stepVal.toString()
-                                onMaxToolRoundsChange(stepVal)
-                            },
+                            onClick = { onMaxToolRoundsChange(stepVal) },
                             modifier = Modifier.weight(1f),
-                            height = 38,
+                            height = 48,
                             corner = 8,
                         )
                     }

@@ -7,11 +7,32 @@
     <string name="nav_settings">LLM Settings</string>
 
     <!-- Chat -->
+    <string name="floating_running">Running</string>
+    <string name="floating_paused">Paused</string>
+    <string name="floating_finished">Task ended</string>
+    <string name="floating_preparing">Preparing the next action…</string>
+    <string name="floating_step_budget">Step %1$d · Limit %2$d</string>
+    <string name="floating_step_unlimited">Step %1$d · No limit</string>
+    <string name="floating_expand">Expand task details</string>
+    <string name="floating_collapse">Collapse task details</string>
+    <string name="floating_open_chat">Open chat</string>
+    <string name="floating_view">View</string>
+    <string name="floating_resume">Resume</string>
+    <string name="floating_stop_description">Stop the current task</string>
+    <string name="floating_resume_description">Resume the paused task</string>
     <string name="chat_title">AgentPaw</string>
     <string name="chat_input_hint">Message AgentPaw…</string>
     <string name="chat_send">Send</string>
     <string name="chat_stop">Stop</string>
     <string name="chat_new_conversation">New chat</string>
+    <string name="chat_new_confirm_title">Start a new chat?</string>
+    <string name="chat_new_confirm_help">This stops the current task, discards its resume point and clears unsent text and images. Existing messages remain in history.</string>
+    <string name="chat_configure_model">Configure model service</string>
+    <string name="chat_setup_help">1. Choose a provider, enter the endpoint and model, then save.\n2. Test the connection in model settings.\n3. For phone control, enable Accessibility or authorize Shizuku / Root.\n\nYour API key is encrypted on this device. Tasks and screenshots used by the agent are sent to your chosen model service.</string>
+    <string name="chat_notification_recovery_title">Notifications are disabled</string>
+    <string name="chat_notification_recovery_help">Notifications show task progress and provide a stop button when you use another app. You can enable them in system settings. Chat remains available if you cancel.</string>
+    <string name="chat_open_system_settings">Open system settings</string>
+    <string name="chat_filter_empty">No messages in this view. Switch to all messages to see the conversation.</string>
     <string name="chat_clear">Clear conversation</string>
     <string name="chat_empty_title">Paw at your service</string>
     <string name="chat_empty_subtitle">Configure an LLM in settings, then start a conversation.</string>
@@ -456,4 +477,21 @@
     <string name="history_media_cleared">History images cleared</string>
     <string name="history_media_clear_failed">Some images could not be cleared. Check storage and retry.</string>
     <string name="history_clearing_media">Clearing history images…</string>
+    <string name="settings_service_workflow">Enter connection details and a model, then test and save. Tasks use the saved configuration.</string>
+    <string name="settings_base_url_hint">OpenAI-compatible base URL, such as https://host/v1. Do not include /chat/completions.</string>
+    <string name="settings_models_search">Search available models</string>
+    <string name="settings_models_no_match">No matching models. You can enter a model name manually.</string>
+    <string name="settings_loading">Loading settings…</string>
+    <string name="settings_saving">Saving…</string>
+    <string name="settings_unsaved">Unsaved changes · tap Save to apply to new tasks</string>
+    <string name="settings_reset_confirmation">Clear the saved model configuration and current draft, including the API key and generation parameters? Appearance and permissions are kept.</string>
+    <string name="settings_resetting">Restoring defaults…</string>
+    <string name="skills_discard_title">Discard unsaved changes?</string>
+    <string name="skills_discard_help">Your edits have not been saved. Leave this editor and discard them?</string>
+    <string name="skills_discard_action">Discard and leave</string>
+    <string name="settings_provider_change">Change</string>
+    <string name="settings_provider_collapse">Collapse</string>
+    <string name="settings_rounds_invalid">Enter a valid step count</string>
+    <string name="settings_provider_custom">Custom</string>
+    <string name="settings_model_manual_hint">Enter a model or fetch the available list</string>
 </resources>

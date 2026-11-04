@@ -8,6 +8,9 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -17,8 +20,15 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.activity.compose.BackHandler
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -30,6 +40,9 @@ import com.paw.agent.core.skill.SkillCatalog
 import com.paw.agent.core.skill.SkillDsl
 import com.paw.agent.core.skill.SkillRisk
 import com.paw.agent.ui.components.adaptive.AppCircularProgressIndicator
+import com.paw.agent.ui.components.adaptive.AppAlertDialog
+import com.paw.agent.ui.components.adaptive.AppSnackbarHost
+import com.paw.agent.ui.components.adaptive.rememberAppSnackbarHostState
 import com.paw.agent.ui.components.adaptive.AppIcon
 import com.paw.agent.ui.components.adaptive.AppIconButton
 import com.paw.agent.ui.components.adaptive.AppScaffold
@@ -66,12 +79,41 @@ fun SkillEditorScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val editing = state.editing
     val scrollState = rememberScrollState()
+    val isContentScrolled by remember(scrollState) { derivedStateOf { scrollState.value > 0 } }
+    val snackbar = rememberAppSnackbarHostState()
+    var confirmDiscard by rememberSaveable { mutableStateOf(false) }
+    val leaveEditor = {
+        viewModel.closeEditor()
+        onBack()
+    }
+    val requestBack = {
+        if (!state.saving) {
+            if (state.hasUnsavedChanges) confirmDiscard = true else leaveEditor()
+        }
+    }
+    BackHandler(onBack = requestBack)
+    LaunchedEffect(state.message) {
+        state.message?.let {
+            viewModel.consumeMessage()
+            snackbar.showSnackbar(it)
+        }
+    }
+    if (confirmDiscard) AppAlertDialog(
+        onDismissRequest = { confirmDiscard = false },
+        title = { AppText(stringResource(R.string.skills_discard_title)) },
+        text = { AppText(stringResource(R.string.skills_discard_help)) },
+        confirmButton = { AppTextButton(stringResource(R.string.skills_discard_action), {
+            confirmDiscard = false
+            leaveEditor()
+        }) },
+        dismissButton = { AppTextButton(stringResource(R.string.action_cancel), { confirmDiscard = false }) },
+    )
 
     AppScaffold(
         modifier = modifier.fillMaxSize(),
         topBar = {
             AppTopAppBar(
-                title = if (editing?.displayName.isNullOrBlank()) {
+                title = if (state.isNewSkill || editing?.displayName.isNullOrBlank()) {
                     stringResource(R.string.skills_create_title)
                 } else {
                     stringResource(R.string.skills_edit_title, editing?.displayName.orEmpty())
@@ -81,9 +123,9 @@ fun SkillEditorScreen(
                 } else {
                     stringResource(R.string.skills_no_errors)
                 },
-                isContentScrolled = scrollState.value > 0,
+                isContentScrolled = isContentScrolled,
                 navigationIcon = {
-                    AppTopBarAction(onClick = onBack) {
+                    AppTopBarAction(onClick = requestBack, enabled = !state.saving) {
                         AppIcon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = stringResource(R.string.cd_back),
@@ -92,7 +134,7 @@ fun SkillEditorScreen(
                 },
                 actions = {
                     AppTextButton(
-                        text = stringResource(R.string.action_save),
+                        text = stringResource(if (state.saving) R.string.settings_saving else R.string.action_save),
                         onClick = { viewModel.save { onBack() } },
                         enabled = state.canSave,
                     )
@@ -100,18 +142,13 @@ fun SkillEditorScreen(
             )
         },
         containerColor = AppTheme.colors.background,
+        snackbarHost = { AppSnackbarHost(snackbar) },
     ) { innerPadding ->
         if (editing == null) {
-            androidx.compose.runtime.LaunchedEffect(Unit) {
-                viewModel.startCreate()
+            Column(Modifier.fillMaxSize().padding(innerPadding).padding(16.dp)) {
+                SkillEmptyHint(text = stringResource(R.string.skills_editor_empty))
+                AppTextButton(stringResource(R.string.skills_create), onClick = viewModel::startCreate)
             }
-            // 编辑状态若被清空，展示友好提示并自动恢复空白草稿，杜绝闪退。
-            SkillEmptyHint(
-                text = stringResource(R.string.skills_editor_empty),
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding),
-            )
             return@AppScaffold
         }
 
@@ -119,6 +156,8 @@ fun SkillEditorScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
+                .consumeWindowInsets(innerPadding)
+                .imePadding()
                 .verticalScroll(scrollState)
                 // 顶栏高度作为可滚动内容的顶部间距，内容从玻璃渐隐带下穿过。
                 .padding(
@@ -131,6 +170,7 @@ fun SkillEditorScreen(
             ModeSwitcher(
                 mode = state.editorMode,
                 onModeChange = viewModel::setEditorMode,
+                enabled = !state.saving,
             )
 
             Spacer(Modifier.height(12.dp))
@@ -145,7 +185,7 @@ fun SkillEditorScreen(
             Spacer(Modifier.height(12.dp))
 
             if (state.editorMode == SkillEditorMode.SIMPLE) {
-                SimpleEditor(viewModel, state.dslText)
+                SimpleEditor(viewModel, state.dslText, enabled = !state.saving)
             } else {
                 AdvancedEditor(viewModel, state.jsonText, editing)
             }
@@ -171,11 +211,11 @@ fun SkillEditorScreen(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 com.paw.agent.ui.components.adaptive.AppOutlinedButton(
                     onClick = { viewModel.testRun(editing) },
-                    enabled = !state.testRunning,
+                    enabled = state.canSave && !state.testRunning,
                 ) {
                     if (state.testRunning) {
                         AppCircularProgressIndicator()
-                        Spacer(Modifier.height(0.dp))
+                        Spacer(Modifier.width(6.dp))
                     } else {
                         AppIcon(
                             imageVector = Icons.Default.PlayArrow,
@@ -183,7 +223,7 @@ fun SkillEditorScreen(
                             modifier = Modifier.height(18.dp),
                         )
                     }
-                    Spacer(Modifier.height(0.dp))
+                    Spacer(Modifier.width(6.dp))
                     AppText(
                         text = stringResource(R.string.skills_test_run),
                         style = AppTheme.typography.labelLarge,
@@ -206,6 +246,7 @@ fun SkillEditorScreen(
 private fun ModeSwitcher(
     mode: SkillEditorMode,
     onModeChange: (SkillEditorMode) -> Unit,
+    enabled: Boolean,
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -214,12 +255,14 @@ private fun ModeSwitcher(
         ModeChip(
             text = stringResource(R.string.skills_mode_simple),
             selected = mode == SkillEditorMode.SIMPLE,
+            enabled = enabled,
             onClick = { onModeChange(SkillEditorMode.SIMPLE) },
             modifier = Modifier.weight(1f),
         )
         ModeChip(
             text = stringResource(R.string.skills_mode_advanced),
             selected = mode == SkillEditorMode.ADVANCED,
+            enabled = enabled,
             onClick = { onModeChange(SkillEditorMode.ADVANCED) },
             modifier = Modifier.weight(1f),
         )
@@ -232,12 +275,13 @@ private fun ModeChip(
     selected: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
 ) {
     AppSurface(
         shape = RoundedCornerShape(12.dp),
         color = if (selected) AppTheme.colors.primaryContainer else AppTheme.colors.surfaceContainer,
         contentColor = if (selected) AppTheme.colors.onPrimaryContainer else AppTheme.colors.onSurfaceVariant,
-        modifier = modifier.clickableNoRipple(onClick),
+        modifier = modifier.clickableNoRipple(enabled = enabled, onClick = onClick),
     ) {
         Row(
             modifier = Modifier
@@ -292,7 +336,7 @@ private fun SummaryCard(
 }
 
 @Composable
-private fun SimpleEditor(viewModel: SkillsViewModel, text: String) {
+private fun SimpleEditor(viewModel: SkillsViewModel, text: String, enabled: Boolean) {
     SettingsGroupLabel(stringResource(R.string.skills_mode_simple))
     SettingsCard {
         Column(Modifier.padding(12.dp)) {
@@ -305,6 +349,7 @@ private fun SimpleEditor(viewModel: SkillsViewModel, text: String) {
             AppTextField(
                 value = text,
                 onValueChange = viewModel::onDslChange,
+                enabled = enabled,
                 minLines = 14,
                 maxLines = 30,
                 modifier = Modifier.fillMaxWidth(),
@@ -324,7 +369,7 @@ private fun SimpleEditor(viewModel: SkillsViewModel, text: String) {
             AppSurface(
                 shape = RoundedCornerShape(10.dp),
                 color = AppTheme.colors.surfaceContainerHigh,
-                modifier = Modifier.clickableNoRipple {
+                modifier = Modifier.clickableNoRipple(enabled = enabled) {
                     viewModel.appendDslLine(SkillDsl.templateLine(spec.kind))
                 },
             ) {
@@ -333,7 +378,7 @@ private fun SimpleEditor(viewModel: SkillsViewModel, text: String) {
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     AppText(text = spec.emoji, style = AppTheme.typography.labelMedium)
-                    Spacer(Modifier.height(0.dp))
+                    Spacer(Modifier.width(4.dp))
                     AppText(
                         text = spec.label,
                         style = AppTheme.typography.labelMedium,
@@ -360,6 +405,7 @@ private fun AdvancedEditor(
 ) {
     val guard = editing.guard
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val canEditStructure = !uiState.saving && uiState.issues.none { it.code == "json_invalid" && it.isError }
 
     SettingsGroupLabel(stringResource(R.string.skills_mode_advanced))
     SettingsCard {
@@ -373,6 +419,7 @@ private fun AdvancedEditor(
             AppTextField(
                 value = jsonText,
                 onValueChange = viewModel::onJsonChange,
+                enabled = !uiState.saving,
                 minLines = 16,
                 maxLines = 40,
                 isError = uiState.issues.any { it.isError && it.code == "json_invalid" },
@@ -388,6 +435,7 @@ private fun AdvancedEditor(
             title = stringResource(R.string.skills_guard_confirm),
             subtitle = stringResource(R.string.skills_guard_confirm_summary),
             checked = guard.confirmBeforeRun,
+            enabled = canEditStructure,
             onCheckedChange = { value ->
                 viewModel.updateGuard { it.copy(confirmBeforeRun = value) }
             },
@@ -397,6 +445,7 @@ private fun AdvancedEditor(
             title = stringResource(R.string.skills_guard_shell),
             subtitle = stringResource(R.string.skills_guard_shell_summary),
             checked = guard.allowShell,
+            enabled = canEditStructure,
             onCheckedChange = { value ->
                 viewModel.updateGuard { it.copy(allowShell = value) }
             },
@@ -406,6 +455,7 @@ private fun AdvancedEditor(
             title = stringResource(R.string.skills_guard_sensitive),
             subtitle = stringResource(R.string.skills_guard_sensitive_summary),
             checked = guard.allowSensitiveScreen,
+            enabled = canEditStructure,
             onCheckedChange = { value ->
                 viewModel.updateGuard { it.copy(allowSensitiveScreen = value) }
             },
@@ -414,6 +464,7 @@ private fun AdvancedEditor(
         Column(Modifier.padding(16.dp)) {
             AppTextField(
                 value = guard.allowedPackages.joinToString(", "),
+                enabled = canEditStructure,
                 onValueChange = { raw ->
                     val packages = raw.split(',', '，')
                         .map { it.trim() }
@@ -428,6 +479,7 @@ private fun AdvancedEditor(
             Spacer(Modifier.height(10.dp))
             AppTextField(
                 value = (guard.maxDurationMs / 1000).toString(),
+                enabled = canEditStructure,
                 onValueChange = { raw ->
                     val seconds = raw.filter(Char::isDigit).toLongOrNull() ?: return@AppTextField
                     viewModel.updateGuard { it.copy(maxDurationMs = (seconds * 1000).coerceIn(1_000, 600_000)) }
@@ -475,6 +527,7 @@ private fun AdvancedEditor(
                     }
                     AppSwitch(
                         checked = step.enabled,
+                        enabled = canEditStructure,
                         onCheckedChange = { value -> viewModel.toggleStep(step.id, value) },
                     )
                 }
@@ -485,8 +538,9 @@ private fun AdvancedEditor(
 
 /** LazyRow 里的无涟漪点击（避免选中态被水波纹盖住）。 */
 @Composable
-private fun Modifier.clickableNoRipple(onClick: () -> Unit): Modifier =
+private fun Modifier.clickableNoRipple(enabled: Boolean = true, onClick: () -> Unit): Modifier =
     this.clickable(
+        enabled = enabled,
         interactionSource = androidx.compose.runtime.remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
         indication = null,
         onClick = onClick,

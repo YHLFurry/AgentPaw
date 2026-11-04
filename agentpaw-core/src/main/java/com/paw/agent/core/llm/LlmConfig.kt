@@ -131,6 +131,9 @@ data class LlmConfig(
         }
         if (reasoningEffort !in REASONING_EFFORTS) add("不支持的思考强度")
         if (timeoutSeconds !in 10..300) add("请求超时需在 10 到 300 秒之间")
+        if (maxToolRounds < 0) add("最大执行步数需为 0 或正整数")
+        if (visionResolutionMode !in setOf("AUTO", "FAST", "HIGH")) add("不支持的截图分辨率模式")
+        if (pacingProfile !in setOf("FAST", "BALANCED", "CAREFUL")) add("不支持的执行节奏")
     }
 
     val isReasoningModel: Boolean

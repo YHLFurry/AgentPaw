@@ -2,6 +2,9 @@ package com.paw.agent.ui.chat
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.SavedStateHandle
+import androidx.lifecycle.createSavedStateHandle
+import androidx.lifecycle.viewmodel.CreationExtras
 import androidx.lifecycle.viewModelScope
 import com.paw.agent.core.agent.Agent
 import com.paw.agent.core.agent.breakpoint.TaskBreakpoint
@@ -49,6 +52,7 @@ class ChatViewModel(
         conversationRepository = conversationRepository,
         settingsRepository = settingsRepository,
     ),
+    private val savedStateHandle: SavedStateHandle = SavedStateHandle(),
 ) : ViewModel() {
 
     val conversation: StateFlow<Conversation> = conversationRepository.conversation
@@ -58,6 +62,8 @@ class ChatViewModel(
     private val _configReady = MutableStateFlow(false)
     private var importVersion = 0
     private var discardAttachment: (String) -> Unit = {}
+    private var draftTouched = false
+    private var draftConversationId: String? = null
 
     val uiState: StateFlow<ChatUiState> = combine(
         _draft,
@@ -84,6 +90,24 @@ class ChatViewModel(
 
     init {
         viewModelScope.launch {
+            combine(conversationRepository.isInitialized, conversation) { ready, current ->
+                if (ready) current.id else null
+            }.collect { id ->
+                if (id != null && id != draftConversationId) {
+                    if (draftConversationId == null) {
+                        // Wait for disk restoration: the repository initially exposes a temporary ID.
+                        if (!draftTouched && savedStateHandle.get<String>(DRAFT_CONVERSATION_KEY) == id) {
+                            _draft.update { it.copy(text = savedStateHandle[DRAFT_TEXT_KEY] ?: "") }
+                        }
+                    } else {
+                        clearDraft()
+                    }
+                    draftConversationId = id
+                    saveDraftText()
+                }
+            }
+        }
+        viewModelScope.launch {
             settingsRepository.settings.collect { settings ->
                 _configReady.value = settings.llm.isUsable
             }
@@ -91,7 +115,20 @@ class ChatViewModel(
     }
 
     fun onDraftChange(value: String) {
+        // A history selection may change the conversation before the Flow collector runs.
+        if (conversationRepository.isInitialized.value && draftConversationId != null && draftConversationId != conversation.value.id) {
+            clearDraft()
+            draftConversationId = conversation.value.id
+        }
+        draftTouched = true
         _draft.update { it.copy(text = value) }
+        saveDraftText()
+    }
+
+    private fun saveDraftText() {
+        if (!conversationRepository.isInitialized.value) return
+        savedStateHandle[DRAFT_CONVERSATION_KEY] = conversation.value.id
+        savedStateHandle[DRAFT_TEXT_KEY] = _draft.value.text
     }
 
     fun importImages(uris: List<String>, importer: suspend (String, String) -> String, discard: (String) -> Unit = {}) {
@@ -124,9 +161,11 @@ class ChatViewModel(
     }
 
     private fun clearDraft() {
+        draftTouched = true
         importVersion++
         _draft.value.images.forEach(discardAttachment)
         _draft.value = ChatDraft()
+        saveDraftText()
     }
 
     /** Sends the current draft, or stops generation if a turn is already running. */
@@ -148,6 +187,8 @@ class ChatViewModel(
         if (text.isEmpty() && draft.images.isEmpty()) return
 
         _draft.value = ChatDraft()
+        draftTouched = true
+        saveDraftText()
         taskRunner.startTask(config, text.ifBlank { "请分析所附图片。" }, draft.images)
     }
 
@@ -172,6 +213,8 @@ class ChatViewModel(
         taskRunner.stop()
         taskRunner.dismissBreakpoint()
         conversationRepository.newConversation()
+        draftConversationId = conversation.value.id
+        saveDraftText()
     }
 
     fun clear() {
@@ -194,8 +237,14 @@ class ChatViewModel(
         private val settingsRepository: SettingsRepository,
         private val taskRunner: AgentTaskRunner? = null,
     ) : ViewModelProvider.Factory {
-        @Suppress("UNCHECKED_CAST")
+        override fun <T : ViewModel> create(modelClass: Class<T>, extras: CreationExtras): T =
+            createViewModel(extras.createSavedStateHandle())
+
         override fun <T : ViewModel> create(modelClass: Class<T>): T =
+            createViewModel(SavedStateHandle())
+
+        @Suppress("UNCHECKED_CAST")
+        private fun <T : ViewModel> createViewModel(handle: SavedStateHandle): T =
             ChatViewModel(
                 agent = agent,
                 conversationRepository = conversationRepository,
@@ -206,8 +255,13 @@ class ChatViewModel(
                     conversationRepository = conversationRepository,
                     settingsRepository = settingsRepository,
                 ),
+                savedStateHandle = handle,
             ) as T
     }
 
-    companion object { const val MAX_ATTACHMENTS = 4 }
+    companion object {
+        const val MAX_ATTACHMENTS = 4
+        internal const val DRAFT_TEXT_KEY = "chat_draft_text"
+        internal const val DRAFT_CONVERSATION_KEY = "chat_draft_conversation"
+    }
 }

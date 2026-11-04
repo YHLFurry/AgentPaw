@@ -1,19 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="531" height="128" viewBox="0 0 531.17 128.00" role="img" aria-labelledby="agentpaw-wordmark-title" color="#18181B">
   <title id="agentpaw-wordmark-title">AgentPaw</title>
 
-  <!--
-    AgentPaw App Logo, horizontal wordmark lock-up.
-
-    Left: the icon at 112px, straight from agentpaw-logo.svg
-    (scale 0.21875). Right: "AgentPaw" set in Inter SemiBold and converted
-    to outlines, so the file has zero font dependencies. The lettering is
-    `currentColor` (default ink #18181B) — set color:#FFFFFF on dark
-    surfaces, as done in agentpaw-logo-wordmark-mono-white-*.png.
-
-    Canvas 531 x 128; icon keeps its 8.8% safe margin on the left,
-    optical gap between icon and lettering is 32px.
-  -->
-  <defs>
+<defs>
     <linearGradient id="agentpaw-wordmark-gradient" x1="64" y1="64" x2="448" y2="448" gradientUnits="userSpaceOnUse">
       <stop offset="0" stop-color="#4F46E5" />
       <stop offset="0.52" stop-color="#7C3AED" />
@@ -21,12 +9,12 @@
     </linearGradient>
   </defs>
 
-  <g transform="translate(8 8) scale(0.21875)" fill="url(#agentpaw-wordmark-gradient)">
-    <path d="M 104 212 A 34 48 0 1 0 172 212 A 34 48 0 1 0 104 212 Z" />
-    <path d="M 174 180 A 38 48 0 1 0 250 180 A 38 48 0 1 0 174 180 Z" />
-    <path d="M 262 180 A 38 48 0 1 0 338 180 A 38 48 0 1 0 262 180 Z" />
-    <path d="M 340 212 A 34 48 0 1 0 408 212 A 34 48 0 1 0 340 212 Z" />
-    <path fill-rule="evenodd" clip-rule="evenodd" d="M 155 296 C 155 256, 357 256, 357 296 C 368 320, 368 350, 338 372 A 26 26 0 0 1 286 372 C 285 365, 283 365, 282 372 A 26 26 0 0 1 230 372 C 229 365, 227 365, 226 372 A 26 26 0 0 1 174 372 C 144 350, 144 320, 155 296 Z" />
+  <g transform="translate(-11.6 -7.4) scale(1.4)" fill="none" stroke="#7C5CDB" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round">
+<path d="M31,43 C27,41 25,35 28,32 C31,29 36,33 37,37 C38,41 36,46 33,46 C32,46 31,45 31,43 Z"/>
+<path d="M43,34 C40,30 41,23 45,23 C49,22 52,28 51,33 C51,37 47,39 44,37 C43,36 43,35 43,34 Z"/>
+<path d="M58,32 C57,27 60,22 64,24 C68,26 68,32 66,36 C63,40 59,38 58,35 C58,34 58,33 58,32 Z"/>
+<path d="M73,38 C75,33 80,33 82,37 C84,41 81,47 77,48 C73,49 71,45 72,42 C72,40 72,39 73,38 Z"/>
+<path d="M54,46 C49,46 46,51 42,55 C37,58 30,62 30,68 C29,75 35,80 42,79 C47,78 50,75 54,76 C61,77 66,82 73,77 C80,73 79,66 75,62 C71,58 67,57 64,52 C61,48 58,45 54,46 Z"/>
   </g>
 
   <g fill="currentColor">

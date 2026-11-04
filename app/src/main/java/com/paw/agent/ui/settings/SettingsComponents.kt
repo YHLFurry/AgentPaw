@@ -3,6 +3,10 @@ package com.paw.agent.ui.settings
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,6 +18,8 @@ import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -25,6 +31,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -288,7 +297,7 @@ fun ProviderGrid(
     modifier: Modifier = Modifier,
 ) {
     Column(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth().selectableGroup(),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         LlmProvider.entries.chunked(2).forEach { rowItems ->
@@ -339,12 +348,12 @@ private fun ProviderCell(
                 },
                 shape = shape,
             )
-            .clickable(onClick = onClick)
+            .selectable(selected = isSelected, role = Role.RadioButton, onClick = onClick)
             .padding(horizontal = 12.dp),
         contentAlignment = Alignment.CenterStart,
     ) {
         AppText(
-            text = provider.gridLabel,
+            text = if (provider == LlmProvider.CUSTOM) stringResource(R.string.settings_provider_custom) else provider.gridLabel,
             style = AppTheme.typography.labelLarge,
             color = if (isSelected) {
                 AppTheme.colors.onPrimaryContainer
@@ -395,7 +404,8 @@ fun SettingsSwitchRow(
         return
     }
 
-    SettingsRow(modifier = modifier) {
+    SettingsRow(modifier = modifier.toggleable(value = checked, enabled = enabled,
+        role = Role.Switch, onValueChange = onCheckedChange)) {
         Column(Modifier.weight(1f)) {
             AppText(
                 text = title,
@@ -417,7 +427,7 @@ fun SettingsSwitchRow(
         Spacer(Modifier.width(12.dp))
         AppSwitch(
             checked = checked,
-            onCheckedChange = if (enabled) onCheckedChange else null,
+            onCheckedChange = null,
             enabled = enabled,
         )
     }
@@ -538,7 +548,7 @@ fun PermissionRow(
             color = AppTheme.colors.onSurfaceVariant,
         )
 
-        if (!isGranted && actionText != null) {
+        if (actionText != null) {
             Spacer(Modifier.height(10.dp))
             AppOutlinedButton(
                 onClick = onAction,
@@ -567,13 +577,14 @@ fun SettingsPageScaffold(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val scrollState = rememberScrollState()
+    val isContentScrolled by remember(scrollState) { derivedStateOf { scrollState.value > 0 } }
     AppScaffold(
         modifier = modifier,
         topBar = {
             AppTopAppBar(
                 title = title,
                 // 玻璃顶栏的材质随"页面是否已离开顶部"亮起，用滚动状态而不是常量来驱动。
-                isContentScrolled = scrollState.value > 0,
+                isContentScrolled = isContentScrolled,
                 navigationIcon = {
                     AppTopBarAction(onClick = onBack) {
                         AppIcon(
@@ -593,6 +604,8 @@ fun SettingsPageScaffold(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(padding)
+                .consumeWindowInsets(padding)
+                .imePadding()
                 .verticalScroll(scrollState)
                 // 顶栏那一份高度花在可滚动内容上：首屏第一条仍然落在顶栏下方，之后的内容
                 // 从顶栏的渐隐带下穿过。写成根布局的 padding 会变成一条永不滚动的死带。
@@ -612,10 +625,12 @@ fun SettingsPageScaffold(
 fun SettingsSaveAction(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
 ) {
     AppTextButton(
         text = stringResource(R.string.settings_save),
         onClick = onClick,
+        enabled = enabled,
         modifier = modifier.padding(end = 4.dp),
     )
 }

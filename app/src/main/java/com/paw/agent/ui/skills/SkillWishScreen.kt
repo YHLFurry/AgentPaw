@@ -17,6 +17,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -62,13 +64,14 @@ fun SkillWishScreen(
     val preview = state.wishPreview
     val configReady = llmConfig.isUsable
     val scrollState = rememberScrollState()
+    val isContentScrolled by remember(scrollState) { derivedStateOf { scrollState.value > 0 } }
 
     AppScaffold(
         modifier = modifier.fillMaxSize(),
         topBar = {
             AppTopAppBar(
                 title = stringResource(R.string.skills_wish_title),
-                isContentScrolled = scrollState.value > 0,
+                isContentScrolled = isContentScrolled,
                 navigationIcon = {
                     AppTopBarAction(onClick = onBack) {
                         AppIcon(
