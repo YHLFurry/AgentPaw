@@ -299,6 +299,19 @@ fun LlmServicePage(
         Spacer(Modifier.height(20.dp))
 
         // ---- connection ----
+        if (state.provider == LlmProvider.CHATGPT_PLAN) {
+            val context = androidx.compose.ui.platform.LocalContext.current
+            SettingsGroupLabel("ChatGPT 账号")
+            SettingsCard {
+                SettingsBlock {
+                    AppText("使用手机浏览器授权订阅，无需 API Key 或电脑中转。授权后获取模型列表并保存设置。")
+                    Spacer(Modifier.height(10.dp))
+                    AppOutlinedButton(onClick = {
+                        context.startActivity(android.content.Intent(context, com.paw.agent.chatgpt.ChatGptLoginActivity::class.java))
+                    }) { AppText("登录 / 管理 ChatGPT 账号") }
+                }
+            }
+        } else {
         SettingsGroupLabel(stringResource(R.string.settings_section_connection))
         SettingsCard {
             SettingsBlock {
@@ -351,6 +364,7 @@ fun LlmServicePage(
 
         Spacer(Modifier.height(20.dp))
 
+        }
         // ---- model ----
         SettingsGroupLabel(stringResource(R.string.settings_section_model))
         SettingsCard {
