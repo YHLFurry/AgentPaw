@@ -50,7 +50,8 @@ class AppContainer(application: Application) {
     /** 用户技能持久化（v2 格式，支持 v1 自动迁移）。 */
     val skillStore: SkillStore by lazy { SkillStore(application, appScope) }
 
-    val llmClient: LlmClient by lazy { OpenAiCompatibleClient() }
+    private val compatibleClient by lazy { OpenAiCompatibleClient() }
+    val llmClient: LlmClient by lazy { com.paw.agent.chatgpt.ChatGptPlanClient(application, compatibleClient) }
 
     val searchBackend: SearchBackend by lazy { DuckDuckGoSearchBackend() }
 
@@ -147,7 +148,7 @@ class AppContainer(application: Application) {
      */
     fun updateRuntimeSettings(settings: AppSettings) {
         skillRunOptions = settings.skillRuntimePolicy()
-        (llmClient as? OpenAiCompatibleClient)?.networkPolicy = settings.networkPolicy()
+        compatibleClient.networkPolicy = settings.networkPolicy()
     }
 
     /** 技能增删改后调用，把变更同步到模型可调用的工具表。 */
