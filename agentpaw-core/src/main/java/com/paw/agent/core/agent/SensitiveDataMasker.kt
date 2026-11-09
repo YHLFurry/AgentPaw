@@ -1,10 +1,23 @@
 package com.paw.agent.core.agent
 
+import kotlinx.serialization.json.*
+
 /**
  * Utility for masking sensitive data (passwords, tokens, API keys, payment info, large base64 dumps)
  * in user-visible logs, tool outputs, and diagnostic messages.
  */
 object SensitiveDataMasker {
+    private val secretKey = Regex("(?i)^(password|passwd|pwd|passcode|pin|cvv|验证码|verification[_-]?code|api[_-]?key|access[_-]?key|secret|auth[_-]?token|access[_-]?token|refresh[_-]?token|token|private[_-]?key|credential)$")
+    private val quotedSecret = Regex("""(?i)(["']?(password|passwd|pwd|passcode|pin|cvv|验证码|verification[_-]?code|api[_-]?key|access[_-]?key|secret|auth[_-]?token|access[_-]?token|refresh[_-]?token|token|private[_-]?key|credential)["']?\s*[:=]\s*)("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')""")
+
+    private fun redactJson(value: JsonElement): JsonElement = when (value) {
+        is JsonObject -> JsonObject(value.mapValues { (key, entry) ->
+            if (secretKey.matches(key) && entry != JsonNull && (entry !is JsonPrimitive || entry.booleanOrNull == null)) JsonPrimitive("***")
+            else redactJson(entry)
+        })
+        is JsonArray -> JsonArray(value.map(::redactJson))
+        else -> value
+    }
 
     private val BASE64_IMAGE_REGEX = Regex(""""image_base64"\s*:\s*"[^"]{40,}"""")
 
@@ -38,7 +51,24 @@ object SensitiveDataMasker {
 
     fun mask(raw: String?): String {
         if (raw.isNullOrBlank()) return ""
-        var text = raw
+        var text = runCatching {
+            val parsed = Json.parseToJsonElement(raw)
+            val redacted = redactJson(parsed)
+            if (parsed == redacted) raw else redacted.toString()
+        }.getOrElse {
+            if (raw.trimStart().startsWith("{") || raw.trimStart().startsWith("[")) {
+                val assignment = Regex("""(?i)["']?(?:password|passwd|pwd|passcode|pin|cvv|private[_-]?key|credential|token|secret|api[_-]?key|access[_-]?(?:token|key))["']?\s*[:=]\s*""").find(raw)
+                if (assignment != null) raw.take(assignment.range.last + 1) + "\"***\" [malformed secret content omitted]" else raw
+            } else raw
+        }
+
+        text = text.replace(quotedSecret) { match ->
+            val key = match.groupValues[2].lowercase()
+            val value = match.groupValues[3].drop(1).dropLast(1)
+            val mask = if (Regex("password|passwd|pwd|passcode|pin|cvv|验证码|verification.*|private.*|credential").matches(key)) "***"
+                else maskLongToken(value)
+            match.groupValues[1] + "\"$mask\""
+        }
 
         // 1. 剥离日志中超长 base64 图片数据，保持日志紧凑
         text = text.replace(BASE64_IMAGE_REGEX, """"image_base64": "[IMAGE_ATTACHMENT_OMITTED]"""")

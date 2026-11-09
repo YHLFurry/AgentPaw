@@ -368,6 +368,7 @@ class OpenAiCompatibleClient(
     }
 
     private fun clientForConfig(config: LlmConfig): OkHttpClient = httpClient.newBuilder()
+        .retryOnConnectionFailure(false)
         // 请求中包含凭据和对话；禁止重定向绕过已校验的地址与传输策略。
         .followRedirects(false)
         .followSslRedirects(false)
@@ -515,6 +516,16 @@ class OpenAiCompatibleClient(
             val uri = runCatching { java.net.URI(url) }.getOrNull() ?: return false
             val rawHost = uri.host?.lowercase() ?: return false
             val host = rawHost.removePrefix("[").removeSuffix("]")
+
+            // 仅解析 IPv6 字面量，避免为主机名发起 DNS 查询或信任 DNS 返回的私网地址。
+            if (host.contains(':')) {
+                val address = runCatching { java.net.InetAddress.getByName(host.substringBefore('%')) }.getOrNull()
+                if (address != null) {
+                    return address.isLoopbackAddress || address.isSiteLocalAddress || address.isLinkLocalAddress ||
+                        (address.address.size == 16 && (address.address[0].toInt() and 0xfe) == 0xfc)
+                }
+                return false
+            }
 
             if (host == "localhost" || host == "127.0.0.1" || host == "::1" || host == "10.0.2.2") {
                 return true

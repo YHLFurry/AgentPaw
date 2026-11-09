@@ -99,9 +99,13 @@ class SkillWishComposer(
 
         val deduped = ensureUniqueKey(definition, existingKeys)
         val normalized = SkillValidator.normalize(
-            deduped.copy(source = SkillSource.WISH, updatedAt = System.currentTimeMillis()),
+            deduped.copy(source = SkillSource.WISH, guard = deduped.guard.copy(allowSensitiveScreen = false), updatedAt = System.currentTimeMillis()),
         )
         val issues = SkillValidator.validate(normalized)
+
+        if (issues.any { it.isError }) {
+            return SkillWishResult.Failure(issues.filter { it.isError }.joinToString("；") { it.message }, raw)
+        }
 
         return SkillWishResult.Success(
             definition = normalized,

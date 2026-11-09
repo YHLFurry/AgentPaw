@@ -489,4 +489,29 @@ class SkillEngineTest {
         assertEquals(SkillRunStatus.CANCELLED, result.status)
         assertEquals(null, controller.lastKey)
     }
+
+    @Test fun `skill sensitive override requires both host and definition permission`() = runTest {
+        for (host in listOf(false, true)) for (declared in listOf(false, true)) {
+            val controller = FakeController(elements = listOf(UiElementInfo(isPassword = true)))
+            val def = skill(guard = SkillGuard(allowSensitiveScreen = declared), steps = listOf(
+                SkillStep(kind = SkillActionKind.TAP_POINT, delayMs = 0),
+            ))
+            val result = SkillEngine(controller, options = { SkillRunOptions(allowSensitiveScreen = host) }).run(def,
+                context = AgentContext("t", grantedTokens = setOf("*")))
+            if (host && declared) assertEquals(SkillRunStatus.SUCCESS, result.status)
+            else { assertEquals(SkillRunStatus.SAFETY_PAUSED, result.status); assertEquals(null, controller.tappedNormalized) }
+        }
+    }
+
+    @Test fun `runtime variable cannot launch outside the declared package list`() = runTest {
+        val controller = FakeController()
+        val def = skill(guard = SkillGuard(allowedPackages = listOf("com.test.app")), steps = listOf(
+            SkillStep(kind = SkillActionKind.SET_VARIABLE, storeAs = "destination", target = "com.other.app", delayMs = 0),
+            SkillStep(kind = SkillActionKind.LAUNCH_APP, target = "{{destination}}", delayMs = 0),
+        ))
+        val result = SkillEngine(controller).run(def)
+        assertEquals(SkillRunStatus.FAILED, result.status)
+        assertTrue(controller.launched.isEmpty())
+    }
+
 }

@@ -1,5 +1,9 @@
 package com.paw.agent.core.skill
 
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonObject
+
 /**
  * 「速记」格式：一行一个动作的自然语言技能稿。
  *
@@ -28,6 +32,8 @@ package com.paw.agent.core.skill
 object SkillDsl {
 
     private const val SEPARATOR = "---"
+    private val json = Json { encodeDefaults = true; ignoreUnknownKeys = true }
+    private val metadataJson = Json { encodeDefaults = false }
 
     data class Result(
         val definition: SkillDefinition?,
@@ -49,17 +55,25 @@ object SkillDsl {
         var emoji = ""
         val parameters = mutableListOf<SkillParameter>()
         val variables = LinkedHashMap<String, String>()
-        var confirmBeforeRun = false
-        var allowedPackages = emptyList<String>()
-        var maxDurationMs = 180_000L
-        var allowShell = false
+        var confirmBeforeRun: Boolean? = null
+        var allowedPackages: List<String>? = null
+        var maxDurationMs = base.guard.maxDurationMs
+        var allowShell: Boolean? = null
         var inBody = false
 
         val steps = mutableListOf<SkillStep>()
+        var stepMetadata: SkillStep? = null
 
         text.lines().forEachIndexed { index, rawLine ->
             val lineNo = index + 1
             val line = rawLine.trim()
+            if (inBody && line.startsWith("# @step ")) {
+                stepMetadata = runCatching { json.decodeFromString(SkillStep.serializer(), line.removePrefix("# @step ")) }.getOrElse {
+                    issues += SkillIssue(SkillIssueSeverity.ERROR, "dsl_metadata_invalid", "步骤配置元数据损坏，请保留原文并在 JSON 模式修正", line = lineNo)
+                    null
+                }
+                return@forEachIndexed
+            }
             if (line.isEmpty() || line.startsWith("#") || line.startsWith("//")) return@forEachIndexed
 
             if (line == SEPARATOR) {
@@ -116,16 +130,19 @@ object SkillDsl {
                                 allowedPackages = v.split(',', '，').map { it.trim() }.filter { it.isNotBlank() }
 
                             "总超时", "timeout" -> {
-                                val seconds = v.removeSuffix("s").removeSuffix("秒").trim().toLongOrNull()
-                                if (seconds == null || seconds <= 0) {
+                                val milliseconds = runCatching {
+                                    if (v.endsWith("ms")) v.removeSuffix("ms").trim().toLong()
+                                    else Math.multiplyExact(v.removeSuffix("s").removeSuffix("秒").trim().toLong(), 1000L)
+                                }.getOrNull()
+                                if (milliseconds == null || milliseconds !in 1_000..600_000) {
                                     issues += SkillIssue(
                                         SkillIssueSeverity.ERROR,
                                         "dsl_guard_invalid",
-                                        "总超时请填写正整数秒数",
+                                        "总超时需为 1–600 秒，也可使用 ms 单位",
                                         line = lineNo,
                                     )
                                 } else {
-                                    maxDurationMs = (seconds * 1000).coerceIn(1_000, 600_000)
+                                    maxDurationMs = milliseconds
                                 }
                             }
 
@@ -150,7 +167,8 @@ object SkillDsl {
             }
 
             // ---- 动作行 ----
-            var body = line
+            val enabled = !line.startsWith("禁用 ")
+            var body = line.removePrefix("禁用 ")
             var condition = ""
 
             if (body.startsWith("如果 ", ignoreCase = true) || body.startsWith("if ", ignoreCase = true)) {
@@ -214,11 +232,21 @@ object SkillDsl {
                 return@forEachIndexed
             }
 
-            steps += parsed.copy(
-                id = "step_${steps.size + 1}",
+            val metadata = stepMetadata
+            stepMetadata = null
+            val merged = if (metadata != null && metadata.kind == parsed.kind) {
+                val baseline = parseAction(renderStep(metadata)) ?: parsed
+                val before = json.encodeToJsonElement(SkillStep.serializer(), baseline).jsonObject
+                val after = json.encodeToJsonElement(SkillStep.serializer(), parsed).jsonObject
+                val preserved = json.encodeToJsonElement(SkillStep.serializer(), metadata).jsonObject
+                json.decodeFromJsonElement(SkillStep.serializer(), JsonObject(preserved + after.filter { (key, value) -> key !in setOf("id", "label") && value != before[key] }))
+            } else parsed
+            steps += merged.copy(
+                id = metadata?.id?.ifBlank { null } ?: "step_${steps.size + 1}",
+                enabled = enabled,
                 condition = condition,
                 onError = onError,
-                maxAttempts = if (onError == SkillErrorPolicy.RETRY) maxAttempts else parsed.maxAttempts,
+                maxAttempts = if (onError == SkillErrorPolicy.RETRY) maxAttempts else merged.maxAttempts,
             )
         }
 
@@ -231,11 +259,11 @@ object SkillDsl {
         }
 
         val guard = base.guard.copy(
-            confirmBeforeRun = if (confirmBeforeRun) true else base.guard.confirmBeforeRun,
-            allowedPackages = allowedPackages.ifEmpty { base.guard.allowedPackages },
+            confirmBeforeRun = confirmBeforeRun ?: base.guard.confirmBeforeRun,
+            allowedPackages = allowedPackages ?: base.guard.allowedPackages,
             maxDurationMs = maxDurationMs,
             // 出现 shell 步骤时自动开启，同时由校验器要求用户显式同意
-            allowShell = allowShell || steps.any { it.kind == SkillActionKind.SHELL } || base.guard.allowShell,
+            allowShell = allowShell ?: (steps.any { it.kind == SkillActionKind.SHELL } || base.guard.allowShell),
         )
 
         val definition = base.copy(
@@ -244,7 +272,9 @@ object SkillDsl {
             description = description.ifBlank { base.description },
             category = category.ifBlank { base.category },
             emoji = emoji.ifBlank { base.emoji },
-            parameters = parameters.ifEmpty { base.parameters },
+            parameters = parameters.ifEmpty { base.parameters }.map { param ->
+                param.copy(defaultValue = base.parameters.firstOrNull { it.key == param.key }?.defaultValue ?: param.defaultValue)
+            },
             steps = steps,
             variables = variables.ifEmpty { base.variables },
             guard = guard,
@@ -500,21 +530,20 @@ object SkillDsl {
             )
         }
         def.variables.forEach { (k, v) -> appendLine("变量: $k = $v") }
-        if (def.guard.confirmBeforeRun) appendLine("守卫: 执行前确认 = 是")
-        if (def.guard.allowedPackages.isNotEmpty()) {
-            appendLine("守卫: 允许应用 = ${def.guard.allowedPackages.joinToString(", ")}")
-        }
-        appendLine("守卫: 总超时 = ${def.guard.maxDurationMs / 1000}")
-        if (def.guard.allowShell) appendLine("守卫: 允许命令 = 是")
+        appendLine("守卫: 执行前确认 = ${if (def.guard.confirmBeforeRun) "是" else "否"}")
+        appendLine("守卫: 允许应用 = ${def.guard.allowedPackages.joinToString(", ")}")
+        appendLine("守卫: 总超时 = ${def.guard.maxDurationMs}ms")
+        appendLine("守卫: 允许命令 = ${if (def.guard.allowShell) "是" else "否"}")
         appendLine(SEPARATOR)
 
         def.steps.forEach { step ->
             var line = renderStep(step)
             if (line.isBlank()) return@forEach
-            if (!step.enabled) line = "# 已禁用: $line"
+            appendLine("# @step " + metadataJson.encodeToString(SkillStep.serializer(), step))
             if (step.onError == SkillErrorPolicy.CONTINUE) line += "（失败继续）"
             if (step.onError == SkillErrorPolicy.RETRY) line += "（重试${step.maxAttempts}）"
             if (step.condition.isNotBlank()) line = "如果 ${step.condition} 则 $line"
+            if (!step.enabled) line = "禁用 $line"
             appendLine(line)
         }
     }
@@ -524,7 +553,7 @@ object SkillDsl {
         SkillActionKind.TAP_POINT -> "点坐标 ${step.x},${step.y}"
         SkillActionKind.INPUT_TEXT -> if (step.clearFirst) "清空输入 ${step.target}" else "输入 ${step.target}"
         SkillActionKind.SWIPE -> "滑动 ${step.x},${step.y} -> ${step.toX ?: step.x},${step.toY ?: step.y}"
-        SkillActionKind.SCROLL -> "滚动 ${step.target}"
+        SkillActionKind.SCROLL -> "scroll ${step.target}"
         SkillActionKind.PRESS_KEY -> when (step.target.lowercase()) {
             "back" -> "返回"
             "home" -> "主页"

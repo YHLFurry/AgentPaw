@@ -227,13 +227,7 @@ class SwipeTool(
         val ey = root["end_y"]?.jsonPrimitive?.intOrNull ?: return "Error: 'end_y' is required"
         val duration = root["duration_ms"]?.jsonPrimitive?.intOrNull?.toLong() ?: 350L
 
-        val isConfirmed = context.isGranted("risk_confirmed:swipe")
-        if (!isConfirmed) {
-            val risk = SafetyGuard.checkRisk("swipe", arguments)
-            if (risk.requiresConfirmation) {
-                return SafetyGuard.formatConfirmationPayload(risk, toolName = "swipe", arguments = arguments)
-            }
-        }
+        SafetyGuard.checkScreenAndRisk("swipe", arguments, context, phoneController)?.let { return it }
 
         val ok = phoneController.swipe(sx, sy, ex, ey, duration)
         return if (ok) """{"status":"success","action":"swipe","from":[$sx,$sy],"to":[$ex,$ey]}"""
@@ -313,10 +307,7 @@ class KeyActionTool(
         val action = root["action"]?.jsonPrimitive?.contentOrNull?.uppercase()
             ?: return "Error: 'action' is required"
 
-        if (action == "ENTER") {
-            val guardBlocked = SafetyGuard.checkScreenAndRisk("key_action", arguments, context, phoneController)
-            if (guardBlocked != null) return guardBlocked
-        }
+        SafetyGuard.checkScreenAndRisk("key_action", arguments, context, phoneController)?.let { return it }
 
         val ok = when (action) {
             "BACK" -> phoneController.pressBack()
@@ -352,13 +343,7 @@ class LaunchAppTool(
         val root = json.parseToJsonElement(arguments).jsonObject
         val appName = root["app_name"]?.jsonPrimitive?.contentOrNull ?: return "Error: 'app_name' is required"
 
-        val isConfirmed = context.isGranted("risk_confirmed:launch_app")
-        if (!isConfirmed) {
-            val risk = SafetyGuard.checkRisk("launch_app", arguments, appName)
-            if (risk.requiresConfirmation) {
-                return SafetyGuard.formatConfirmationPayload(risk, toolName = "launch_app", arguments = arguments)
-            }
-        }
+        SafetyGuard.checkScreenAndRisk("launch_app", arguments, context, phoneController, targetTextExtra = appName)?.let { return it }
 
         val ok = phoneController.launchApp(appName)
         return if (ok) {
@@ -410,13 +395,7 @@ class DeepLinkTool(
             return """{"status":"error","message":"Security violation: scheme '$scheme' is strictly forbidden for deeplinks to prevent unauthorized file or component access."}"""
         }
 
-        val isConfirmed = context.isGranted("risk_confirmed:open_deeplink")
-        if (!isConfirmed) {
-            val risk = SafetyGuard.checkRisk("open_deeplink", arguments, uri)
-            if (risk.requiresConfirmation) {
-                return SafetyGuard.formatConfirmationPayload(risk, toolName = "open_deeplink", arguments = arguments)
-            }
-        }
+        SafetyGuard.checkScreenAndRisk("open_deeplink", arguments, context, phoneController, targetTextExtra = uri)?.let { return it }
 
         val ok = phoneController.openDeepLink(uri)
         return if (ok) {
@@ -624,13 +603,7 @@ class DoubleTapTool(
         val cropRoi = root["crop_roi"]?.jsonArray?.mapNotNull { it.jsonPrimitive.intOrNull }
             ?.takeIf { it.size == 4 }
 
-        val isConfirmed = context.isGranted("risk_confirmed:double_tap")
-        if (!isConfirmed) {
-            val risk = SafetyGuard.checkRisk("double_tap", arguments)
-            if (risk.requiresConfirmation) {
-                return SafetyGuard.formatConfirmationPayload(risk, toolName = "double_tap", arguments = arguments)
-            }
-        }
+        SafetyGuard.checkScreenAndRisk("double_tap", arguments, context, phoneController)?.let { return it }
 
         val ok = phoneController.doubleTap(x, y, cropRoi)
         return if (ok) """{"status":"success","action":"double_tap","x":$x,"y":$y}"""
@@ -670,13 +643,7 @@ class LongPressTool(
         val cropRoi = root["crop_roi"]?.jsonArray?.mapNotNull { it.jsonPrimitive.intOrNull }
             ?.takeIf { it.size == 4 }
 
-        val isConfirmed = context.isGranted("risk_confirmed:long_press")
-        if (!isConfirmed) {
-            val risk = SafetyGuard.checkRisk("long_press", arguments)
-            if (risk.requiresConfirmation) {
-                return SafetyGuard.formatConfirmationPayload(risk, toolName = "long_press", arguments = arguments)
-            }
-        }
+        SafetyGuard.checkScreenAndRisk("long_press", arguments, context, phoneController)?.let { return it }
 
         val ok = phoneController.longPress(x, y, duration, cropRoi)
         return if (ok) """{"status":"success","action":"long_press","x":$x,"y":$y,"duration_ms":$duration}"""

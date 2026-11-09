@@ -104,6 +104,10 @@ object RiskActionGuard {
                     requiresConfirmation = true,
                 )
             }
+            if (scheme !in setOf("http", "https", "geo")) {
+                return RiskDecision(true, RiskLevel.HIGH, "EXTERNAL_APP", "打开外部应用协议 ($scheme)",
+                    uriStr.take(80), "可能预填拨号、短信、安装或其他应用操作，需要显式确认", true)
+            }
         }
 
         // 2. 文本输入风险分析

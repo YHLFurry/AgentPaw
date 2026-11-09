@@ -60,4 +60,21 @@ class SensitiveDataMaskerTest {
         assertFalse("Bearer secret token should not be leaked", masked.contains("secretbearer"))
         assertTrue("Masks bearer token", masked.contains("Bearer mys...123"))
     }
+
+    @Test fun `structured credentials with separators and escaped quotes are fully removed`() {
+        val input = """{"password":"abc\"def, ghi]}","nested":{"privateKey":"line1\nline2","credential":"secret value"}}"""
+        val result = SensitiveDataMasker.mask(input)
+        for (secret in listOf("abc", "def", "ghi", "line1", "line2", "secret value")) assertFalse(result.contains(secret))
+    }
+
+    @Test fun `malformed JSON secret tails are omitted conservatively`() {
+        val result = SensitiveDataMasker.mask("""{"password":"abc"def"}""")
+        assertFalse(result.contains("abc")); assertFalse(result.contains("def"))
+    }
+
+    @Test fun `quoted non JSON passwords include spaces and punctuation in the mask`() {
+        val result = SensitiveDataMasker.mask("password=\"alpha beta, gamma]\" and token=\"long, token value\"")
+        for (part in listOf("alpha", "beta", "gamma")) assertFalse(result.contains(part))
+    }
+
 }

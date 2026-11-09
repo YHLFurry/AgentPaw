@@ -1,5 +1,16 @@
 package com.paw.agent.core.search
 
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
+import okhttp3.Call
+import okhttp3.Callback
+import okhttp3.Response
+import java.io.IOException
+import com.paw.agent.core.io.BoundedIO
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -51,13 +62,13 @@ class DuckDuckGoSearchBackend(
                 var lastException: Throwable? = null
                 for (attempt in 1..2) {
                     try {
-                        val response = httpClient.newCall(request).execute()
-                        response.use { resp ->
-                            val body = resp.body?.string().orEmpty()
-                            if (resp.isSuccessful) {
+                        currentCoroutineContext().ensureActive()
+                        val (code, body) = readResponse(httpClient.newCall(request))
+                        run {
+                            if (code in 200..299) {
                                 return@withContext Result.success(parse(query, body, limit))
                             }
-                            if (resp.code == 429 || resp.code == 403) {
+                            if (code == 429 || code == 403) {
                                 if (attempt == 2) {
                                     return@withContext Result.success(
                                         SearchResponse(
@@ -65,18 +76,19 @@ class DuckDuckGoSearchBackend(
                                             results = listOf(
                                                 SearchResult(
                                                     title = "Search Notice",
-                                                    snippet = "DuckDuckGo search service is temporarily rate-limited or unavailable (HTTP ${resp.code}).",
+                                                    snippet = "DuckDuckGo search service is temporarily rate-limited or unavailable (HTTP ${code}).",
                                                     url = "",
                                                 ),
                                             ),
-                                            abstract = "Search rate-limited (HTTP ${resp.code}).",
+                                            abstract = "Search rate-limited (HTTP ${code}).",
                                         ),
                                     )
                                 }
                             } else {
-                                error("DuckDuckGo returned HTTP ${resp.code}")
+                                error("DuckDuckGo returned HTTP ${code}")
                             }
                         }
+                    } catch (e: CancellationException) { throw e
                     } catch (e: Exception) {
                         lastException = e
                         if (attempt == 2) throw e
@@ -86,8 +98,29 @@ class DuckDuckGoSearchBackend(
                     }
                 }
                 throw lastException ?: IllegalStateException("Search failed after retry")
-            }
+            }.onFailure { if (it is CancellationException) throw it }
         }
+
+    private suspend fun readResponse(call: Call): Pair<Int, String> = suspendCancellableCoroutine { continuation ->
+        continuation.invokeOnCancellation { call.cancel() }
+        call.enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                if (continuation.isActive) continuation.resumeWithException(e)
+            }
+            override fun onResponse(call: Call, response: Response) {
+                try {
+                    val result = response.use {
+                        it.code to it.body?.byteStream()?.use { stream ->
+                            String(BoundedIO.readBytes(stream, 1024 * 1024), Charsets.UTF_8)
+                        }.orEmpty()
+                    }
+                    if (continuation.isActive) continuation.resume(result)
+                } catch (e: Exception) {
+                    if (continuation.isActive) continuation.resumeWithException(e)
+                }
+            }
+        })
+    }
 
     /** Exposed for unit tests: turns a raw response body into a [SearchResponse]. */
     internal fun parse(query: String, body: String, limit: Int): SearchResponse {
