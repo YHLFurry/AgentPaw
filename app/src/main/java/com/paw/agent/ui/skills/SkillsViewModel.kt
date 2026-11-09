@@ -45,6 +45,7 @@ data class SkillsUiState(
     val builtIns: List<SkillDefinition> = SkillPresets.builtIns,
     val query: String = "",
     val loadError: String? = null,
+    val importing: Boolean = false,
     val editing: SkillDefinition? = null,
     val editorMode: SkillEditorMode = SkillEditorMode.SIMPLE,
     val dslText: String = "",
@@ -64,12 +65,15 @@ data class SkillsUiState(
     val wishRepaired: Boolean = false,
     val message: String? = null,
 ) {
-    val visibleSkills: List<SkillDefinition>
-        get() = if (query.isBlank()) {
-            skills
+    val visibleSkills: List<SkillDefinition> get() = filterSkills(skills)
+    val visibleBuiltIns: List<SkillDefinition> get() = filterSkills(builtIns)
+
+    private fun filterSkills(list: List<SkillDefinition>): List<SkillDefinition> =
+        if (query.isBlank()) {
+            list
         } else {
             val q = query.trim()
-            skills.filter {
+            list.filter {
                 it.displayName.contains(q, ignoreCase = true) ||
                     it.description.contains(q, ignoreCase = true) ||
                     it.tags.any { tag -> tag.contains(q, ignoreCase = true) } ||
@@ -122,7 +126,7 @@ class SkillsViewModel(
         }
         viewModelScope.launch {
             store.loadError.collect { error ->
-                if (error != null) _uiState.value = _uiState.value.copy(loadError = error)
+                _uiState.value = _uiState.value.copy(loadError = error)
             }
         }
     }
@@ -149,6 +153,10 @@ class SkillsViewModel(
         }
     }
 
+    fun deleteAll() {
+        launchStoreAction { store.deleteAll(); sync() }
+    }
+
     fun duplicate(skill: SkillDefinition) {
         launchStoreAction {
             val copy = store.duplicate(skill.id)
@@ -160,10 +168,21 @@ class SkillsViewModel(
     fun exportAll(): String = store.exportJson()
 
     fun import(text: String, onDone: (Int, List<String>) -> Unit) {
-        launchStoreAction {
-            val result = store.importJson(text)
-            sync()
-            onDone(result.imported.size, result.errors)
+        if (_uiState.value.importing) return
+        _uiState.value = _uiState.value.copy(importing = true)
+        viewModelScope.launch {
+            try {
+                val result = store.importJson(text)
+                sync()
+                if (result.warnings.isNotEmpty()) notify(result.warnings.joinToString("；"))
+                onDone(result.imported.size, result.errors)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                onDone(0, listOf(error.message ?: "技能导入失败，请重试"))
+            } finally {
+                _uiState.value = _uiState.value.copy(importing = false)
+            }
         }
     }
 

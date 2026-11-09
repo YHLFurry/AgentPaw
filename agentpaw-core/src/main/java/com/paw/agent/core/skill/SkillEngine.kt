@@ -125,7 +125,12 @@ class SkillEngine(
                     vars,
                 )
             }
-            if (step.condition.isNotBlank() && !SkillExpression.evaluate(step.condition, vars)) {
+            val condition = SkillExpression.evaluateWithDiagnostics(step.condition, vars)
+            if (condition.error != null) {
+                reports += report(step, index, SkillStepStatus.FAILED, "条件计算失败：${condition.error}")
+                return SkillRunResult(SkillRunStatus.FAILED, def.key, "条件计算失败，已停止技能", reports, vars)
+            }
+            if (!condition.value) {
                 reports += report(step, index, SkillStepStatus.SKIPPED, "条件不成立：${step.condition}")
                 continue
             }
@@ -227,8 +232,7 @@ class SkillEngine(
             if (screenText.isNotBlank()) vars["screen_text"] = screenText.take(4000)
 
             if (state != null && SafetyGuard.isSensitive(state) &&
-                !opts.allowSensitiveScreen &&
-                !def.guard.allowSensitiveScreen
+                !(opts.allowSensitiveScreen && def.guard.allowSensitiveScreen)
             ) {
                 return StepOutcome(
                     ok = false,
@@ -269,6 +273,9 @@ class SkillEngine(
         return when (step.kind) {
             SkillActionKind.LAUNCH_APP -> {
                 if (target.text.isBlank()) return StepOutcome(false, "未填写应用名/包名")
+                if (def.guard.allowedPackages.isNotEmpty() && target.text !in def.guard.allowedPackages) {
+                    return StepOutcome(false, "启动目标不在技能允许的应用列表中")
+                }
                 val launched = controller.launchApp(target.text)
                 StepOutcome(launched, if (launched) "已启动 ${target.text}" else "启动 ${target.text} 失败")
             }
@@ -464,6 +471,10 @@ class SkillEngine(
 
         def.steps.filter { it.enabled }.forEach { step ->
             when (step.kind) {
+                SkillActionKind.LAUNCH_APP ->
+                    consider(RiskActionGuard.evaluate("launch_app", step.target, targetElementText = step.target))
+                SkillActionKind.PRESS_KEY ->
+                    consider(RiskActionGuard.evaluate("key_action", step.target))
                 SkillActionKind.SHELL ->
                     consider(RiskActionGuard.evaluate("shell_command", step.target))
 
@@ -524,6 +535,12 @@ class SkillEngine(
                     screenText,
                 )
 
+            SkillActionKind.LAUNCH_APP ->
+                RiskActionGuard.evaluate("launch_app", target, screenText, target)
+
+            SkillActionKind.SWIPE, SkillActionKind.SCROLL ->
+                RiskActionGuard.evaluate("swipe", target, screenText, target)
+
             SkillActionKind.OPEN_DEEPLINK ->
                 RiskActionGuard.evaluate("open_deeplink", """{"uri":"${escape(targetText)}"}""", screenText)
 
@@ -533,6 +550,7 @@ class SkillEngine(
     }
 
     private fun isInteractive(kind: SkillActionKind): Boolean = kind in setOf(
+        SkillActionKind.LAUNCH_APP,
         SkillActionKind.TAP_ELEMENT,
         SkillActionKind.TAP_POINT,
         SkillActionKind.INPUT_TEXT,
@@ -567,7 +585,7 @@ class SkillEngine(
             state == null -> "无法读取当前界面，已阻止继续操作"
             !packageAllowed(def, state.foregroundPackage) -> "当前应用不在技能允许列表中，已暂停"
             SafetyGuard.isSensitive(state) &&
-                !opts.allowSensitiveScreen && !def.guard.allowSensitiveScreen -> "检测到敏感密码/支付页面，技能已安全暂停"
+                !(opts.allowSensitiveScreen && def.guard.allowSensitiveScreen) -> "检测到敏感密码/支付页面，技能已安全暂停"
             else -> return null
         }
         return StepOutcome(false, reason, pausedPayload = safetyPausePayload(reason))

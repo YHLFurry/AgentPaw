@@ -36,15 +36,19 @@ object SkillExpression {
      * 求值。[variables] 中的键不带花括号，调用方负责把参数名原样放进去。
      * 任何解析/求值异常都返回 false——条件不成立比误执行安全。
      */
-    fun evaluate(expression: String, variables: Map<String, String>): Boolean {
-        if (expression.isBlank()) return true
+    data class Evaluation(val value: Boolean, val error: String? = null)
+
+    fun evaluate(expression: String, variables: Map<String, String>): Boolean = evaluateWithDiagnostics(expression, variables).value
+
+    fun evaluateWithDiagnostics(expression: String, variables: Map<String, String>): Evaluation {
+        if (expression.isBlank()) return Evaluation(true)
         return try {
             val parser = Parser(tokenize(expression), variables)
             val value = parser.parseExpression()
             parser.expectEnd()
-            value.truthy()
+            Evaluation(value.truthy())
         } catch (e: ExpressionException) {
-            false
+            Evaluation(false, e.message ?: "条件计算失败")
         }
     }
 

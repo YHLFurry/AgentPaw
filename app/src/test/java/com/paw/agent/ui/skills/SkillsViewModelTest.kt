@@ -33,6 +33,39 @@ class SkillsViewModelTest {
     @Before fun setup() { Dispatchers.setMain(dispatcher) }
     @After fun cleanup() { Dispatchers.resetMain() }
 
+    @Test fun `search filters built in and user skills with the same rules`() {
+        val preset = SkillPresets.builtIns.first()
+        val state = SkillsUiState(skills = listOf(preset), builtIns = listOf(preset), query = " ${preset.key.uppercase()} ")
+        assertEquals(listOf(preset), state.visibleSkills)
+        assertEquals(listOf(preset), state.visibleBuiltIns)
+        assertTrue(state.copy(query = "no_such_skill_9283").visibleBuiltIns.isEmpty())
+    }
+
+    @Test fun `invalid import reports errors without changing the store and can be retried`() = runTest {
+        val store = SkillStore(scope = backgroundScope, storageDirectory = temp.newFolder())
+        store.awaitLoaded()
+        val vm = viewModel(store)
+        val failed = CompletableDeferred<Unit>()
+        vm.import("{ unfinished") { count, errors ->
+            assertEquals(0, count)
+            assertTrue(errors.isNotEmpty())
+            failed.complete(Unit)
+        }
+        assertTrue(vm.uiState.value.importing)
+        failed.await()
+        assertFalse(vm.uiState.value.importing)
+        assertTrue(store.skills.value.isEmpty())
+        val imported = CompletableDeferred<Unit>()
+        vm.import(store.exportJson(listOf(SkillPresets.builtIns.first()))) { count, errors ->
+            assertEquals(1, count)
+            assertTrue(errors.isEmpty())
+            imported.complete(Unit)
+        }
+        imported.await()
+        assertFalse(vm.uiState.value.importing)
+        assertEquals(1, store.skills.value.size)
+    }
+
     private fun viewModel(store: SkillStore): SkillsViewModel {
         val controller = Proxy.newProxyInstance(PhoneController::class.java.classLoader,
             arrayOf(PhoneController::class.java)) { _, _, _ -> error("Editor must not operate device") } as PhoneController

@@ -274,4 +274,47 @@ class SkillDefinitionTest {
         // 仍会提醒用户这是高危动作
         assertTrue(SkillValidator.validate(def).any { it.code == "shell_confirm" })
     }
+
+    @Test fun `DSL preserves every action advanced fields including disabled steps`() {
+        for (kind in SkillActionKind.entries) {
+            val step = SkillStep(id = "stable-id", kind = kind, label = "自定义标签", target = when(kind) {
+                SkillActionKind.PRESS_KEY -> "home"
+                SkillActionKind.SCROLL -> "down"
+                SkillActionKind.OPEN_DEEPLINK -> "https://example.com"
+                SkillActionKind.SHELL -> "id"
+                else -> "搜索"
+            }, toX = 200, toY = 300, durationMs = 650, delayMs = 800, timeoutMs = 30_000, maxAttempts = 6,
+                enabled = false, storeAs = "saved", note = "保留说明", options = mapOf("custom" to "value"))
+            val def = SkillPresets.blankTemplate().copy(steps = listOf(step))
+            val result = SkillDsl.parse(SkillDsl.render(def), def)
+            assertTrue("$kind: ${result.issues}", result.isSuccess)
+            assertEquals(kind.name, step, result.definition!!.steps.single())
+        }
+    }
+
+    @Test fun `editing a DSL target preserves timeouts disabled state and custom options`() {
+        val step = SkillStep(id = "original", kind = SkillActionKind.TAP_ELEMENT, target = "搜索", timeoutMs = 30_000,
+            delayMs = 987, enabled = false, note = "保留", options = mapOf("key" to "value"))
+        val def = SkillPresets.blankTemplate().copy(steps = listOf(step))
+        val result = SkillDsl.parse(SkillDsl.render(def).replace("点 搜索", "点 联系人"), def)
+        assertTrue(result.isSuccess)
+        assertEquals(step.copy(target = "联系人"), result.definition!!.steps.single())
+    }
+
+    @Test fun `fallback braces and adjacent templates do not swallow each other`() {
+        assertEquals("a{1,2}", SkillInterpolator.render("{{name|a{1,2}}}", emptyMap()).text)
+        assertEquals("one-two", SkillInterpolator.render("{{a|one}}-{{b|two}}", emptyMap()).text)
+    }
+
+
+    @Test fun `DSL can explicitly clear existing guards while preserving millisecond timeout`() {
+        val def = SkillPresets.blankTemplate().copy(guard = SkillGuard(confirmBeforeRun = true, allowShell = true,
+            allowedPackages = listOf("com.test.app"), maxDurationMs = 1234))
+        val edited = SkillDsl.render(def).replace("执行前确认 = 是", "执行前确认 = 否")
+            .replace("允许命令 = 是", "允许命令 = 否").replace("允许应用 = com.test.app", "允许应用 = ")
+        val result = SkillDsl.parse(edited, def)
+        assertTrue(result.issues.toString(), result.isSuccess)
+        assertEquals(def.guard.copy(confirmBeforeRun = false, allowShell = false, allowedPackages = emptyList()), result.definition!!.guard)
+    }
+
 }

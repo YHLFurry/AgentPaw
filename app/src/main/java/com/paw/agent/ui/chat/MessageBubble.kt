@@ -66,6 +66,7 @@ fun MessageBubble(
 ) {
     val isUser = message.role == MessageRole.USER
     val context = LocalContext.current
+    val resources = androidx.compose.ui.platform.LocalResources.current
     val clipboardManager = LocalClipboardManager.current
 
     Row(
@@ -136,7 +137,7 @@ fun MessageBubble(
                     AppSurface(
                         onClick = {
                             clipboardManager.setText(AnnotatedString(message.content))
-                            Toast.makeText(context, "已复制消息内容", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, resources.getString(R.string.chat_message_copied), Toast.LENGTH_SHORT).show()
                         },
                         shape = RoundedCornerShape(12.dp),
                         color = AppTheme.colors.surfaceVariant.copy(alpha = 0.5f),
@@ -148,12 +149,12 @@ fun MessageBubble(
                         ) {
                             AppIcon(
                                 imageVector = Icons.Outlined.ContentCopy,
-                                contentDescription = "复制消息内容",
+                                contentDescription = stringResource(R.string.chat_copy_message),
                                 modifier = Modifier.size(12.dp),
                             )
                             Spacer(Modifier.width(3.dp))
                             AppText(
-                                text = "复制",
+                                text = stringResource(R.string.chat_copy),
                                 style = AppTheme.typography.labelSmall,
                             )
                         }
@@ -227,7 +228,7 @@ private fun ToolMessageBody(message: Message) {
                     .padding(vertical = 2.dp, horizontal = 4.dp),
             ) {
                 AppText(
-                    text = if (isExpanded.value) "收起执行详情 ▲" else "展开完整日志 ▼",
+                    text = if (isExpanded.value) stringResource(R.string.chat_log_collapse) else stringResource(R.string.chat_log_expand),
                     style = AppTheme.typography.labelSmall,
                     color = AppTheme.colors.primary,
                 )

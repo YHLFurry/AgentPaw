@@ -129,14 +129,14 @@
     <string name="settings_max_rounds">Max execution rounds (Steps)</string>
     <string name="settings_max_rounds_value">%1$d rounds (%2$s)</string>
     <string name="settings_max_rounds_grids">%1$d cells</string>
-    <string name="settings_max_rounds_unlimited">Unlimited</string>
-    <string name="settings_max_rounds_unlimited_desc">Set to 0: Unlimited steps, executes until complete or stopped</string>
-    <string name="settings_max_rounds_hint">Step rule: Positive integers allowed, or enter 0 for unlimited rounds. 5 rounds = 1 cell.</string>
+    <string name="settings_max_rounds_unlimited">Automatic (up to 200 rounds)</string>
+    <string name="settings_max_rounds_unlimited_desc">Set to 0: Execute automatically, with a safety limit of 200 rounds</string>
+    <string name="settings_max_rounds_hint">Enter a positive limit, or 0 for automatic execution (up to 200 rounds). 5 rounds = 1 cell.</string>
     <string name="settings_max_rounds_custom">Custom round limit</string>
-    <string name="settings_max_rounds_custom_hint">Positive integer, or 0 for unlimited</string>
+    <string name="settings_max_rounds_custom_hint">Positive integer, or 0 for automatic execution (up to 200 rounds)</string>
     <string name="settings_max_rounds_convert">Result: %1$d rounds = %2$s</string>
     <string name="settings_max_rounds_presets">Quick round presets:</string>
-    <string name="settings_max_rounds_preset_0">0 (Unlimited)</string>
+    <string name="settings_max_rounds_preset_0">0 (Automatic, up to 200 rounds)</string>
     <string name="settings_max_rounds_preset_5">5 (1)</string>
     <string name="settings_max_rounds_preset_10">10 (2)</string>
     <string name="settings_max_rounds_preset_15">15 (rec)</string>
@@ -236,7 +236,7 @@
     <!-- Task History & Comparison -->
     <string name="history_title">Task History</string>
     <string name="history_empty">No past task records</string>
-    <string name="history_restore">Restore this task</string>
+    <string name="history_restore">Restore task</string>
     <string name="history_compare">Compare Tasks</string>
     <string name="history_compare_title">Task Execution Comparison</string>
     <string name="history_select_to_compare">Select two tasks to compare</string>
@@ -252,7 +252,7 @@
     <string name="skills_edit">Edit</string>
     <string name="skills_test_run">Test run</string>
     <string name="skills_empty">No custom skills yet. Start with a wish, or write one by hand.</string>
-    <string name="skills_subtitle_count">%1$d custom skills</string>
+    <string name="skills_subtitle_count">Custom: %1$d</string>
     <string name="skills_export">Export all skills</string>
     <string name="skills_import">Import</string>
     <string name="skills_search_hint">Search by name, tag or description</string>
@@ -404,7 +404,7 @@
     <string name="chat_continue_action">Continue task</string>
     <string name="chat_dismiss_breakpoint">Dismiss saved progress</string>
     <string name="chat_loading_history">Restoring conversation…</string>
-    <string name="chat_resume_hint">Add instructions to continue, or use the Continue button</string>
+    <string name="chat_resume_hint">Additional instructions…</string>
     <string name="chat_system_console">System controls</string>
     <string name="chat_root_granted">Root authorized</string>
     <string name="chat_authorized_connected">Authorized and connected</string>
@@ -494,4 +494,46 @@
     <string name="settings_rounds_invalid">Enter a valid step count</string>
     <string name="settings_provider_custom">Custom</string>
     <string name="settings_model_manual_hint">Enter a model or fetch the available list</string>
+    <string name="history_clear_filters">Clear filters</string>
+    <string name="skills_importing">Importing…</string>
+    <string name="skills_import_success">Imported %1$d skills</string>
+    <string name="skills_import_failed">Imported %1$d; %2$d failed: %3$s</string>
+    <string name="chat_reject_action">Reject and pause</string>
+    <string name="chat_abandon_title">Abandon this task?</string>
+    <string name="chat_abandon_help">This removes the saved checkpoint. Conversation history will be kept.</string>
+    <string name="chat_execution_progress">Step %1$d · %2$s</string>
+    <string name="chat_risk_expiry">Expires in %1$d:%2$02d. The checkpoint will be kept.</string>
+    <string name="settings_expert_discover">Open About and hold the app icon to unlock advanced settings</string>
+    <string name="skills_delete_all">Delete all custom skills</string>
+    <string name="skills_delete_all_help">All custom skills will be removed. Built-in skills will be kept. Export a backup first if needed.</string>
+    <string name="skills_export_success">Skills saved to the selected file</string>
+    <string name="skills_export_failed">Export failed. Check the destination and available storage, then retry.</string>
+    <string name="history_delete_all">Delete all history</string>
+    <string name="history_delete_all_help">All conversations and their images will be permanently removed. The current task will stop.</string>
+    <string name="error_connection_timeout_help">The request timed out. Check your connection or increase the timeout.</string>
+    <string name="error_auth_help">Authentication failed. Check the API key and model permissions.</string>
+    <string name="error_rate_limit_help">The service limit was reached. Check your quota or retry later.</string>
+    <string name="error_network_help">Cannot connect. Check the service address, network and TLS configuration.</string>
+    <string name="error_provider_help">The provider could not complete the request. Check model support or retry later.</string>
+    <string name="error_configuration_help">Check the highlighted connection and generation settings, then retry.</string>
+    <string name="error_save_help">Settings could not be saved. Check available storage and re-enter the API key if needed.</string>
+    <string name="settings_show_details">Show technical details</string>
+    <string name="settings_hide_details">Hide technical details</string>
+    <string name="about_expert_active">Expert mode enabled</string>
+    <string name="about_app_information">Application information</string>
+    <string name="about_version_summary">Version and build identifier</string>
+    <string name="about_licenses_heading">Open source and licenses</string>
+    <string name="chat_message_copied">Message copied</string>
+    <string name="chat_copy_message">Copy message</string>
+    <string name="chat_copy">Copy</string>
+    <string name="chat_log_collapse">Collapse execution details ▲</string>
+    <string name="chat_log_expand">Expand full log ▼</string>
+    <string name="notification_channel_name">AgentPaw execution status</string>
+    <string name="notification_channel_description">Shows the current task status on this device</string>
+    <string name="notification_preparing">Preparing device task…</string>
+    <string name="notification_running">AgentPaw task in progress</string>
+    <string name="notification_stop_task">Stop task</string>
+    <string name="chat_more_actions">More actions</string>
+    <string name="skills_import_too_large">Import text exceeds the 1 MB limit.</string>
+    <string name="history_delete_failed">Could not delete the history record. Check storage access and retry.</string>
 </resources>

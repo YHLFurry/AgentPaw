@@ -57,4 +57,13 @@ class NetworkPolicyTest {
         assertFalse(strict.evaluate("ftp://example.com/v1").allowed)
         assertFalse(strict.evaluate("api.example.com/v1").allowed)
     }
+
+    @org.junit.Test fun `mapped IPv6 private addresses are allowed without opening public mapped addresses`() {
+        val policy = NetworkPolicy(allowHttp = true)
+        for (host in listOf("::ffff:127.0.0.1", "::ffff:192.168.2.3", "::ffff:c0a8:203", "fd12::1234")) {
+            org.junit.Assert.assertTrue(host, policy.evaluate("http://[$host]:11434/v1").allowed)
+        }
+        org.junit.Assert.assertFalse(policy.evaluate("http://[::ffff:8.8.8.8]:11434/v1").allowed)
+    }
+
 }

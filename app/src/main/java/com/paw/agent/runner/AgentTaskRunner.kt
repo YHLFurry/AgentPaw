@@ -43,6 +43,7 @@ import java.util.concurrent.ConcurrentHashMap
  * 运行在 Application / 前台服务生命周期范围内，与 Activity / ViewModel 解耦，
  * 保证用户切到后台、操作其他应用或 Activity 被系统回收时，任务与前台服务持续稳定运行。
  */
+@androidx.annotation.MainThread
 class AgentTaskRunner(
     private val context: Context? = null,
     private val agent: Agent,
@@ -69,6 +70,7 @@ class AgentTaskRunner(
     private var stepCount = 0
     private var maxSteps = 15
     private var isStopping = false
+    private var riskExpiryJob: Job? = null
     private var isAdaptivePacingEnabled = true
     private var lastLlmConfig: LlmConfig = LlmConfig()
     private var activeAssistantId: String? = null
@@ -121,6 +123,7 @@ class AgentTaskRunner(
             if (checkpointRevision != 0L) return@launch
             sessionOriginalGoal = bp.originalGoal
             _activeBreakpoint.value = bp
+            scheduleRiskExpiry(bp)
             persistBreakpoint(bp)
             clearTaskRunning()
             AgentExecutionController.markPaused(bp.stoppedAtStep, "检测到未完成的中断任务，可继续执行")
@@ -132,9 +135,10 @@ class AgentTaskRunner(
         checkpointStore?.saveBreakpoint(bp)
     }
 
-    private fun markTaskRunning(goal: String) {
+    private fun markTaskRunning(goal: String, resumed: TaskBreakpoint? = null) {
         checkpointRevision++
-        checkpointStore?.markRunning(goal)
+        if (resumed == null) checkpointStore?.markRunning(goal)
+        else checkpointStore?.saveProgress(resumed.copy(riskConfirmation = null))
     }
 
     private fun clearTaskRunning() {
@@ -159,6 +163,7 @@ class AgentTaskRunner(
         }
 
         val generation = ++runGeneration
+        riskExpiryJob?.cancel()
         activeToolCalls.clear()
         activeToolMessageIds.clear()
         sessionOriginalGoal = text
@@ -197,7 +202,7 @@ class AgentTaskRunner(
         cancelled = false
         com.paw.agent.device.accessibility.AgentAccessibilityService.clearGlobalStop()
         stepCount = 0
-        maxSteps = if (config.maxToolRounds <= 0) 0 else config.maxToolRounds
+        maxSteps = if (config.maxToolRounds <= 0) 200 else config.maxToolRounds.coerceAtMost(200)
         AgentExecutionController.markStarted(maxSteps)
 
         runJob = scope.launch {
@@ -216,8 +221,10 @@ class AgentTaskRunner(
         sessionStartMessageIndex = conversationRepository.conversation.value.messages.size
         previousCompletedSteps = bp.completedSteps
         _activeBreakpoint.value = null
+        riskExpiryJob?.cancel()
+        markTaskRunning(bp.originalGoal, bp)
+        // Persist the replacement before removing the last durable paused checkpoint.
         persistBreakpoint(null)
-        markTaskRunning(bp.originalGoal)
         _isGenerating.value = true
 
         context?.let { runCatching { AgentFloatingService.start(it) } }
@@ -249,7 +256,7 @@ class AgentTaskRunner(
         cancelled = false
         com.paw.agent.device.accessibility.AgentAccessibilityService.clearGlobalStop()
         stepCount = bp.stoppedAtStep
-        maxSteps = if (bp.maxSteps <= 0) 0 else bp.maxSteps
+        maxSteps = if (bp.maxSteps <= 0) 200 else bp.maxSteps.coerceAtMost(200)
         AgentExecutionController.markStarted(maxSteps)
         AgentExecutionController.updateProgress(stepCount, maxSteps, "从断点继续执行中...")
 
@@ -390,10 +397,45 @@ class AgentTaskRunner(
     }
 
     fun dismissBreakpoint() {
+        riskExpiryJob?.cancel()
         _activeBreakpoint.value = null
         persistBreakpoint(null)
         clearTaskRunning()
         AgentExecutionController.markStopped("断点已取消")
+    }
+
+    fun rejectRiskAction(reason: String = "用户拒绝此操作，任务已暂停；继续时请采用其他方案") {
+        val bp = _activeBreakpoint.value ?: return
+        val risk = bp.riskConfirmation ?: return
+        if (risk.isConfirmed) return
+        riskExpiryJob?.cancel()
+        val paused = bp.copy(riskConfirmation = null, interruptedStep = null, interruptedReason = reason)
+        _activeBreakpoint.value = paused
+        persistBreakpoint(paused)
+        conversationRepository.addMessage(Message(UUID.randomUUID().toString(), MessageRole.USER,
+            "$reason。未授权执行 ${risk.toolName}：${risk.target}，不得当作已完成操作。"))
+        AgentExecutionController.markPaused(paused.stoppedAtStep, reason)
+    }
+
+    private fun scheduleRiskExpiry(bp: TaskBreakpoint) {
+        riskExpiryJob?.cancel()
+        if (bp.riskConfirmation?.isConfirmed != false) return
+        riskExpiryJob = scope.launch {
+            kotlinx.coroutines.delay((bp.timestamp + 300_000L - System.currentTimeMillis()).coerceIn(0, 300_000))
+            if (_activeBreakpoint.value?.id == bp.id && _activeBreakpoint.value?.riskConfirmation != null) {
+                rejectRiskAction("操作确认已过期，任务与断点已保留；继续时需重新评估")
+            }
+        }
+    }
+
+    private fun saveRunningProgress(interrupted: ToolCall? = null) {
+        checkpointStore?.saveProgress(TaskBreakpoint(
+            originalGoal = resolveOriginalGoal(), stoppedAtStep = stepCount.coerceAtLeast(1), maxSteps = maxSteps,
+            completedSteps = completedStepSnapshots(),
+            interruptedStep = interrupted?.let { StepSnapshot(stepCount.coerceAtLeast(1), it.name, it.arguments,
+                "操作结果尚未确认，恢复前先核实设备状态", isInterrupted = true) },
+            interruptedReason = "进程中断后恢复，先核实最后一个动作是否已经完成",
+        ))
     }
 
     private fun handleEvent(event: AgentEvent) {
@@ -524,6 +566,7 @@ class AgentTaskRunner(
 
                 val toolMsgId = "tool_${event.call.id}_${UUID.randomUUID().toString().take(8)}"
                 activeToolCalls[event.call.id] = event.call
+                saveRunningProgress(event.call)
                 activeToolMessageIds[event.call.id] = toolMsgId
                 val actionDesc = "${event.call.name} ${event.call.arguments.take(40)}"
                 AgentExecutionController.updateProgress(stepCount, maxSteps, actionDesc)
@@ -583,6 +626,8 @@ class AgentTaskRunner(
                     triggerSafetyPauseBreakpoint(event.result, call, controlSignal as ToolControlSignal.SafetyPause)
                 } else if (isConfirmationRequired) {
                     triggerRiskConfirmationBreakpoint(event.result, call, controlSignal as ToolControlSignal.RequiresConfirmation)
+                } else {
+                    saveRunningProgress()
                 }
             }
 
@@ -663,6 +708,7 @@ class AgentTaskRunner(
         persistBreakpoint(bp)
         clearTaskRunning()
         AgentExecutionController.markPaused(stepCount.coerceAtLeast(1), "高风险动作待确认: ${signal.action}")
+        scheduleRiskExpiry(bp)
         cancelled = true
         runJob?.cancel()
         runJob = null
@@ -681,6 +727,17 @@ class AgentTaskRunner(
             resumeBreakpoint(config = config)
             return
         }
+
+        if (risk.isConfirmed) {
+            resumeBreakpoint(config = config)
+            return
+        }
+
+        if (System.currentTimeMillis() < bp.timestamp || System.currentTimeMillis() - bp.timestamp >= 300_000L) {
+            rejectRiskAction("操作确认已过期，任务与断点已保留")
+            return
+        }
+        riskExpiryJob?.cancel()
 
         val confirmedArgs = try {
             val element = if (risk.arguments.isNotBlank()) {

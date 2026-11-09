@@ -545,7 +545,7 @@ class ChatViewModelTest {
         ))
         val viewModel = ChatViewModel(Agent(client, ToolRegistry(listOf(tool))), conversationRepository, settingsRepository)
         sendMessage(viewModel, "执行任务")
-        advanceUntilIdle()
+        testDispatcher.scheduler.runCurrent()
         assertNotNull(viewModel.taskRunner.activeBreakpoint.value?.riskConfirmation)
         viewModel.confirmRiskAction(config)
         advanceUntilIdle()
@@ -579,7 +579,7 @@ class ChatViewModelTest {
         }
         val viewModel = ChatViewModel(Agent(client, ToolRegistry(listOf(tool))), conversationRepository, settingsRepository)
         sendMessage(viewModel, "执行任务")
-        advanceUntilIdle()
+        testDispatcher.scheduler.runCurrent()
         viewModel.confirmRiskAction(config)
         advanceUntilIdle()
 
@@ -691,4 +691,100 @@ class ChatViewModelTest {
             _settings.update { it.copy(adaptivePacingEnabled = enabled) }
         }
     }
+
+    @Test fun `refusing or expiring confirmation keeps the task and never executes the action`() = runTest(testDispatcher) {
+        var actions = 0
+        val tool = object : AgentTool {
+            override val definition = ToolDefinition("risky", "test", """{"type":"object"}""")
+            override suspend fun execute(arguments: String, context: AgentContext): String {
+                if (context.isGranted("risk_confirmed:risky")) { actions++; return "done" }
+                return """{"status":"requires_confirmation","action":"send","tool_name":"risky","arguments":"{}"}"""
+            }
+        }
+        // Use the registered tool for both refusal and expiry paths.
+        val active = ChatViewModel(Agent(ScriptedLlmClient(List(2) { listOf(LlmChunk.ToolCalls(listOf(ToolCall("r_$it", "risky", "{}")))) }), ToolRegistry(listOf(tool))),
+            conversationRepository, settingsRepository)
+        sendMessage(active, "send once")
+        testDispatcher.scheduler.runCurrent()
+        val id = active.taskRunner.activeBreakpoint.value!!.id
+        active.rejectRiskAction()
+        assertEquals(id, active.taskRunner.activeBreakpoint.value!!.id)
+        assertNull(active.taskRunner.activeBreakpoint.value!!.riskConfirmation)
+        assertEquals(0, actions)
+        assertTrue(AgentExecutionController.state.value.isPaused)
+        active.newConversation()
+        sendMessage(active, "try another task")
+        testDispatcher.scheduler.runCurrent()
+        assertNotNull(active.taskRunner.activeBreakpoint.value?.riskConfirmation)
+        testDispatcher.scheduler.advanceTimeBy(300_001)
+        testDispatcher.scheduler.runCurrent()
+        assertNotNull(active.taskRunner.activeBreakpoint.value)
+        assertNull(active.taskRunner.activeBreakpoint.value!!.riskConfirmation)
+        assertEquals(0, actions)
+
+    }
+
+
+    @Test fun `resumed progress survives another crash while the model is still thinking`() = runTest(testDispatcher) {
+        val directory = temporaryFolder.newFolder()
+        val completed = com.paw.agent.core.agent.breakpoint.StepSnapshot(3, "input_text", "{}", "sent once")
+        val bp = TaskBreakpoint(originalGoal = "original", stoppedAtStep = 4, completedSteps = listOf(completed))
+        File(directory, "active_breakpoint.json").writeText(Json { encodeDefaults = true }.encodeToString(bp))
+        val client = object : LlmClient {
+            override fun complete(config: LlmConfig, request: ChatCompletionRequest): Flow<LlmChunk> = flow { kotlinx.coroutines.awaitCancellation() }
+            override suspend fun testConnection(config: LlmConfig) = Result.success(Unit)
+        }
+        val runner = AgentTaskRunner(agent = Agent(client), conversationRepository = conversationRepository,
+            settingsRepository = settingsRepository, scope = backgroundScope, checkpointDirectory = directory, ioDispatcher = testDispatcher)
+        testDispatcher.scheduler.runCurrent()
+        runner.resumeBreakpoint(config = config)
+        testDispatcher.scheduler.runCurrent()
+        val recovered = com.paw.agent.runner.TaskCheckpointStore(directory, backgroundScope, testDispatcher).recover()!!
+        assertEquals(listOf(completed), recovered.completedSteps)
+        assertEquals(4, recovered.stoppedAtStep)
+        runner.stop()
+    }
+
+    @Test fun `clock rollback never extends a pending operation approval`() = runTest(testDispatcher) {
+        val directory = temporaryFolder.newFolder()
+        var executions = 0
+        val tool = object : AgentTool {
+            override val definition = ToolDefinition("risky", "test", """{"type":"object"}""")
+            override suspend fun execute(arguments: String, context: AgentContext): String { executions++; return "done" }
+        }
+        val bp = TaskBreakpoint(originalGoal = "original", stoppedAtStep = 1, timestamp = System.currentTimeMillis() + 3_600_000,
+            riskConfirmation = com.paw.agent.core.agent.breakpoint.RiskConfirmationDetails("send", "test", "test", toolName = "risky"))
+        File(directory, "active_breakpoint.json").writeText(Json.encodeToString(bp))
+        val runner = AgentTaskRunner(agent = Agent(ScriptedLlmClient(emptyList()), ToolRegistry(listOf(tool))),
+            conversationRepository = conversationRepository, settingsRepository = settingsRepository, scope = backgroundScope,
+            checkpointDirectory = directory, ioDispatcher = testDispatcher)
+        testDispatcher.scheduler.runCurrent()
+        runner.confirmAndExecuteRiskAction(config)
+        testDispatcher.scheduler.runCurrent()
+        assertEquals(0, executions)
+        assertNotNull(runner.activeBreakpoint.value)
+        assertNull(runner.activeBreakpoint.value!!.riskConfirmation)
+    }
+
+
+    @Test fun `recovered confirmed receipt can only resume and cannot execute the action twice`() = runTest(testDispatcher) {
+        val directory = temporaryFolder.newFolder()
+        var executions = 0
+        val tool = object : AgentTool {
+            override val definition = ToolDefinition("risky", "test", """{"type":"object"}""")
+            override suspend fun execute(arguments: String, context: AgentContext): String { executions++; return "done" }
+        }
+        val bp = TaskBreakpoint(originalGoal = "original", stoppedAtStep = 2,
+            riskConfirmation = com.paw.agent.core.agent.breakpoint.RiskConfirmationDetails("send", "test", "done", toolName = "risky", isConfirmed = true))
+        File(directory, "active_breakpoint.json").writeText(Json { encodeDefaults = true }.encodeToString(bp))
+        val runner = AgentTaskRunner(agent = Agent(ScriptedLlmClient(listOf(listOf(LlmChunk.Delta("already done")))), ToolRegistry(listOf(tool))),
+            conversationRepository = conversationRepository, settingsRepository = settingsRepository, scope = backgroundScope,
+            checkpointDirectory = directory, ioDispatcher = testDispatcher)
+        testDispatcher.scheduler.runCurrent()
+        runner.confirmAndExecuteRiskAction(config)
+        testDispatcher.scheduler.runCurrent()
+        assertEquals(0, executions)
+        assertFalse(runner.isGenerating.value)
+    }
+
 }

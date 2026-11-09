@@ -3,9 +3,12 @@
 package com.paw.agent.ui.components.adaptive
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
@@ -664,16 +667,19 @@ fun AppAlertDialog(
                             color = AppTheme.colors.onSurfaceVariant,
                         )
                     ) {
-                        text()
+                        Column(
+                            modifier = Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()),
+                        ) {
+                            text()
+                        }
                     }
                     Spacer(Modifier.size(24.dp))
-                    Row(
+                    FlowRow(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End,
-                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         dismissButton()
-                        Spacer(Modifier.size(8.dp))
                         confirmButton()
                     }
                 }
@@ -683,7 +689,7 @@ fun AppAlertDialog(
         androidx.compose.material3.AlertDialog(
             onDismissRequest = onDismissRequest,
             title = title,
-            text = text,
+            text = { Column(Modifier.verticalScroll(rememberScrollState())) { text() } },
             confirmButton = confirmButton,
             dismissButton = dismissButton,
             containerColor = AppTheme.colors.surface,

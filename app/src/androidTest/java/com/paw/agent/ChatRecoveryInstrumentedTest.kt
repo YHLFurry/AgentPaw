@@ -2,6 +2,7 @@ package com.paw.agent
 
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
@@ -37,13 +38,13 @@ class ChatRecoveryInstrumentedTest(private val theme: UiThemeMode) {
                 )
             }
         }
-        compose.onNodeWithContentDescription(text(R.string.chat_new_conversation)).performClick()
+        openNewChat()
         compose.onNodeWithText(text(R.string.chat_new_confirm_title)).assertIsDisplayed()
         compose.runOnIdle { assertEquals(0, newChats) }
         compose.onNodeWithText(text(R.string.action_cancel)).performClick()
         compose.onNodeWithText(text(R.string.chat_new_confirm_title)).assertDoesNotExist()
         compose.runOnIdle { assertEquals(0, newChats) }
-        compose.onNodeWithContentDescription(text(R.string.chat_new_conversation)).performClick()
+        openNewChat()
         compose.onNodeWithText(text(R.string.chat_new_conversation)).performClick()
         compose.runOnIdle { assertEquals(1, newChats) }
     }
@@ -104,5 +105,14 @@ class ChatRecoveryInstrumentedTest(private val theme: UiThemeMode) {
     companion object {
         @JvmStatic @Parameterized.Parameters(name = "{0}")
         fun themes(): List<Array<Any>> = UiThemeMode.entries.map { arrayOf<Any>(it) }
+    }
+
+    private fun openNewChat() {
+        if (compose.onAllNodesWithContentDescription(text(R.string.chat_new_conversation)).fetchSemanticsNodes().isNotEmpty()) {
+            compose.onNodeWithContentDescription(text(R.string.chat_new_conversation)).performClick()
+        } else {
+            compose.onNodeWithContentDescription(text(R.string.chat_more_actions)).performClick()
+            compose.onNodeWithText(text(R.string.chat_new_conversation)).performClick()
+        }
     }
 }

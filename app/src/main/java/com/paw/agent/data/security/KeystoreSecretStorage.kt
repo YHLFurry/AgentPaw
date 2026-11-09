@@ -20,6 +20,17 @@ import javax.crypto.spec.SecretKeySpec
  */
 object KeystoreSecretStorage {
 
+    internal fun <T> withKeyRecovery(reset: () -> Unit, operation: () -> T): T = try {
+        operation()
+    } catch (error: Exception) {
+        val invalid = generateSequence<Throwable>(error) { it.cause }.any {
+            it is java.security.UnrecoverableKeyException || it is android.security.keystore.KeyPermanentlyInvalidatedException
+        }
+        if (!invalid) throw error
+        reset()
+        operation()
+    }
+
     private const val ANDROID_KEYSTORE = "AndroidKeyStore"
     private const val KEY_ALIAS = "agentpaw_master_credentials_key"
     private const val AES_GCM_TRANSFORMATION = "AES/GCM/NoPadding"
@@ -70,9 +81,13 @@ object KeystoreSecretStorage {
      * 将敏感明文字符串加密为安全密文存储格式。
      * 严禁在 Keystore 异常时静默降级为明文，杜绝 API Key 明文落盘泄露风险。
      */
+    @Synchronized
     fun encrypt(plainText: String): String {
         if (plainText.isBlank()) return plainText
         return runCatching {
+          withKeyRecovery(reset = {
+              KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null); deleteEntry(KEY_ALIAS) }
+          }) {
             val key = getOrCreateKey()
             val cipher = Cipher.getInstance(AES_GCM_TRANSFORMATION)
             cipher.init(Cipher.ENCRYPT_MODE, key)
@@ -85,6 +100,7 @@ object KeystoreSecretStorage {
 
             val base64 = Base64.encodeToString(combined, Base64.NO_WRAP)
             "$ENCRYPTED_PREFIX$base64"
+          }
         }.getOrElse { e ->
             throw SecurityException("Keystore encryption failed. Refusing to store unencrypted credentials.", e)
         }

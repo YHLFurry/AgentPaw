@@ -74,6 +74,8 @@ class Lexer(private val source: String) {
 
                 c == '$' -> emit(tokens, readDollar())
 
+                c == '2' && source.getOrNull(pos + 1) == '>' -> emit(tokens, readSymbol()!!)
+
                 c.isDigit() || (c == '.' && pos + 1 < source.length && source[pos + 1].isDigit()) ->
                     emit(tokens, readNumber())
 

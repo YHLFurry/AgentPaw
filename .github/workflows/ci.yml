@@ -57,7 +57,7 @@ jobs:
         run: ./gradlew assembleDebug --no-daemon --stacktrace
 
       - name: Check Lint and Release build
-        run: ./gradlew :app:lintDebug :app:assembleRelease --no-daemon --stacktrace --max-workers=2
+        run: ./gradlew :app:lintDebug :agentpaw-core:lintDebug :app:assembleRelease --no-daemon --stacktrace --max-workers=2
 
       - name: Upload Test Reports
         if: always()
@@ -67,6 +67,10 @@ jobs:
           path: |
             app/build/reports/tests/testDebugUnitTest/
             agentpaw-core/build/reports/tests/testDebugUnitTest/
+            app/build/reports/maintenance-ui/
+            app/build/reports/ui-review/
+            app/build/reports/lint-results-debug.*
+            agentpaw-core/build/reports/lint-results-debug.*
           retention-days: 7
 
       - name: Upload Debug APK

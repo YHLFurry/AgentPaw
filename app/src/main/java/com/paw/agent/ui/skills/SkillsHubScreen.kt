@@ -1,13 +1,17 @@
 package com.paw.agent.ui.skills
 
-import android.content.ClipData
-import android.content.ClipboardManager
-import android.content.Context
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -15,6 +19,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -24,6 +29,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.PlayArrow
@@ -35,10 +41,13 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -81,11 +90,37 @@ fun SkillsHubScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val resources = LocalResources.current
     val listState = rememberLazyListState()
 
+    val scope = rememberCoroutineScope()
+    var exporting by remember { mutableStateOf(false) }
+    var pendingDeleteAll by remember { mutableStateOf(false) }
+    val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        if (uri == null) exporting = false
+        else scope.launch {
+            val success = withContext(Dispatchers.IO) {
+                runCatching {
+                    val output = requireNotNull(context.contentResolver.openOutputStream(uri, "wt"))
+                    output.writer(Charsets.UTF_8).use { it.write(viewModel.exportAll()) }
+                }.isSuccess
+            }
+            exporting = false
+            Toast.makeText(context, resources.getString(if (success) R.string.skills_export_success else R.string.skills_export_failed), Toast.LENGTH_LONG).show()
+        }
+    }
+    if (pendingDeleteAll) AppAlertDialog(
+        onDismissRequest = { pendingDeleteAll = false },
+        title = { AppText(stringResource(R.string.skills_delete_all)) },
+        text = { AppText(stringResource(R.string.skills_delete_all_help)) },
+        confirmButton = { AppButton(onClick = { pendingDeleteAll = false; viewModel.deleteAll() }) { AppText(stringResource(R.string.action_delete)) } },
+        dismissButton = { AppOutlinedButton(onClick = { pendingDeleteAll = false }) { AppText(stringResource(R.string.action_cancel)) } },
+    )
+
     var pendingDelete by remember { mutableStateOf<SkillDefinition?>(null) }
-    var showImport by remember { mutableStateOf(false) }
-    var importText by remember { mutableStateOf("") }
+    var showImport by rememberSaveable { mutableStateOf(false) }
+    var importText by rememberSaveable { mutableStateOf("") }
+    var importError by rememberSaveable { mutableStateOf<String?>(null) }
 
     LaunchedEffect(state.message) {
         state.message?.let {
@@ -114,14 +149,11 @@ fun SkillsHubScreen(
                     }
                 },
                 actions = {
-                    AppTopBarAction(onClick = {
-                        copyToClipboard(context, viewModel.exportAll())
-                        Toast.makeText(context, "已复制全部技能 JSON 到剪贴板", Toast.LENGTH_SHORT).show()
-                    }) {
-                        AppIcon(
-                            imageVector = Icons.Default.ContentCopy,
-                            contentDescription = stringResource(R.string.skills_export),
-                        )
+                    AppTopBarAction(onClick = { exporting = true; exportLauncher.launch("agentpaw-skills.json") }, enabled = !exporting) {
+                        AppIcon(Icons.Default.Download, stringResource(R.string.skills_export))
+                    }
+                    AppTopBarAction(onClick = { pendingDeleteAll = true }, enabled = state.skills.isNotEmpty()) {
+                        AppIcon(Icons.Default.Delete, stringResource(R.string.skills_delete_all))
                     }
                     AppTopBarAction(onClick = { showImport = true }) {
                         AppIcon(
@@ -148,21 +180,27 @@ fun SkillsHubScreen(
                 bottom = 12.dp,
             ),
         ) {
+            state.loadError?.let { error ->
+                item {
+                    AppText(error, color = AppTheme.colors.error, style = AppTheme.typography.bodySmall)
+                }
+            }
             item {
                 WishEntryCard(onClick = onOpenWish)
             }
 
             item {
-                Row(
+                FlowRow(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     AppOutlinedButton(
                         onClick = {
                             viewModel.startCreate()
                             onOpenEditor()
                         },
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier.widthIn(min = 160.dp).weight(1f),
                     ) {
                         AppIcon(
                             imageVector = Icons.Default.Add,
@@ -174,7 +212,7 @@ fun SkillsHubScreen(
                     }
                     AppOutlinedButton(
                         onClick = { showImport = true },
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier.widthIn(min = 160.dp).weight(1f),
                     ) {
                         AppIcon(
                             imageVector = Icons.Default.Upload,
@@ -199,7 +237,7 @@ fun SkillsHubScreen(
                     onValueChange = viewModel::onQueryChange,
                     placeholder = stringResource(R.string.skills_search_hint),
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().testTag("skills_search"),
                 )
             }
 
@@ -245,13 +283,14 @@ fun SkillsHubScreen(
                 )
             }
 
-            items(state.builtIns, key = { it.key }) { skill ->
+            if (state.visibleBuiltIns.isEmpty() && state.query.isNotBlank()) {
+                item { SkillEmptyHint(stringResource(R.string.skills_empty_search)) }
+            }
+            items(state.visibleBuiltIns, key = { it.key }) { skill ->
                 BuiltInSkillCard(
                     skill = skill,
-                    onCopy = {
-                        viewModel.duplicate(skill)
-                        Toast.makeText(context, "已复制为可编辑技能", Toast.LENGTH_SHORT).show()
-                    },
+                    testing = state.testRunning,
+                    onCopy = { viewModel.duplicate(skill) },
                     onTest = { viewModel.testRun(skill) },
                 )
             }
@@ -292,7 +331,7 @@ fun SkillsHubScreen(
 
     if (showImport) {
         AppAlertDialog(
-            onDismissRequest = { showImport = false },
+            onDismissRequest = { if (!state.importing) showImport = false },
             title = { AppText(stringResource(R.string.skills_import_title)) },
             text = {
                 Column {
@@ -304,32 +343,40 @@ fun SkillsHubScreen(
                     Spacer(Modifier.height(8.dp))
                     AppTextField(
                         value = importText,
-                        onValueChange = { importText = it },
+                        onValueChange = {
+                            if (it.length > 1024 * 1024) importError = resources.getString(R.string.skills_import_too_large)
+                            else { importText = it; importError = null }
+                        },
+                        enabled = !state.importing,
+                        isError = importError != null,
                         placeholder = "{ \"displayName\": ... }",
                         minLines = 5,
                         maxLines = 8,
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().testTag("skill_import_text"),
                     )
+                    importError?.let {
+                        AppText(it, color = AppTheme.colors.error, style = AppTheme.typography.bodySmall)
+                    }
                 }
             },
             confirmButton = {
                 AppButton(onClick = {
                     viewModel.import(importText) { count, errors ->
-                        val message = if (errors.isEmpty()) {
-                            "已导入 $count 条技能"
+                        if (errors.isEmpty()) {
+                            importText = ""
+                            importError = null
+                            showImport = false
+                            Toast.makeText(context, resources.getString(R.string.skills_import_success, count), Toast.LENGTH_LONG).show()
                         } else {
-                            "导入 $count 条，${errors.size} 条失败：${errors.first()}"
+                            importError = resources.getString(R.string.skills_import_failed, count, errors.size, errors.first())
                         }
-                        Toast.makeText(context, message, Toast.LENGTH_LONG).show()
                     }
-                    importText = ""
-                    showImport = false
-                }, enabled = importText.isNotBlank()) {
-                    AppText(stringResource(R.string.action_import))
+                }, enabled = importText.isNotBlank() && !state.importing, modifier = Modifier.testTag("skill_import_confirm")) {
+                    AppText(stringResource(if (state.importing) R.string.skills_importing else R.string.action_import))
                 }
             },
             dismissButton = {
-                AppOutlinedButton(onClick = { showImport = false }) {
+                AppOutlinedButton(onClick = { showImport = false }, enabled = !state.importing) {
                     AppText(stringResource(R.string.action_cancel))
                 }
             },
@@ -339,12 +386,12 @@ fun SkillsHubScreen(
 
 @Composable
 private fun TextRow(title: String, trailing: String) {
-    Row(
+    FlowRow(
         modifier = Modifier
             .fillMaxWidth()
             .padding(top = 8.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
+        verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         AppText(
             text = title,
@@ -429,6 +476,7 @@ private fun UserSkillCard(
                             color = AppTheme.colors.onSurface,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
                         )
                         Spacer(Modifier.width(8.dp))
                         SkillRiskBadge(SkillCatalog.riskOf(skill))
@@ -498,6 +546,7 @@ private fun UserSkillCard(
 @Composable
 private fun BuiltInSkillCard(
     skill: SkillDefinition,
+    testing: Boolean,
     onCopy: () -> Unit,
     onTest: () -> Unit,
 ) {
@@ -521,11 +570,11 @@ private fun BuiltInSkillCard(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
-                SkillRiskBadge(SkillRisk.LOW)
+                SkillRiskBadge(SkillCatalog.riskOf(skill))
             }
             Spacer(Modifier.height(6.dp))
             Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
-                AppIconButton(onClick = onTest) {
+                AppIconButton(onClick = onTest, enabled = !testing) {
                     AppIcon(Icons.Default.PlayArrow, contentDescription = stringResource(R.string.skills_test_run))
                 }
                 AppIconButton(onClick = onCopy) {
@@ -534,9 +583,4 @@ private fun BuiltInSkillCard(
             }
         }
     }
-}
-
-private fun copyToClipboard(context: Context, text: String) {
-    val manager = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager ?: return
-    manager.setPrimaryClip(ClipData.newPlainText("AgentPaw skills", text))
 }

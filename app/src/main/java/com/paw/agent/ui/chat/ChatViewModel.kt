@@ -208,6 +208,10 @@ class ChatViewModel(
         taskRunner.dismissBreakpoint()
     }
 
+    fun rejectRiskAction() {
+        taskRunner.rejectRiskAction()
+    }
+
     fun newConversation() {
         clearDraft()
         taskRunner.stop()

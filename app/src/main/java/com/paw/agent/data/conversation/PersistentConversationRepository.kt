@@ -149,7 +149,7 @@ class PersistentConversationRepository(
      */
     private fun extractImagesToDisk(message: Message, conversationId: String): Message {
         if (message.images.isEmpty()) return message
-        val updatedImages = message.images.mapIndexed { index, img ->
+        val updatedImages = message.images.mapIndexedNotNull { index, img ->
             if (img.startsWith("file://") || img.startsWith("http://") || img.startsWith("https://")) {
                 img
             } else {
@@ -162,7 +162,7 @@ class PersistentConversationRepository(
                         bytes.size >= 3 && bytes[0] == 0xff.toByte() && bytes[1] == 0xd8.toByte() && bytes[2] == 0xff.toByte() -> "jpg"
                         bytes.size >= 12 && String(bytes, 0, 4, Charsets.US_ASCII) == "RIFF" &&
                             String(bytes, 8, 4, Charsets.US_ASCII) == "WEBP" -> "webp"
-                        else -> error("Unsupported image format")
+                        else -> throw IllegalArgumentException("Unsupported image format")
                     }
                     val safeMessageId = UUID.nameUUIDFromBytes(message.id.toByteArray()).toString()
                     val imgFile = File(imagesDir, "${conversationId}_${safeMessageId}_$index.$extension")
@@ -179,8 +179,13 @@ class PersistentConversationRepository(
                     }
                     "file://${imgFile.absolutePath}"
                 }.getOrElse { error ->
-                    _storageError.value = "图片保存失败，已保留原始附件：${error.message.orEmpty().take(120)}"
-                    img
+                    if (error is IllegalArgumentException) {
+                        _storageError.value = "无效或超限图片已移除，文字记录仍会保存"
+                        null
+                    } else {
+                        _storageError.value = "图片保存失败，已保留原始附件：${error.message.orEmpty().take(120)}"
+                        img
+                    }
                 }
             }
         }
@@ -274,31 +279,57 @@ class PersistentConversationRepository(
         scope.launch(ioDispatcher) { mutex.withLock { visibleCount += MAX_HISTORY_ITEMS; refreshHistory() } }
     }
 
-    /**
-     * 删除指定历史记录，并同步清理该任务关联的离线截图文件
-     */
-    fun deleteConversation(id: String) {
-        if (_historyList.value.none { it.id == id } && _conversation.value.id != id) return
+    fun deleteAllHistory() {
         synchronized(pendingLock) {
-            deletedIds.add(id)
-            pendingConversations.remove(id)
-            failedConversations.remove(id)
+            deletedIds.addAll(_allHistory.value.map { it.id } + _conversation.value.id)
+            pendingConversations.clear()
+            failedConversations.clear()
         }
         scope.launch(ioDispatcher) {
             mutex.withLock {
+                runCatching {
+                    storageDir.listFiles().orEmpty().filter { it.extension == "json" && validId(it.nameWithoutExtension) }
+                        .forEach { check(it.delete() || !it.exists()) { "Cannot delete history" } }
+                    imagesDir.listFiles().orEmpty().filter { it.isFile }.forEach { check(it.delete() || !it.exists()) { "Cannot delete image" } }
+                    index.clear()
+                    val empty = Conversation(id = UUID.randomUUID().toString(), createdAt = System.currentTimeMillis(), updatedAt = System.currentTimeMillis())
+                    _conversation.value = empty
+                    check(saveToDiskLocked(empty))
+                    updateHistoryListLocked(empty)
+                    refreshHistory()
+                    persistIndex()
+                }.onFailure { _storageError.value = "历史清理未完成，请检查存储权限或空间后重试" }
+            }
+        }
+    }
+
+    /**
+     * 删除指定历史记录，并同步清理该任务关联的离线截图文件
+     */
+    suspend fun deleteConversation(id: String): Boolean = withContext(ioDispatcher) {
+        try {
+            mutex.withLock {
+                if (_allHistory.value.none { it.id == id } && _conversation.value.id != id) return@withLock false
                 val file = File(storageDir, "$id.json")
-                if (file.exists()) file.delete()
-
-                val imageFiles = imagesDir.listFiles { _, name -> name.startsWith("${id}_") } ?: emptyArray()
-                imageFiles.forEach { it.delete() }
-
-                _historyList.value = _historyList.value.filterNot { it.id == id }
+                if (file.exists() && !file.delete()) {
+                    _storageError.value = "历史记录删除失败，请检查存储权限后重试"
+                    return@withLock false
+                }
+                synchronized(pendingLock) {
+                    deletedIds.add(id)
+                    pendingConversations.remove(id)
+                    failedConversations.remove(id)
+                }
+                val imageFiles = imagesDir.listFiles { _, name -> name.startsWith("${id}_") }.orEmpty()
+                imageFiles.forEach { image ->
+                    if (!runCatching { image.delete() || !image.exists() }.getOrDefault(false)) {
+                        _storageError.value = "历史已删除，但部分图片清理失败，请重试清除图片"
+                    }
+                }
                 index.remove(id)
                 if (_conversation.value.id == id) {
                     val fallback = index.keys.firstOrNull()?.let { runCatching { readConversation(File(storageDir, "$it.json")) }.getOrNull() } ?: Conversation(
-                        id = UUID.randomUUID().toString(),
-                        createdAt = System.currentTimeMillis(),
-                        updatedAt = System.currentTimeMillis(),
+                        id = UUID.randomUUID().toString(), createdAt = System.currentTimeMillis(), updatedAt = System.currentTimeMillis(),
                     )
                     _conversation.value = fallback
                     saveToDiskLocked(fallback)
@@ -306,7 +337,13 @@ class PersistentConversationRepository(
                 }
                 refreshHistory()
                 persistIndex()
+                true
             }
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            _storageError.value = "历史记录删除未完成，请重试"
+            false
         }
     }
 
@@ -413,6 +450,7 @@ class PersistentConversationRepository(
     }
 
     override fun removeMessage(id: String) {
+        val oldImages = _conversation.value.messages.filter { it.id == id }.flatMap { it.images }.toSet()
         var nextConv: Conversation? = null
         _conversation.update { current ->
             val updated = current.copy(
@@ -422,7 +460,24 @@ class PersistentConversationRepository(
             nextConv = updated
             updated
         }
-        nextConv?.let { persistAsync(it) }
+        nextConv?.let { updated ->
+            persistAsync(updated)
+            scope.launch(ioDispatcher) {
+                mutex.withLock {
+                    if (synchronized(pendingLock) { updated.id in deletedIds }) return@withLock
+                    val latest = if (_conversation.value.id == updated.id) _conversation.value
+                        else synchronized(pendingLock) { pendingConversations[updated.id] ?: savingConversations[updated.id] ?: failedConversations[updated.id] }
+                            ?: runCatching { readConversation(File(storageDir, "${updated.id}.json")) }.getOrNull()
+                            ?: return@withLock
+                    if (!saveToDiskLocked(latest)) return@withLock
+                    val retained = latest.messages.flatMap { it.images }.toSet()
+                    oldImages.filter { it !in retained && it.startsWith("file://") }.forEach { reference ->
+                        val target = File(reference.removePrefix("file://"))
+                        if (target.canonicalFile.parentFile == imagesDir.canonicalFile && target.name.startsWith("${updated.id}_")) target.delete()
+                    }
+                }
+            }
+        }
     }
 
     override fun clear() {

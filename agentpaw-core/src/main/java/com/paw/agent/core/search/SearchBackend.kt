@@ -1,6 +1,7 @@
 package com.paw.agent.core.search
 
 /** One search hit, normalised across providers. */
+@kotlinx.serialization.Serializable
 data class SearchResult(
     val title: String,
     val snippet: String,
@@ -8,6 +9,7 @@ data class SearchResult(
 )
 
 /** A page of results plus whatever the provider reported. */
+@kotlinx.serialization.Serializable
 data class SearchResponse(
     val query: String,
     val results: List<SearchResult>,

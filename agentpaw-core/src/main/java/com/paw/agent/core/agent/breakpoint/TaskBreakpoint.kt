@@ -99,6 +99,8 @@ data class TaskBreakpoint(
         【断点续操恢复指令（严格执行）】
         任务原目标：$originalGoal
         断点暂停位置：$interruptedText
+        中断说明：$interruptedReason
+        若最后动作结果未知，先读取当前页面核实；不得直接重放发送、提交、支付或删除等副作用操作。
         $contextNote
         【已成功执行的步骤清单（严禁重复执行以下已完成的操作）】：
         $stepsText

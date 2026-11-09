@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -24,6 +25,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.PauseCircle
 import androidx.compose.material.icons.filled.Stop
@@ -104,6 +106,7 @@ fun ChatScreen(
     onSendOrStop: () -> Unit,
     onResumeBreakpoint: () -> Unit = {},
     onConfirmRiskAction: () -> Unit = {},
+    onRejectRiskAction: () -> Unit = {},
     onDismissBreakpoint: () -> Unit = {},
     onOpenSettings: () -> Unit,
     onOpenHistory: () -> Unit,
@@ -114,11 +117,27 @@ fun ChatScreen(
     onRetrySave: () -> Unit = {},
 ) {
     val listState = rememberLazyListState()
+    var confirmDiscard by remember { mutableStateOf(false) }
+    if (confirmDiscard) com.paw.agent.ui.components.adaptive.AppAlertDialog(
+        onDismissRequest = { confirmDiscard = false },
+        title = { AppText(stringResource(R.string.chat_abandon_title)) },
+        text = { AppText(stringResource(R.string.chat_abandon_help)) },
+        confirmButton = { AppButton(onClick = { confirmDiscard = false; onDismissBreakpoint() }) { AppText(stringResource(R.string.action_delete)) } },
+        dismissButton = { AppOutlinedButton(onClick = { confirmDiscard = false }) { AppText(stringResource(R.string.action_cancel)) } },
+    )
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         onImagesPicked(uris.map { it.toString() })
     }
     var selectedFilterIndex by rememberSaveable { mutableIntStateOf(0) }
     var confirmNewConversation by rememberSaveable { mutableStateOf(false) }
+    val compactToolbar = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp < 360 ||
+        androidx.compose.ui.platform.LocalDensity.current.fontScale > 1.3f
+    var toolbarMenu by remember { mutableStateOf(false) }
+    val requestNewConversation = {
+        if (isGenerating || activeBreakpoint != null || draft.isNotBlank() || images.isNotEmpty() || importingImages) confirmNewConversation = true
+        else onNewConversation()
+    }
+
 
     if (confirmNewConversation) {
         AppAlertDialog(
@@ -173,6 +192,18 @@ fun ChatScreen(
                     }
                 },
                 actions = {
+                    if (compactToolbar) {
+                        Box {
+                            AppTopBarAction(onClick = { toolbarMenu = true }) {
+                                AppIcon(Icons.Default.MoreVert, stringResource(R.string.chat_more_actions))
+                            }
+                            androidx.compose.material3.DropdownMenu(expanded = toolbarMenu, onDismissRequest = { toolbarMenu = false }, containerColor = AppTheme.colors.surface) {
+                                androidx.compose.material3.DropdownMenuItem(text = { AppText(stringResource(R.string.history_title)) }, onClick = { toolbarMenu = false; onOpenHistory() })
+                                androidx.compose.material3.DropdownMenuItem(text = { AppText(stringResource(R.string.skills_title)) }, onClick = { toolbarMenu = false; onOpenSkills() })
+                                androidx.compose.material3.DropdownMenuItem(text = { AppText(stringResource(R.string.chat_new_conversation)) }, onClick = { toolbarMenu = false; requestNewConversation() })
+                            }
+                        }
+                    } else {
                     AppTopBarAction(onClick = onOpenHistory) {
                         AppIcon(
                             imageVector = Icons.Default.History,
@@ -196,6 +227,7 @@ fun ChatScreen(
                             imageVector = Icons.Outlined.EditNote,
                             contentDescription = stringResource(R.string.chat_new_conversation),
                         )
+                    }
                     }
                     AppTopBarAction(onClick = onOpenSettings) {
                         AppIcon(
@@ -224,7 +256,8 @@ fun ChatScreen(
                 onSendOrStop = onSendOrStop,
                 onResumeBreakpoint = onResumeBreakpoint,
                 onConfirmRiskAction = onConfirmRiskAction,
-                onDismissBreakpoint = onDismissBreakpoint,
+                onRejectRiskAction = onRejectRiskAction,
+                onDismissBreakpoint = { confirmDiscard = true },
                 onOpenSettings = onConfigureModel,
             )
         },
@@ -273,7 +306,7 @@ fun ChatScreen(
         // 得自己让开玻璃顶栏；两者都没有时头部为零高度，消息列表照常从顶栏下方穿过。
         val showRootDashboard = isRootAvailable
         val showTopNotice = (!hasAnyExecutionEngine || !hasOverlayPermission || !hasNotificationPermission) && !showRootDashboard
-        val showTopHeader = showRootDashboard || showTopNotice || !hasNotificationPermission || storageError != null || (splitVisionLanguageMode && messages.isNotEmpty())
+        val showTopHeader = agentExecutionState.isRunning || agentExecutionState.isPaused || showRootDashboard || showTopNotice || !hasNotificationPermission || storageError != null || (splitVisionLanguageMode && messages.isNotEmpty())
         val showStreamFilter = splitVisionLanguageMode && messages.isNotEmpty()
         val filteredMessages = remember(messages, selectedFilterIndex, splitVisionLanguageMode) {
             if (!splitVisionLanguageMode) messages
@@ -316,6 +349,14 @@ fun ChatScreen(
                         AppText(stringResource(R.string.history_retry_save))
                     }
                 }
+            }
+            if (!showRootDashboard && (agentExecutionState.isRunning || agentExecutionState.isPaused)) {
+                AppText(
+                    text = stringResource(R.string.chat_execution_progress, agentExecutionState.currentStep, agentExecutionState.currentAction),
+                    style = AppTheme.typography.bodySmall,
+                    color = AppTheme.colors.primary,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                )
             }
             if (showRootDashboard) {
                 RootAuthDashboard(
@@ -614,6 +655,7 @@ private fun Composer(
     onSendOrStop: () -> Unit,
     onResumeBreakpoint: () -> Unit,
     onConfirmRiskAction: () -> Unit = {},
+    onRejectRiskAction: () -> Unit = {},
     onDismissBreakpoint: () -> Unit,
     onOpenSettings: () -> Unit,
 ) {
@@ -634,6 +676,13 @@ private fun Composer(
             if (activeBreakpoint != null && !isGenerating) {
                 val risk = activeBreakpoint.riskConfirmation
                 if (risk != null && !risk.isConfirmed) {
+                    var remaining by remember(activeBreakpoint.id) { mutableStateOf(300) }
+                    LaunchedEffect(activeBreakpoint.id) {
+                        do {
+                            remaining = ((activeBreakpoint.timestamp + 300_000L - System.currentTimeMillis()) / 1000).coerceIn(0, 300).toInt()
+                            if (remaining > 0) kotlinx.coroutines.delay(1000)
+                        } while (remaining > 0)
+                    }
                     // 独立的高风险操作确认卡片
                     AppCard(
                         cornerRadius = 14.dp,
@@ -666,10 +715,10 @@ private fun Composer(
                                     color = AppTheme.colors.error,
                                     modifier = Modifier.weight(1f),
                                 )
-                                AppIconButton(onClick = onDismissBreakpoint) {
+                                AppIconButton(onClick = onRejectRiskAction) {
                                     AppIcon(
                                         imageVector = Icons.Outlined.Close,
-                                        contentDescription = stringResource(R.string.chat_dismiss),
+                                        contentDescription = stringResource(R.string.chat_reject_action),
                                         modifier = Modifier.size(18.dp),
                                     )
                                 }
@@ -689,23 +738,24 @@ private fun Composer(
                                 style = AppTheme.typography.bodySmall,
                                 color = AppTheme.colors.onErrorContainer.copy(alpha = 0.85f),
                             )
+                            AppText(stringResource(R.string.chat_risk_expiry, remaining / 60, remaining % 60), style = AppTheme.typography.bodySmall)
                             Spacer(Modifier.height(10.dp))
-                            Row(
+                            FlowRow(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.End,
-                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                                verticalArrangement = Arrangement.spacedBy(4.dp),
                             ) {
                                 AppOutlinedButton(
-                                    onClick = onDismissBreakpoint,
+                                    onClick = onRejectRiskAction,
                                 ) {
-                                    AppText(text = stringResource(R.string.chat_cancel_action), style = AppTheme.typography.labelSmall)
+                                    AppText(text = stringResource(R.string.chat_reject_action), style = AppTheme.typography.labelSmall)
                                 }
-                                Spacer(Modifier.width(8.dp))
                                 AppButton(
                                     onClick = onConfirmRiskAction,
                                 ) {
                                     AppText(
                                         text = stringResource(R.string.chat_confirm_action),
+                                        color = AppTheme.colors.onPrimary,
                                         style = AppTheme.typography.labelSmall,
                                         fontWeight = FontWeight.Bold,
                                     )

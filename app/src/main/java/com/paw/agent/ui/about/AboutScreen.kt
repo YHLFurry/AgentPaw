@@ -192,7 +192,7 @@ fun AboutScreen(
                             modifier = Modifier.size(16.dp),
                         )
                         AppText(
-                            text = "资深（专家）模式已激活",
+                            text = stringResource(R.string.about_expert_active),
                             style = AppTheme.typography.labelSmall,
                             color = AppTheme.colors.primary,
                             fontWeight = FontWeight.SemiBold,
@@ -225,12 +225,12 @@ fun AboutScreen(
                 "v$name (Build $code)"
             }
 
-            SettingsGroupLabel("应用程序信息")
+            SettingsGroupLabel(stringResource(R.string.about_app_information))
             SettingsCard {
                 SettingsNavRow(
                     icon = Icons.Outlined.Info,
                     title = stringResource(R.string.settings_version),
-                    summary = "版本与内部编译标识",
+                    summary = stringResource(R.string.about_version_summary),
                     trailing = displayVersion,
                     onClick = {},
                 )
@@ -251,7 +251,7 @@ fun AboutScreen(
             Spacer(Modifier.height(20.dp))
 
             // 开源社区与协议
-            SettingsGroupLabel("开源与许可")
+            SettingsGroupLabel(stringResource(R.string.about_licenses_heading))
             SettingsCard {
                 SettingsNavRow(
                     icon = Icons.Outlined.Code,

@@ -25,6 +25,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.first
 import com.paw.agent.core.model.Conversation
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -61,6 +62,8 @@ fun HistoryDetailScreen(
     val scope = rememberCoroutineScope()
     val historyList by container.conversationRepository.historyList.collectAsStateWithLifecycle()
     val loaded by produceState<Pair<Boolean, Conversation?>>(false to null, historyList, conversationId) {
+        value = false to null
+        container.conversationRepository.isInitialized.first { it }
         value = true to container.conversationRepository.getConversation(conversationId)
     }
     val conv = loaded.second
@@ -88,6 +91,8 @@ fun HistoryDetailScreen(
                             if (ok) {
                                 Toast.makeText(context, resources.getString(R.string.history_restored), Toast.LENGTH_SHORT).show()
                                 onRestoreToChat()
+                            } else {
+                                Toast.makeText(context, resources.getString(R.string.history_restore_failed), Toast.LENGTH_SHORT).show()
                             }
                           }
                         }) {
@@ -134,6 +139,8 @@ fun HistoryDetailScreen(
                             if (ok) {
                                 Toast.makeText(context, resources.getString(R.string.history_restored_ok), Toast.LENGTH_SHORT).show()
                                 onRestoreToChat()
+                            } else {
+                                Toast.makeText(context, resources.getString(R.string.history_restore_failed), Toast.LENGTH_SHORT).show()
                             }
                           }
                         }) {
@@ -146,7 +153,7 @@ fun HistoryDetailScreen(
         containerColor = AppTheme.colors.background,
     ) { innerPadding ->
         if (conv == null) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Box(modifier = Modifier.fillMaxSize().padding(innerPadding).padding(top = LocalTopBarClearance.current), contentAlignment = Alignment.Center) {
                 AppText(if (!loaded.first) stringResource(R.string.history_loading) else stringResource(R.string.history_not_found))
             }
         } else {

@@ -38,7 +38,7 @@ import com.paw.agent.ui.theme.AppTheme
 fun SkillRiskBadge(risk: SkillRisk, modifier: Modifier = Modifier) {
     val (label, bg, fg) = when (risk) {
         SkillRisk.NONE -> Triple("安全", AppTheme.colors.surfaceVariant, AppTheme.colors.onSurfaceVariant)
-        SkillRisk.LOW -> Triple("低风险", AppTheme.colors.secondaryContainer, AppTheme.colors.onSecondaryContainer)
+        SkillRisk.LOW -> Triple("低风险", AppTheme.colors.secondaryContainer, AppTheme.colors.onSurface)
         SkillRisk.MEDIUM -> Triple("需留意", AppTheme.colors.tertiaryContainer, AppTheme.colors.onTertiaryContainer)
         SkillRisk.HIGH -> Triple("高风险", AppTheme.colors.errorContainer, AppTheme.colors.onErrorContainer)
         SkillRisk.CRITICAL -> Triple("极高危", AppTheme.colors.error, AppTheme.colors.onError)

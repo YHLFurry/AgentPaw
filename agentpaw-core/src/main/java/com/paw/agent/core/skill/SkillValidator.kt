@@ -46,6 +46,7 @@ object SkillValidator {
         }
 
         // ---- 元信息 ----
+        if (def.guard.allowSensitiveScreen) warn("sensitive_screen_override", "敏感页豁免只有同时启用宿主资深开关时才生效")
         if (def.displayName.isBlank()) {
             error("name_blank", "技能名称不能为空")
         } else if (def.displayName.length > 40) {

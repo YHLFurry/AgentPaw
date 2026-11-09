@@ -140,6 +140,7 @@ fun AgentPawApp(
                 onResumeBreakpoint = { chatViewModel.resumeBreakpoint(config = settings.llm) },
                 onConfirmRiskAction = { chatViewModel.confirmRiskAction(settings.llm) },
                 onDismissBreakpoint = chatViewModel::dismissBreakpoint,
+                onRejectRiskAction = chatViewModel::rejectRiskAction,
                 onOpenSettings = { navController.navigate(Routes.SETTINGS) },
                 onConfigureModel = { navController.navigate(Routes.SETTINGS_MODEL) },
                 onRetrySave = container.conversationRepository::retryFailedSaves,

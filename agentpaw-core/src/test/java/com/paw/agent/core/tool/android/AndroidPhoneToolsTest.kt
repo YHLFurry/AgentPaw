@@ -200,8 +200,8 @@ class AndroidPhoneToolsTest {
         assertEquals("wechat", controller.lastLaunched)
 
         val deepLinkTool = DeepLinkTool(controller)
-        // General non-payment deeplink executes directly
-        val normalRes = deepLinkTool.execute("""{"uri": "bilibili://video/123"}""", context)
+        // Custom app schemes require explicit approval even when they are not payment schemes.
+        val normalRes = deepLinkTool.execute("""{"uri": "bilibili://video/123"}""", AgentContext("t", grantedTokens = setOf("risk_confirmed:open_deeplink")))
         assertTrue(normalRes.contains("success"))
         assertEquals("bilibili://video/123", controller.lastDeepLink)
 
@@ -492,5 +492,32 @@ class AndroidPhoneToolsTest {
         val parsed = kotlinx.serialization.json.Json.parseToJsonElement(res)
         assertEquals("success", parsed.jsonObject["status"]?.jsonPrimitive?.content)
     }
+
+    @Test fun `all device mutation tools block sensitive screens even with approval`() = runTest {
+        var mutations = 0
+        val sensitive = java.lang.reflect.Proxy.newProxyInstance(PhoneController::class.java.classLoader,
+            arrayOf(PhoneController::class.java)) { _, method, _ ->
+            when (method.name) {
+                "getScreenState" -> ScreenStateInfo(elements = listOf(UiElementInfo(text = "Confirm payment", isPassword = true)))
+                "isAccessibilityEnabled", "isShizukuAvailable" -> true
+                else -> { mutations++; error("Sensitive page mutation: ${method.name}") }
+            }
+        } as PhoneController
+        val tools = listOf<Pair<com.paw.agent.core.agent.AgentTool, String>>(
+            TapTool(sensitive) to """{"x":10,"y":10}""",
+            DoubleTapTool(sensitive) to """{"x":10,"y":10}""",
+            LongPressTool(sensitive) to """{"x":10,"y":10}""",
+            SwipeTool(sensitive) to """{"start_x":10,"start_y":10,"end_x":20,"end_y":20}""",
+            InputTextTool(sensitive) to """{"text":"test"}""",
+            LaunchAppTool(sensitive) to """{"app_name":"com.example.app"}""",
+            DeepLinkTool(sensitive) to """{"uri":"https://example.com"}""",
+            ClickElementTool(sensitive) to """{"index":0}""",
+        ) + listOf("BACK", "HOME", "RECENTS", "ENTER").map { KeyActionTool(sensitive) to """{"action":"$it"}""" }
+        for ((tool, arguments) in tools) {
+            assertTrue(tool.definition.name, tool.execute(arguments, AgentContext("review", grantedTokens = setOf("*"))).contains("is_safety_pause"))
+        }
+        assertEquals(0, mutations)
+    }
+
 }
 

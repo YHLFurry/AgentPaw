@@ -301,4 +301,12 @@ class InterpreterTest {
         assertEquals("content\n", result.stdout)
         assertTrue(File(root, "data.txt").exists())
     }
+
+    @Test fun `stderr redirection does not become an extra command argument or redirect stdout`() {
+        val env = ShellEnvironment(temp.newFolder().absolutePath)
+        val result = Interpreter(CommandRegistry()).execute("echo sample 2>error.txt", env)
+        assertEquals("sample", result.stdout.trim())
+        assertEquals("", File(env.rootDir, "error.txt").readText())
+    }
+
 }

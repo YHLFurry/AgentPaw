@@ -92,7 +92,7 @@ fun ExpertSettingsPage(
     // 低频心跳：用户停留在本页时，“剩余 N 分钟”也能自然衰减，而不是定格在进入时的值。
     var clockTick by remember { mutableIntStateOf(0) }
     LaunchedEffect(state.riskBypassUntil) {
-        while (true) {
+        while (state.riskBypassUntil > System.currentTimeMillis()) {
             kotlinx.coroutines.delay(15_000)
             clockTick++
         }

@@ -69,7 +69,11 @@ class AgentFloatingService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP_TASK) {
             stopAccessibilityOperations()
-            AgentExecutionController.requestStop()
+            if (AgentExecutionController.state.value.isPaused) {
+                (application as com.paw.agent.AgentPawApplication).container.agentTaskRunner.dismissBreakpoint()
+            } else {
+                AgentExecutionController.requestStop()
+            }
             stopSelf()
             return START_NOT_STICKY
         }
@@ -89,16 +93,16 @@ class AgentFloatingService : Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 channelId,
-                "AgentPaw 运行状态",
+                getString(com.paw.agent.R.string.notification_channel_name),
                 NotificationManager.IMPORTANCE_LOW,
             ).apply {
-                description = "显示 AgentPaw 当前在手机上的执行状态"
+                description = getString(com.paw.agent.R.string.notification_channel_description)
             }
             val notificationManager = getSystemService(NotificationManager::class.java)
             notificationManager?.createNotificationChannel(channel)
         }
 
-        val notification = buildNotification("正在准备操作手机...")
+        val notification = buildNotification(getString(com.paw.agent.R.string.notification_preparing))
         startForeground(NOTIFICATION_ID, notification)
     }
 
@@ -122,11 +126,11 @@ class AgentFloatingService : Service() {
         )
 
         return NotificationCompat.Builder(this, channelId)
-            .setContentTitle("AgentPaw 手机智能体运行中")
+            .setContentTitle(getString(com.paw.agent.R.string.notification_running))
             .setContentText(contentText)
             .setSmallIcon(R.drawable.ic_paw)
             .setContentIntent(appPendingIntent)
-            .addAction(android.R.drawable.ic_media_pause, "⏹ 停止任务", stopIntent)
+            .addAction(android.R.drawable.ic_media_pause, getString(com.paw.agent.R.string.notification_stop_task), stopIntent)
             .setOngoing(true)
             .build()
     }

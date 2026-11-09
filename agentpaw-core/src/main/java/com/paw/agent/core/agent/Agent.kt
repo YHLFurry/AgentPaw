@@ -73,7 +73,8 @@ sealed interface AgentEvent {
 class Agent(
     private val llmClient: LlmClient,
     private val toolRegistry: ToolRegistry = ToolRegistry(),
-    private val maxToolRounds: Int = DEFAULT_MAX_TOOL_ROUNDS,
+    // -1 delegates to config; every non-negative constructor argument is explicit.
+    private val maxToolRounds: Int = -1,
     private val streamUpdateIntervalMs: Long = 50L,
 ) {
 
@@ -93,15 +94,11 @@ class Agent(
         val sanitizedTools = HashMap<Message, WireMessage>()
 
         val effectiveMaxRounds: Int? = run {
-            val configured = if (this@Agent.maxToolRounds != DEFAULT_MAX_TOOL_ROUNDS) {
-                this@Agent.maxToolRounds
-            } else {
-                config.maxToolRounds
-            }
+            val configured = this@Agent.maxToolRounds.takeIf { it >= 0 } ?: config.maxToolRounds
             if (configured <= 0) {
-                null
+                200
             } else {
-                configured
+                configured.coerceAtMost(200)
             }
         }
         var round = 0

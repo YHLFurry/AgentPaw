@@ -1,10 +1,14 @@
 package com.paw.agent.ui.history
 
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.border
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -25,14 +29,9 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.outlined.DeleteSweep
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
-import androidx.compose.material.icons.outlined.Check
-import androidx.compose.material.icons.outlined.Close
-import androidx.compose.material.icons.outlined.Compare
-import androidx.compose.material.icons.outlined.PlayArrow
-import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -41,6 +40,7 @@ import kotlinx.coroutines.launch
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -98,12 +98,25 @@ fun HistoryScreen(
                     stats.initialGoal.contains(search, ignoreCase = true))
         }
     }
-    val selectedForCompare = remember { mutableStateListOf<String>() }
-    var isCompareMode by remember { mutableStateOf(false) }
+    var selectedForCompare by rememberSaveable { mutableStateOf(listOf<String>()) }
+    var isCompareMode by rememberSaveable { mutableStateOf(false) }
     var pendingDeleteConvId by remember { mutableStateOf<String?>(null) }
+    var pendingDeleteAll by remember { mutableStateOf(false) }
     var pendingClearMedia by remember { mutableStateOf(false) }
     var clearingMedia by remember { mutableStateOf(false) }
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+    LaunchedEffect(allHistory, initialized) {
+        if (!initialized) return@LaunchedEffect
+        selectedForCompare = selectedForCompare.filter { id -> allHistory.any { it.id == id } }
+        if (allHistory.size < 2) {
+            isCompareMode = false
+            selectedForCompare = emptyList()
+        }
+    }
+    BackHandler(isCompareMode) {
+        isCompareMode = false
+        selectedForCompare = emptyList()
+    }
 
     AppScaffold(
         modifier = modifier.fillMaxSize(),
@@ -120,13 +133,13 @@ fun HistoryScreen(
                     }
                 },
                 actions = {
-                    AppTopBarAction(onClick = { if (!clearingMedia) pendingClearMedia = true }) {
+                    AppTopBarAction(onClick = { pendingClearMedia = true }, enabled = initialized && !clearingMedia && allHistory.isNotEmpty()) {
                         AppIcon(Icons.Outlined.DeleteSweep, stringResource(R.string.history_clear_media))
                     }
-                    if (historyList.size >= 2) {
+                    if (allHistory.size >= 2) {
                         AppTopBarAction(onClick = {
                             isCompareMode = !isCompareMode
-                            if (!isCompareMode) selectedForCompare.clear()
+                            if (!isCompareMode) selectedForCompare = emptyList()
                         }) {
                             AppIcon(
                                 imageVector = Icons.AutoMirrored.Filled.CompareArrows,
@@ -141,10 +154,27 @@ fun HistoryScreen(
         },
         containerColor = AppTheme.colors.background,
     ) { innerPadding ->
+      if (pendingDeleteAll) com.paw.agent.ui.components.adaptive.AppAlertDialog(
+          onDismissRequest = { pendingDeleteAll = false },
+          title = { AppText(stringResource(R.string.history_delete_all)) },
+          text = { AppText(stringResource(R.string.history_delete_all_help)) },
+          confirmButton = { AppButton(onClick = {
+              pendingDeleteAll = false
+              container.agentTaskRunner.stop()
+              container.agentTaskRunner.dismissBreakpoint()
+              container.conversationRepository.deleteAllHistory()
+          }) { AppText(stringResource(R.string.action_delete)) } },
+          dismissButton = { AppOutlinedButton(onClick = { pendingDeleteAll = false }) { AppText(stringResource(R.string.action_cancel)) } },
+      )
       if (pendingClearMedia) com.paw.agent.ui.components.adaptive.AppAlertDialog(
           onDismissRequest = { pendingClearMedia = false },
           title = { AppText(stringResource(R.string.history_clear_media)) },
-          text = { AppText(stringResource(R.string.history_clear_media_help)) },
+          text = { Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+              AppText(stringResource(R.string.history_clear_media_help))
+              AppOutlinedButton(onClick = { pendingClearMedia = false; pendingDeleteAll = true }) {
+                  AppText(stringResource(R.string.history_delete_all))
+              }
+          } },
           confirmButton = {
               AppButton(onClick = {
                   pendingClearMedia = false
@@ -173,14 +203,36 @@ fun HistoryScreen(
             onValueChange = { query = it },
             label = stringResource(R.string.history_search),
             singleLine = true,
-            modifier = Modifier.padding(horizontal = 16.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
         )
-        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+        FlowRow(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             AppOutlinedButton(onClick = { failedOnly = !failedOnly }) {
                 AppText(stringResource(if (failedOnly) R.string.history_show_all else R.string.history_failed_only))
             }
-            Spacer(Modifier.width(12.dp))
             AppText("${visibleHistory.size}/${allHistory.size}", style = AppTheme.typography.bodySmall)
+        }
+        if (isCompareMode) {
+            AppSurface(color = AppTheme.colors.surfaceContainer, modifier = Modifier.fillMaxWidth()) {
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    AppText(
+                        stringResource(R.string.history_selected_count, selectedForCompare.size),
+                        style = AppTheme.typography.bodyMedium,
+                        color = AppTheme.colors.onSurface,
+                        modifier = Modifier.align(Alignment.CenterVertically),
+                    )
+                    AppButton(
+                        onClick = { onOpenCompare(selectedForCompare[0], selectedForCompare[1]) },
+                        enabled = selectedForCompare.size == 2,
+                    ) { AppText(stringResource(R.string.history_compare_start)) }
+                    AppOutlinedButton(onClick = { isCompareMode = false; selectedForCompare = emptyList() }) {
+                        AppText(stringResource(R.string.action_cancel))
+                    }
+                }
+            }
         }
         if (visibleHistory.isEmpty()) {
             Box(
@@ -188,43 +240,23 @@ fun HistoryScreen(
                     .fillMaxSize(),
                 contentAlignment = Alignment.Center,
             ) {
+              Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.padding(24.dp)) {
                 AppText(
                     text = stringResource(if (!initialized) R.string.history_loading else if (historyList.isEmpty()) R.string.history_empty else R.string.history_no_matches),
                     color = AppTheme.colors.onSurfaceVariant,
                 )
+                if (query.isNotBlank() || failedOnly) {
+                    AppOutlinedButton(onClick = { query = ""; failedOnly = false }) {
+                        AppText(stringResource(R.string.history_clear_filters))
+                    }
+                }
+              }
             }
         } else {
             Column(
                 modifier = Modifier
                     .fillMaxSize(),
             ) {
-                if (isCompareMode) {
-                    AppSurface(
-                        color = AppTheme.colors.primaryContainer,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                        ) {
-                            AppText(
-                                text = stringResource(R.string.history_selected_count, selectedForCompare.size),
-                                style = AppTheme.typography.bodyMedium,
-                                color = AppTheme.colors.onPrimaryContainer,
-                            )
-                            if (selectedForCompare.size == 2) {
-                                AppButton(onClick = {
-                                    onOpenCompare(selectedForCompare[0], selectedForCompare[1])
-                                }) {
-                                    AppText(stringResource(R.string.history_compare_start))
-                                }
-                            }
-                        }
-                    }
-                }
 
                 LazyColumn(
                     state = listState,
@@ -251,9 +283,9 @@ fun HistoryScreen(
                             onCardClick = {
                                 if (isCompareMode) {
                                     if (isSelected) {
-                                        selectedForCompare.remove(conv.id)
+                                        selectedForCompare = selectedForCompare - conv.id
                                     } else if (selectedForCompare.size < 2) {
-                                        selectedForCompare.add(conv.id)
+                                        selectedForCompare = selectedForCompare + conv.id
                                     } else {
                                         Toast.makeText(context, resources.getString(R.string.history_compare_limit), Toast.LENGTH_SHORT).show()
                                     }
@@ -298,10 +330,12 @@ fun HistoryScreen(
                         confirmButton = {
                             AppButton(
                                 onClick = {
-                                    container.conversationRepository.deleteConversation(targetId)
-                                    selectedForCompare.remove(targetId)
                                     pendingDeleteConvId = null
-                                    Toast.makeText(context, resources.getString(R.string.history_deleted), Toast.LENGTH_SHORT).show()
+                                    scope.launch {
+                                        val deleted = container.conversationRepository.deleteConversation(targetId)
+                                        if (deleted) selectedForCompare = selectedForCompare - targetId
+                                        Toast.makeText(context, resources.getString(if (deleted) R.string.history_deleted else R.string.history_delete_failed), Toast.LENGTH_SHORT).show()
+                                    }
                                 },
                             ) {
                                 AppText(stringResource(R.string.action_delete))
@@ -321,7 +355,7 @@ fun HistoryScreen(
 }
 
 @Composable
-private fun HistoryTaskCard(
+internal fun HistoryTaskCard(
     stats: TaskExecutionStats,
     isCompareMode: Boolean,
     isSelected: Boolean,
@@ -338,7 +372,9 @@ private fun HistoryTaskCard(
         cornerRadius = 16.dp,
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { onCardClick() },
+            .then(if (isSelected) Modifier.border(2.dp, AppTheme.colors.primary, RoundedCornerShape(16.dp)) else Modifier)
+            .then(if (isCompareMode) Modifier.selectable(selected = isSelected, role = Role.Checkbox, onClick = onCardClick)
+                  else Modifier.clickable(onClick = onCardClick)),
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(
@@ -364,6 +400,7 @@ private fun HistoryTaskCard(
                         fontWeight = FontWeight.SemiBold,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
                     )
                 }
 
@@ -382,9 +419,9 @@ private fun HistoryTaskCard(
 
             Spacer(Modifier.height(10.dp))
 
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
+            FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 AppText(
                     text = stringResource(R.string.history_step_count, stats.stepCount),
@@ -402,17 +439,18 @@ private fun HistoryTaskCard(
                     AppText(
                         text = formattedTime,
                         style = AppTheme.typography.labelSmall,
-                        color = AppTheme.colors.outline,
+                        color = AppTheme.colors.onSurfaceVariant,
                     )
                 }
             }
 
-            Spacer(Modifier.height(12.dp))
+            if (!isCompareMode) {
+                Spacer(Modifier.height(12.dp))
 
-            Row(
+            FlowRow(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End,
-                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 AppOutlinedButton(onClick = onRestore) {
                     AppIcon(
@@ -423,10 +461,10 @@ private fun HistoryTaskCard(
                     Spacer(Modifier.width(4.dp))
                     AppText(stringResource(R.string.history_restore))
                 }
-                Spacer(Modifier.width(8.dp))
                 AppIconButton(onClick = onDelete) {
                     AppIcon(imageVector = Icons.Default.Delete, contentDescription = stringResource(R.string.history_delete_record))
                 }
+            }
             }
         }
     }
