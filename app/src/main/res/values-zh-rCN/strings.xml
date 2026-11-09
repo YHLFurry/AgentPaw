@@ -483,4 +483,23 @@
     <string name="settings_rounds_invalid">待填写有效步数</string>
     <string name="settings_provider_custom">自定义</string>
     <string name="settings_model_manual_hint">手动填写或从服务端获取</string>
+    <string name="chatgpt_title">ChatGPT 订阅直连（预览版）</string>
+    <string name="chatgpt_account_section">ChatGPT 账号</string>
+    <string name="chatgpt_settings_help">使用手机浏览器授权，获取可用模型后保存设置，无需 API Key 或电脑中转。</string>
+    <string name="chatgpt_manage">登录 / 管理 ChatGPT 账号</string>
+    <string name="chatgpt_intro">通过系统浏览器登录并授权 AgentPaw 使用 ChatGPT 套餐。对话、截图与工具结果由手机直接通过 HTTPS 发送给 OpenAI；凭证使用 Android Keystore 在本机加密保存。模型与额度以账号权限为准。\n\n授权完成后返回此页。登录期间强制关闭 AgentPaw 需要重新发起授权。</string>
+    <string name="chatgpt_continue">Continue with ChatGPT</string>
+    <string name="chatgpt_logout">退出登录</string>
+    <string name="chatgpt_back">返回模型设置</string>
+    <string name="chatgpt_connected">已连接：%1$s</string>
+    <string name="chatgpt_account_authorized">已授权账号</string>
+    <string name="chatgpt_disconnected">尚未连接 ChatGPT</string>
+    <string name="chatgpt_idle">登录后可获取账号支持的模型。</string>
+    <string name="chatgpt_waiting">等待浏览器授权，完成后返回此页。</string>
+    <string name="chatgpt_success">授权成功。请获取模型并保存模型设置。</string>
+    <string name="chatgpt_cancelled">已取消登录，可重新发起授权。</string>
+    <string name="chatgpt_failed">操作未完成，请检查网络，重新打开此页后重试。</string>
+    <string name="chatgpt_signed_out">已退出登录，并撤销可续期会话。</string>
+    <string name="chatgpt_remote_unconfirmed">已在本机退出，尚未确认远端撤销。请在 ChatGPT 设置中断开此应用以撤销授权。</string>
+    <string name="chatgpt_parameter_help">此预览路由不支持温度、Top-p 和输出 Token 上限；上下文预算仍为本地估算。请选择账号可用的模型。</string>
 </resources>

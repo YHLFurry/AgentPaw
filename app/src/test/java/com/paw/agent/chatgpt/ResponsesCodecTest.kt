@@ -19,15 +19,20 @@ class ResponsesCodecTest {
         assertEquals(false, body["store"]!!.jsonPrimitive.boolean)
         assertEquals(true, body["stream"]!!.jsonPrimitive.boolean)
         val input = body["input"]!!.jsonArray
+        assertEquals("developer", input[0].jsonObject["role"]!!.jsonPrimitive.content)
         assertEquals("input_image", input[1].jsonObject["content"]!!.jsonArray[1].jsonObject["type"]!!.jsonPrimitive.content)
         assertEquals("call_phone_1", input[2].jsonObject["call_id"]!!.jsonPrimitive.content)
+        assertEquals("agentpaw", input[2].jsonObject["namespace"]!!.jsonPrimitive.content)
         assertEquals("function_call_output", input[3].jsonObject["type"]!!.jsonPrimitive.content)
         assertEquals("{\"battery\":73}", input[3].jsonObject["output"]!!.jsonPrimitive.content)
-        assertEquals("get_screen_state", body["tools"]!!.jsonArray[0].jsonObject["name"]!!.jsonPrimitive.content)
+        val namespace = body["tools"]!!.jsonArray.single().jsonObject
+        assertEquals("namespace", namespace["type"]!!.jsonPrimitive.content)
+        assertEquals("agentpaw", namespace["name"]!!.jsonPrimitive.content)
+        assertEquals("get_screen_state", namespace["tools"]!!.jsonArray.single().jsonObject["name"]!!.jsonPrimitive.content)
         assertNull(body["temperature"])
     }
     @Test fun returnsCompleteToolArgumentsWithProviderCallId() {
-        val response = Json.parseToJsonElement("""{"output":[{"type":"reasoning"},{"type":"function_call","id":"fc_item","call_id":"call_42","name":"tap","arguments":"{\"x\":120,\"y\":340}"}]}""").jsonObject
+        val response = Json.parseToJsonElement("""{"output":[{"type":"reasoning"},{"type":"function_call","namespace":"agentpaw","id":"fc_item","call_id":"call_42","name":"tap","arguments":"{\"x\":120,\"y\":340}"}]}""").jsonObject
         val calls = ResponsesCodec.calls(response)
         assertEquals(1, calls.size)
         assertEquals("call_42", calls[0].id)
@@ -36,5 +41,8 @@ class ResponsesCodecTest {
     }
     @Test(expected = IllegalArgumentException::class) fun rejectsToolResultsWithoutCallId() {
         ResponsesCodec.request("model", ChatCompletionRequest("model", listOf(ChatMessage("tool", "result"))))
+    }
+    @Test(expected = IllegalArgumentException::class) fun rejectsToolsFromAnotherNamespace() {
+        ResponsesCodec.calls(Json.parseToJsonElement("""{"output":[{"type":"function_call","namespace":"other","call_id":"c","name":"tap","arguments":"{}"}]}""").jsonObject)
     }
 }

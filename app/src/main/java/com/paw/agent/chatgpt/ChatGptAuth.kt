@@ -1,173 +1,412 @@
 package com.paw.agent.chatgpt
 
 import android.content.Context
-import android.security.keystore.KeyGenParameterSpec
-import android.security.keystore.KeyProperties
 import android.util.Base64
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.withContext
-import okhttp3.FormBody
+import okhttp3.*
 import okhttp3.HttpUrl.Companion.toHttpUrl
-import okhttp3.OkHttpClient
-import okhttp3.Request
 import org.json.JSONObject
-import java.io.File
 import java.math.BigInteger
 import java.net.InetAddress
 import java.net.ServerSocket
+import java.net.Socket
 import java.security.KeyFactory
-import java.security.KeyStore
 import java.security.MessageDigest
 import java.security.SecureRandom
 import java.security.Signature
 import java.security.spec.RSAPublicKeySpec
 import java.util.UUID
 import java.util.concurrent.TimeUnit
-import javax.crypto.Cipher
-import javax.crypto.KeyGenerator
-import javax.crypto.SecretKey
-import javax.crypto.spec.GCMParameterSpec
 
-/** Credentials never leave app-private noBackup storage except for TLS requests to OpenAI. */
-class ChatGptAuth private constructor(context: Context) {
-    private val file = File(context.applicationContext.noBackupFilesDir, "chatgpt-plan.enc")
-    private val mutex = Mutex()
-    private val http = OkHttpClient.Builder().callTimeout(60, TimeUnit.SECONDS).build()
-    @Volatile var status: String = ""
-        private set
-    private fun key(): SecretKey {
-        val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-        (store.getKey(ALIAS, null) as? SecretKey)?.let { return it }
-        return KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore").apply {
-            init(KeyGenParameterSpec.Builder(ALIAS, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
-                .setBlockModes(KeyProperties.BLOCK_MODE_GCM).setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE).build())
-        }.generateKey()
+enum class ChatGptAuthStatus { IDLE, WAITING, SIGNED_IN, CANCELLED, FAILED, SIGNED_OUT, REMOTE_UNCONFIRMED }
+
+data class ChatGptAuthState(
+    val signedIn: Boolean = false,
+    val accountLabel: String = "",
+    val busy: Boolean = false,
+    val status: ChatGptAuthStatus = ChatGptAuthStatus.IDLE,
+)
+
+internal data class ChatGptEndpoints(
+    val authorize: String = "https://auth.openai.com/api/accounts/authorize",
+    val token: String = "https://auth.openai.com/api/accounts/oauth/token",
+    val jwks: String = "https://auth.openai.com/.well-known/jwks.json",
+    val discovery: String = "https://auth.openai.com/.well-known/openid-configuration",
+    val issuer: String = "https://auth.openai.com",
+)
+
+/** One owner for login, token rotation and account changes. Network IO never holds [gate]. */
+class ChatGptAuth internal constructor(
+    private val storage: ChatGptCredentialStorage,
+    private val http: OkHttpClient = OkHttpClient.Builder()
+        .retryOnConnectionFailure(false).followRedirects(false).followSslRedirects(false)
+        .callTimeout(30, TimeUnit.SECONDS).build(),
+    private val endpoints: ChatGptEndpoints = ChatGptEndpoints(),
+) {
+    private val gate = Any()
+    private val refreshMutex = Mutex()
+    private var generation = 0L
+    private var attempt: LoginAttempt? = null
+    private var signingOut = false
+    private var credentialsBlocked = false
+    private val calls = mutableMapOf<Call, Job>()
+    private val mutableState = MutableStateFlow(ChatGptAuthState())
+    val state = mutableState.asStateFlow()
+
+    suspend fun load() = withContext(Dispatchers.IO) { synchronized(gate) { publish(storage.read()) } }
+
+    private fun publish(saved: JSONObject, status: ChatGptAuthStatus = state.value.status) {
+        mutableState.value = ChatGptAuthState(
+            signedIn = !signingOut && !credentialsBlocked && saved.optString("access_token").isNotBlank(),
+            accountLabel = saved.optString("email"), busy = attempt != null || signingOut, status = status,
+        )
     }
-    @Synchronized private fun read(): JSONObject {
-        if (!file.exists()) return JSONObject()
-        val bytes = android.util.AtomicFile(file).openRead().use { it.readBytes() }
-        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-        cipher.init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, bytes.copyOfRange(0, 12)))
-        return JSONObject(String(cipher.doFinal(bytes.copyOfRange(12, bytes.size)), Charsets.UTF_8))
-    }
-    @Synchronized private fun write(data: JSONObject) {
-        val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.ENCRYPT_MODE, key()) }
-        val atomic = android.util.AtomicFile(file)
-        val out = atomic.startWrite()
-        try { out.write(cipher.iv + cipher.doFinal(data.toString().toByteArray(Charsets.UTF_8))); atomic.finishWrite(out) }
-        catch (e: Exception) { atomic.failWrite(out); throw e }
-    }
-    fun signedIn() = runCatching { read().has("access_token") }.getOrDefault(false)
-    fun accountLabel() = runCatching { read().optString("email", "已授权") }.getOrDefault("")
-    fun reportFailure(error: Exception) { status = error.message ?: "登录未完成，请检查手机网络后重试。" }
-    suspend fun signOut() = withContext(Dispatchers.IO) { mutex.withLock {
-        val host = read().optString("host_id", "urn:uuid:${UUID.randomUUID()}")
-        write(JSONObject().put("host_id", host)); status = "已退出登录（如需撤销授权，请在 ChatGPT 中管理此应用）。"
-    } }
-    private fun token(form: FormBody): JSONObject {
-        http.newCall(Request.Builder().url("https://auth.openai.com/api/accounts/oauth/token").post(form).build()).execute().use { response ->
-            val text = response.body?.string().orEmpty()
-            check(response.isSuccessful) { "登录凭证请求失败 HTTP ${response.code}，请重新登录。" }
-            check(response.header("Content-Type").orEmpty().contains("json")) { "登录服务返回网页，请检查手机网络后重新登录。" }
-            return JSONObject(text)
+
+    /** Caller holds gate. Epoch validation also rejects callbacks already past socket.accept(). */
+    private fun invalidate() {
+        generation++
+        attempt?.closeResources()
+        attempt = null
+        val obsolete = calls.toMap()
+        calls.clear()
+        obsolete.forEach { (call, owner) ->
+            call.cancel()
+            owner.cancel(CancellationException("Account operation superseded"))
         }
     }
-    suspend fun accessToken(): String = withContext(Dispatchers.IO) { mutex.withLock {
-        val saved = read()
-        check(saved.has("access_token")) { "请先到模型服务中登录 ChatGPT。" }
-        if (saved.optLong("expires_at") > System.currentTimeMillis() + 90_000) return@withLock saved.getString("access_token")
-        val next = token(FormBody.Builder().add("grant_type", "refresh_token").add("client_id", saved.getString("client_id"))
-            .add("refresh_token", saved.getString("refresh_token")).add("resource", RESOURCE).build())
-        if (next.has("scope")) check(next.getString("scope").split(" ").contains("chatgpt.tokens.use.direct")) { "订阅权限已撤销，请重新登录。" }
-        for (k in next.keys()) saved.put(k, next.get(k))
-        saved.put("expires_at", System.currentTimeMillis() + next.getLong("expires_in") * 1000)
-        write(saved); saved.getString("access_token")
-    } }
-    /** Listener is bound before the browser opens; no exported callback activity or custom URI scheme. */
-    suspend fun prepareLogin(): LoginAttempt = withContext(Dispatchers.IO) {
-        val saved = read()
-        if (!saved.has("host_id")) { saved.put("host_id", "urn:uuid:${UUID.randomUUID()}"); write(saved) }
-        val socket = ServerSocket(0, 4, InetAddress.getByName("127.0.0.1")).apply { soTimeout = 600_000 }
-        val redirect = "http://127.0.0.1:${socket.localPort}/auth/callback"
-        val verifier = random(); val state = random(); val nonce = random()
-        val clientId = saved.optString("client_id", "dynamic_agent_client")
-        val url = "https://auth.openai.com/api/accounts/authorize".toHttpUrl().newBuilder()
-            .addQueryParameter("client_id", clientId).addQueryParameter("ext_agent_host_id", saved.getString("host_id"))
-            .addQueryParameter("response_type", "code").addQueryParameter("redirect_uri", redirect)
-            .addQueryParameter("scope", "openid profile email offline_access resource.invoke chatgpt.tokens.use.direct")
-            .addQueryParameter("resource", RESOURCE).addQueryParameter("state", state).addQueryParameter("nonce", nonce)
-            .addQueryParameter("code_challenge_method", "S256")
-            .addQueryParameter("code_challenge", b64(MessageDigest.getInstance("SHA-256").digest(verifier.toByteArray())))
-        if (clientId == "dynamic_agent_client") url.addQueryParameter("agent_name_hint", "AgentPaw Direct Test")
-        else if (saved.has("id_token")) url.addQueryParameter("id_token_hint", saved.getString("id_token"))
-        status = "等待浏览器授权，完成后返回此页。"
-        LoginAttempt(url.build().toString(), socket, redirect, verifier, state, nonce, saved)
+
+    fun cancelLogin() = synchronized(gate) {
+        if (attempt != null) {
+            invalidate()
+            mutableState.value = state.value.copy(busy = false, status = ChatGptAuthStatus.CANCELLED)
+        }
     }
-    inner class LoginAttempt(val url: String, private val server: ServerSocket, private val redirect: String,
-        private val verifier: String, private val state: String, private val nonce: String, private val saved: JSONObject) {
-        fun cancel() { runCatching { server.close() } }
-        suspend fun awaitCallback() = withContext(Dispatchers.IO) {
-            try { server.use {
+
+    fun reportFailure(owner: LoginAttempt? = null) = synchronized(gate) {
+        // Exception messages may contain OAuth URLs, codes or credentials.
+        if (owner == null || attempt === owner) {
+            mutableState.value = state.value.copy(status = ChatGptAuthStatus.FAILED)
+        }
+    }
+
+    private suspend fun <T> consume(epoch: Long, call: Call, block: suspend (Response) -> T): T {
+        val owner = currentCoroutineContext().job
+        synchronized(gate) {
+            if (generation != epoch || signingOut) {
+                call.cancel()
+                throw CancellationException("Account operation superseded")
+            }
+            calls[call] = owner
+        }
+        return try { call.consumeCancellable(block) } finally { synchronized(gate) { calls.remove(call) } }
+    }
+
+    private suspend fun token(epoch: Long, form: FormBody, timeoutMillis: Int = 30_000): JSONObject = consume(epoch,
+        http.newBuilder().callTimeout(timeoutMillis.toLong(), TimeUnit.MILLISECONDS)
+            .readTimeout(timeoutMillis.toLong(), TimeUnit.MILLISECONDS)
+            .writeTimeout(timeoutMillis.toLong(), TimeUnit.MILLISECONDS).build()
+            .newCall(Request.Builder().url(endpoints.token).post(form).build()),
+    ) { response ->
+        check(response.isSuccessful) { "Token request failed: HTTP ${response.code}" }
+        check(response.header("Content-Type").orEmpty().contains("json", ignoreCase = true))
+        JSONObject(response.body?.string().orEmpty())
+    }
+
+    private data class Credential(val token: String, val generation: Long)
+
+    private suspend fun credentials(timeoutMillis: Int): Credential = withContext(Dispatchers.IO) { refreshMutex.withLock {
+        val (saved, epoch) = synchronized(gate) {
+            check(!signingOut && !credentialsBlocked) { "ChatGPT sign-in required" }
+            storage.read() to generation
+        }
+        check(saved.optString("access_token").isNotBlank()) { "ChatGPT sign-in required" }
+        if (saved.optLong("expires_at") > System.currentTimeMillis() + 90_000) {
+            return@withLock Credential(saved.getString("access_token"), epoch)
+        }
+        val next = token(epoch, FormBody.Builder().add("grant_type", "refresh_token")
+            .add("client_id", saved.getString("client_id")).add("refresh_token", saved.getString("refresh_token"))
+            .add("resource", RESOURCE).build(), timeoutMillis)
+        validateToken(next, requireScope = false)
+        listOf("access_token", "refresh_token", "scope", "token_type").forEach { key ->
+            if (next.has(key)) saved.put(key, next.get(key))
+        }
+        saved.put("expires_at", expiry(next))
+        val context = currentCoroutineContext()
+        synchronized(gate) {
+            context.ensureActive()
+            if (epoch != generation || signingOut) throw CancellationException("Refresh superseded")
+            storage.write(saved)
+            publish(saved)
+        }
+        Credential(saved.getString("access_token"), epoch)
+    } }
+
+    internal suspend fun <T> authorizedResponse(
+        client: OkHttpClient, request: (String) -> Request, block: suspend (Response) -> T,
+    ): T {
+        val credential = credentials(client.callTimeoutMillis.takeIf { it > 0 } ?: 30_000)
+        return consume(credential.generation, client.newCall(request(credential.token)), block)
+    }
+
+    suspend fun signOut() = withContext(Dispatchers.IO) {
+        val (saved, epoch) = synchronized(gate) {
+            check(!signingOut) { "Sign-out already in progress" }
+            val data = storage.read()
+            invalidate()
+            signingOut = true
+            credentialsBlocked = true
+            publish(data)
+            data to generation
+        }
+        var revoked = saved.optString("access_token").isBlank() && saved.optString("refresh_token").isBlank()
+        try {
+            if (saved.optString("refresh_token").isNotBlank()) revoked = revoke(saved)
+        } finally {
+            // Cancellation or a failed server must never leave usable local tokens behind.
+            withContext(NonCancellable + Dispatchers.IO) {
+                synchronized(gate) {
+                    if (epoch == generation) {
+                        val registration = JSONObject()
+                        listOf("host_id", "client_id", "subject", "email").forEach { key ->
+                            if (saved.has(key)) registration.put(key, saved.get(key))
+                        }
+                        try {
+                            storage.write(registration)
+                            mutableState.value = ChatGptAuthState(accountLabel = registration.optString("email"),
+                                status = if (revoked) ChatGptAuthStatus.SIGNED_OUT else ChatGptAuthStatus.REMOTE_UNCONFIRMED)
+                        } catch (e: Exception) {
+                            mutableState.value = ChatGptAuthState(status = ChatGptAuthStatus.FAILED)
+                            throw e
+                        } finally { signingOut = false }
+                    }
+                }
+            }
+        }
+    }
+
+    private suspend fun revoke(saved: JSONObject): Boolean {
+        val client = http.newBuilder().callTimeout(10, TimeUnit.SECONDS).build()
+        repeat(2) { retry ->
+            try {
+                val url = client.newCall(Request.Builder().url(endpoints.discovery).build()).consumeCancellable {
+                    check(it.isSuccessful)
+                    JSONObject(it.body?.string().orEmpty()).getString("revocation_endpoint").toHttpUrl()
+                }
+                val issuer = endpoints.issuer.toHttpUrl()
+                // Discovery cannot redirect a refresh token to another origin.
+                check(url.scheme == issuer.scheme && url.host == issuer.host && url.port == issuer.port)
+                val code = client.newCall(Request.Builder().url(url).post(FormBody.Builder()
+                    .add("token", saved.getString("refresh_token")).add("token_type_hint", "refresh_token")
+                    .add("client_id", saved.getString("client_id")).build()).build()).consumeCancellable { it.code }
+                if (code == 200) return true
+                if (code < 500) return false
+            } catch (e: CancellationException) { throw e }
+            catch (_: Exception) { /* Never log credentials or server messages. */ }
+            if (retry == 0) delay(300)
+        }
+        return false
+    }
+
+    /** Installs the listener and attempt identity before the system browser opens. */
+    suspend fun prepareLogin(): LoginAttempt {
+        val owner = currentCoroutineContext().job
+        return withContext(Dispatchers.IO) {
+            currentCoroutineContext().ensureActive()
+            synchronized(gate) {
+                check(!signingOut) { "Signing out" }
+                val saved = storage.read()
+                if (!saved.has("host_id")) {
+                    saved.put("host_id", "urn:uuid:${UUID.randomUUID()}")
+                    storage.write(saved)
+                }
+                invalidate()
+                val server = ServerSocket(0, 4, InetAddress.getByName("127.0.0.1")).apply { soTimeout = 600_000 }
+                try {
+                    LoginAttempt(server, saved, generation).also { next ->
+                        attempt = next
+                        next.ownerHandle = owner.invokeOnCompletion { cause -> if (cause != null) next.cancel() }
+                        publish(saved, ChatGptAuthStatus.WAITING)
+                    }
+                } catch (e: Exception) { server.close(); throw e }
+            }
+        }
+    }
+
+    inner class LoginAttempt internal constructor(
+        private val server: ServerSocket, private val saved: JSONObject, private val epoch: Long,
+    ) {
+        private val verifier = random()
+        private val state = random()
+        private val nonce = random()
+        private val redirect = "http://127.0.0.1:${server.localPort}/auth/callback"
+        @Volatile private var accepted: Socket? = null
+        internal var ownerHandle: DisposableHandle? = null
+        internal val isCurrent: Boolean get() = synchronized(gate) { attempt === this && epoch == generation }
+        val url: String = endpoints.authorize.toHttpUrl().newBuilder().apply {
+            val clientId = saved.optString("client_id").ifBlank { "dynamic_agent_client" }
+            addQueryParameter("client_id", clientId)
+            addQueryParameter("ext_agent_host_id", saved.getString("host_id"))
+            addQueryParameter("response_type", "code")
+            addQueryParameter("redirect_uri", redirect)
+            addQueryParameter("scope", "openid profile email offline_access resource.invoke chatgpt.tokens.use.direct")
+            addQueryParameter("resource", RESOURCE)
+            addQueryParameter("state", state)
+            addQueryParameter("nonce", nonce)
+            addQueryParameter("code_challenge_method", "S256")
+            addQueryParameter("code_challenge", b64(MessageDigest.getInstance("SHA-256").digest(verifier.toByteArray())))
+            if (clientId == "dynamic_agent_client") addQueryParameter("agent_name_hint", "AgentPaw")
+            else if (saved.has("id_token")) addQueryParameter("id_token_hint", saved.getString("id_token"))
+        }.build().toString()
+
+        internal fun closeResources() {
+            runCatching { server.close() }
+            runCatching { accepted?.close() }
+            ownerHandle?.dispose()
+        }
+
+        fun cancel() = synchronized(gate) {
+            if (attempt === this) cancelLogin() else closeResources()
+        }
+
+        suspend fun awaitCallback() {
+            try { awaitCallbackOnIo() } finally { cancel() }
+        }
+
+        private suspend fun awaitCallbackOnIo() = withContext(Dispatchers.IO) { coroutineScope {
+            val context = currentCoroutineContext()
+            val cancellation = launch(start = CoroutineStart.UNDISPATCHED) {
+                try { awaitCancellation() } finally { closeResources() }
+            }
+            try {
                 while (true) {
+                    context.ensureActive()
                     val client = server.accept()
+                    synchronized(gate) {
+                        if (epoch != generation || attempt !== this@LoginAttempt) {
+                            client.close()
+                            throw CancellationException("Login superseded")
+                        }
+                        accepted = client
+                    }
                     client.use {
+                        context.ensureActive()
                         client.soTimeout = 10_000
                         val line = client.getInputStream().bufferedReader().readLine().orEmpty()
                         val uri = ("http://127.0.0.1" + line.split(" ").getOrElse(1) { "/" }).toHttpUrl()
                         if (uri.encodedPath != "/auth/callback" || uri.queryParameter("state") != state) {
-                            client.getOutputStream().write("HTTP/1.1 400 Bad Request\r\nConnection: close\r\nContent-Length: 0\r\n\r\n".toByteArray()); return@use
+                            client.getOutputStream().write("HTTP/1.1 400 Bad Request\r\nConnection: close\r\nContent-Length: 0\r\n\r\n".toByteArray())
+                            return@use
                         }
                         try {
-                            check(uri.queryParameter("error") == null) { "授权未完成，请重新登录。" }
+                            check(uri.queryParameter("error") == null) { "Authorization declined" }
                             val id = uri.queryParameter("client_id") ?: saved.optString("client_id")
-                            check(id.isNotBlank() && id != "dynamic_agent_client") { "未收到有效的客户端注册信息。" }
-                            check(!saved.has("client_id") || saved.getString("client_id") == id) { "授权账号注册不匹配。" }
-                            val result = token(FormBody.Builder().add("grant_type", "authorization_code").add("client_id", id)
-                                .add("code", requireNotNull(uri.queryParameter("code"))).add("code_verifier", verifier)
-                                .add("redirect_uri", redirect).add("resource", RESOURCE).build())
-                            val identity = verifyIdToken(result.getString("id_token"), id, nonce)
-                            check(!saved.has("subject") || saved.getString("subject") == identity.getString("sub")) { "返回的账号与原账号不一致。" }
-                            check(result.getString("scope").split(" ").contains("chatgpt.tokens.use.direct")) { "未授予 ChatGPT 套餐使用权限。" }
-                            result.put("client_id", id).put("host_id", saved.getString("host_id")).put("subject", identity.getString("sub"))
-                                .put("email", identity.optString("email", "已授权")).put("expires_at", System.currentTimeMillis() + result.getLong("expires_in") * 1000)
-                            mutex.withLock { write(result) }
-                            status = "授权成功。返回 AgentPaw，选择模型并保存设置。"
-                            browserResult(client, true); return@withContext
-                        } catch (e: Exception) { browserResult(client, false); throw e }
+                            check(id.isNotBlank() && id != "dynamic_agent_client")
+                            check(!saved.has("client_id") || saved.getString("client_id") == id)
+                            val result = token(epoch, FormBody.Builder().add("grant_type", "authorization_code")
+                                .add("client_id", id).add("code", requireNotNull(uri.queryParameter("code")))
+                                .add("code_verifier", verifier).add("redirect_uri", redirect).add("resource", RESOURCE).build())
+                            val identity = verifyIdToken(epoch, result.getString("id_token"), id, nonce)
+                            check(!saved.has("subject") || saved.getString("subject") == identity.getString("sub"))
+                            validateToken(result, requireScope = true)
+                            result.put("client_id", id).put("host_id", saved.getString("host_id"))
+                                .put("subject", identity.getString("sub")).put("email", identity.optString("email"))
+                                .put("expires_at", expiry(result))
+                            synchronized(gate) {
+                                context.ensureActive()
+                                if (epoch != generation || attempt !== this@LoginAttempt || signingOut) {
+                                    throw CancellationException("Login superseded")
+                                }
+                                storage.write(result)
+                                credentialsBlocked = false
+                                attempt = null
+                                publish(result, ChatGptAuthStatus.SIGNED_IN)
+                            }
+                            // A disconnected browser cannot invalidate a successfully committed login.
+                            runCatching { browserResult(client, true) }
+                            return@coroutineScope
+                        } catch (e: Exception) {
+                            runCatching { browserResult(client, false) }
+                            throw e
+                        }
                     }
                 }
-            } } catch (e: Exception) { status = e.message ?: "授权失败，请重试。"; throw e }
-        }
-        private fun browserResult(client: java.net.Socket, success: Boolean) {
-            val body = "<!doctype html><meta charset=utf-8><h2>${if (success) "授权成功，请返回 AgentPaw。" else "授权未完成，请返回 AgentPaw 查看提示。"}</h2>".toByteArray()
+            } catch (e: Exception) {
+                synchronized(gate) {
+                    if (attempt === this@LoginAttempt) {
+                        attempt = null
+                        mutableState.value = this@ChatGptAuth.state.value.copy(busy = false, status =
+                            if (e is CancellationException) ChatGptAuthStatus.CANCELLED else ChatGptAuthStatus.FAILED)
+                    }
+                }
+                context.ensureActive()
+                throw e
+            } finally {
+                cancellation.cancel()
+                closeResources()
+            }
+        } }
+
+        private fun browserResult(client: Socket, success: Boolean) {
+            val body = "<!doctype html><meta charset=utf-8><h2>${if (success) "Signed in. Return to AgentPaw." else "Sign-in failed. Return to AgentPaw."}</h2>".toByteArray()
             client.getOutputStream().write(("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nCache-Control: no-store\r\nConnection: close\r\nContent-Length: ${body.size}\r\n\r\n").toByteArray() + body)
         }
     }
-    private fun verifyIdToken(jwt: String, audience: String, nonce: String): JSONObject {
-        val parts = jwt.split('.'); check(parts.size == 3) { "身份令牌格式错误。" }
+
+    private suspend fun verifyIdToken(epoch: Long, jwt: String, audience: String, nonce: String): JSONObject {
+        val parts = jwt.split('.')
+        check(parts.size == 3) { "Invalid ID token" }
         val header = JSONObject(String(decode(parts[0]), Charsets.UTF_8))
-        check(header.getString("alg") == "RS256") { "不支持的身份签名算法。" }
-        val jwks = http.newCall(Request.Builder().url("https://auth.openai.com/.well-known/jwks.json").build()).execute().use {
-            check(it.isSuccessful); JSONObject(it.body!!.string()).getJSONArray("keys")
+        check(header.getString("alg") == "RS256")
+        val jwks = consume(epoch, http.newCall(Request.Builder().url(endpoints.jwks).build())) {
+            check(it.isSuccessful)
+            JSONObject(it.body!!.string()).getJSONArray("keys")
         }
-        val jwk = (0 until jwks.length()).map { jwks.getJSONObject(it) }.firstOrNull { it.optString("kid") == header.getString("kid") && it.optString("kty") == "RSA" }
-            ?: error("无法验证 OpenAI 身份签名。")
-        val publicKey = KeyFactory.getInstance("RSA").generatePublic(RSAPublicKeySpec(BigInteger(1, decode(jwk.getString("n"))), BigInteger(1, decode(jwk.getString("e")))))
-        val valid = Signature.getInstance("SHA256withRSA").run { initVerify(publicKey); update("${parts[0]}.${parts[1]}".toByteArray(Charsets.US_ASCII)); verify(decode(parts[2])) }
-        check(valid) { "身份令牌签名无效。" }
-        val payload = JSONObject(String(decode(parts[1]), Charsets.UTF_8)); val now = System.currentTimeMillis() / 1000
-        check(payload.getString("iss") == "https://auth.openai.com" && payload.getString("nonce") == nonce && payload.getLong("exp") > now) { "身份令牌已过期或不匹配。" }
-        val aud = payload.get("aud"); check(aud == audience || (aud is org.json.JSONArray && (0 until aud.length()).any { aud.getString(it) == audience })) { "身份令牌受众不匹配。" }
+        val jwk = (0 until jwks.length()).map { jwks.getJSONObject(it) }.firstOrNull {
+            it.optString("kid") == header.getString("kid") && it.optString("kty") == "RSA"
+        } ?: error("Unknown signing key")
+        val publicKey = KeyFactory.getInstance("RSA").generatePublic(RSAPublicKeySpec(
+            BigInteger(1, decode(jwk.getString("n"))), BigInteger(1, decode(jwk.getString("e"))),
+        ))
+        check(Signature.getInstance("SHA256withRSA").run {
+            initVerify(publicKey)
+            update("${parts[0]}.${parts[1]}".toByteArray(Charsets.US_ASCII))
+            verify(decode(parts[2]))
+        }) { "Invalid ID signature" }
+        val payload = JSONObject(String(decode(parts[1]), Charsets.UTF_8))
+        val now = System.currentTimeMillis() / 1000
+        check(payload.getString("iss") == endpoints.issuer && payload.getString("nonce") == nonce && payload.getLong("exp") > now)
+        val aud = payload.get("aud")
+        check(aud == audience || (aud is org.json.JSONArray && (0 until aud.length()).any { aud.getString(it) == audience }))
         if (payload.has("nbf")) check(payload.getLong("nbf") <= now + 30)
-        check(payload.getString("sub").isNotBlank()); return payload
+        check(payload.getString("sub").isNotBlank())
+        return payload
     }
+
+    private fun validateToken(token: JSONObject, requireScope: Boolean) {
+        check(token.opt("access_token") is String && token.getString("access_token").isNotBlank())
+        check(token.optString("token_type", "Bearer").equals("Bearer", ignoreCase = true))
+        if (requireScope || token.has("refresh_token")) {
+            check(token.opt("refresh_token") is String && token.getString("refresh_token").isNotBlank())
+        }
+        if (requireScope || token.has("scope")) check(token.getString("scope").split(" ").contains("chatgpt.tokens.use.direct"))
+    }
+
+    private fun expiry(token: JSONObject): Long {
+        val seconds = token.getLong("expires_in")
+        check(seconds in 1..31_536_000L)
+        return System.currentTimeMillis() + seconds * 1000
+    }
+
     companion object {
-        private const val ALIAS = "agentpaw_chatgpt_plan_v1"
         const val RESOURCE = "https://api.openai.com/v1"
         @Volatile private var instance: ChatGptAuth? = null
-        fun get(context: Context): ChatGptAuth = instance ?: synchronized(this) { instance ?: ChatGptAuth(context.applicationContext).also { instance = it } }
+        fun get(context: Context): ChatGptAuth = instance ?: synchronized(this) {
+            instance ?: ChatGptAuth(EncryptedChatGptCredentialStorage(context.applicationContext)).also { instance = it }
+        }
         private fun random(): String = b64(ByteArray(48).also { SecureRandom().nextBytes(it) })
         private fun b64(bytes: ByteArray): String = Base64.encodeToString(bytes, Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING)
         private fun decode(s: String): ByteArray = Base64.decode(s, Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING)
