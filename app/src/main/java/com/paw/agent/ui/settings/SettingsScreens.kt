@@ -299,6 +299,22 @@ fun LlmServicePage(
         Spacer(Modifier.height(20.dp))
 
         // ---- connection ----
+        if (state.provider == LlmProvider.CHATGPT_PLAN) {
+            val context = androidx.compose.ui.platform.LocalContext.current
+            SettingsGroupLabel(stringResource(R.string.chatgpt_account_section))
+            SettingsCard {
+                SettingsBlock {
+                    AppText(stringResource(R.string.chatgpt_settings_help))
+                    Spacer(Modifier.height(10.dp))
+                    AppOutlinedButton(onClick = {
+                        context.startActivity(android.content.Intent(context, com.paw.agent.chatgpt.ChatGptLoginActivity::class.java))
+                    }) { AppText(stringResource(R.string.chatgpt_manage)) }
+                    Spacer(Modifier.height(8.dp))
+                    AppText(stringResource(R.string.chatgpt_parameter_help),
+                        style = AppTheme.typography.bodySmall, color = AppTheme.colors.onSurfaceVariant)
+                }
+            }
+        } else {
         SettingsGroupLabel(stringResource(R.string.settings_section_connection))
         SettingsCard {
             SettingsBlock {
@@ -351,6 +367,7 @@ fun LlmServicePage(
 
         Spacer(Modifier.height(20.dp))
 
+        }
         // ---- model ----
         SettingsGroupLabel(stringResource(R.string.settings_section_model))
         SettingsCard {

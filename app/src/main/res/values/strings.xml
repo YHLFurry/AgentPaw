@@ -494,4 +494,23 @@
     <string name="settings_rounds_invalid">Enter a valid step count</string>
     <string name="settings_provider_custom">Custom</string>
     <string name="settings_model_manual_hint">Enter a model or fetch the available list</string>
+    <string name="chatgpt_title">ChatGPT plan connection (preview)</string>
+    <string name="chatgpt_account_section">ChatGPT account</string>
+    <string name="chatgpt_settings_help">Authorize in your phone browser, fetch available models, then save. No API key or computer is required.</string>
+    <string name="chatgpt_manage">Sign in / manage ChatGPT account</string>
+    <string name="chatgpt_intro">Sign in through your system browser to authorize AgentPaw to use your ChatGPT plan. Conversations, screenshots and tool results are sent directly from this phone to OpenAI over HTTPS. Credentials are encrypted locally using Android Keystore. Models and limits depend on your account.\n\nReturn here after authorizing. Force-stopping AgentPaw during sign-in requires starting again.</string>
+    <string name="chatgpt_continue">Continue with ChatGPT</string>
+    <string name="chatgpt_logout">Sign out</string>
+    <string name="chatgpt_back">Back to model settings</string>
+    <string name="chatgpt_connected">Connected: %1$s</string>
+    <string name="chatgpt_account_authorized">Authorized account</string>
+    <string name="chatgpt_disconnected">ChatGPT is not connected</string>
+    <string name="chatgpt_idle">Sign in to fetch models available to your account.</string>
+    <string name="chatgpt_waiting">Waiting for browser authorization. Return here when complete.</string>
+    <string name="chatgpt_success">Signed in. Fetch models and save your model settings.</string>
+    <string name="chatgpt_cancelled">Sign-in cancelled. You can try again.</string>
+    <string name="chatgpt_failed">The operation could not complete. Check your network, reopen this page and try again.</string>
+    <string name="chatgpt_signed_out">Signed out. The renewable session has been revoked.</string>
+    <string name="chatgpt_remote_unconfirmed">Signed out on this phone. Remote revocation could not be confirmed; disconnect this app in ChatGPT Settings to revoke access.</string>
+    <string name="chatgpt_parameter_help">This preview route does not accept temperature, top-p or output-token limits. Context budgets remain local estimates. Select a model available to your account.</string>
 </resources>

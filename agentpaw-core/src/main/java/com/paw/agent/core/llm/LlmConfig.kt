@@ -18,6 +18,12 @@ enum class LlmProvider(
     val apiKeyPrefix: String = "Bearer ",
     val suggestedModels: List<String> = emptyList(),
 ) {
+    CHATGPT_PLAN(
+        displayName = "ChatGPT 订阅直连",
+        defaultBaseUrl = "https://api.openai.com/v1",
+        defaultModel = "gpt-6.1-sol",
+        requiresApiKey = false,
+    ),
     OPENAI(
         displayName = "OpenAI",
         defaultBaseUrl = "https://api.openai.com/v1",
