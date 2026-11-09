@@ -113,63 +113,88 @@ class SkillStore(
 
     // ------------------------------------------------------------------ 写入
 
-    suspend fun save(skill: SkillDefinition): SkillDefinition = mutex.withLock {
-        val normalized = SkillValidator.normalize(
-            skill.copy(
-                revision = if (skill.revision <= 0) 1 else skill.revision,
+    suspend fun save(skill: SkillDefinition): SkillDefinition {
+        awaitLoaded()
+        return mutex.withLock {
+            val normalized = SkillValidator.normalize(
+                skill.copy(
+                    revision = if (skill.revision <= 0) 1 else skill.revision,
+                    updatedAt = System.currentTimeMillis(),
+                ),
+            ).let { candidate ->
+                val existing = _skills.value.firstOrNull { it.id == candidate.id }
+                if (existing != null) candidate.copy(revision = existing.revision + 1) else candidate
+            }
+
+            require(SkillValidator.errorsOf(normalized).isEmpty()) { "技能校验失败，未保存无效定义" }
+
+            require(_skills.value.none { it.id != normalized.id && it.key == normalized.key }) { "技能标识已被其他技能使用，请更换 key" }
+            val current = _skills.value.toMutableList()
+            val index = current.indexOfFirst { it.id == normalized.id }
+            if (index >= 0) current[index] = normalized else current.add(normalized)
+            persist(current)
+            _skills.value = current
+            normalized
+        }
+    }
+
+    suspend fun delete(id: String) {
+        awaitLoaded()
+        return mutex.withLock {
+            val current = _skills.value.filterNot { it.id == id }
+            persist(current)
+            _skills.value = current
+        }
+    }
+
+    suspend fun deleteAll() {
+        awaitLoaded()
+        return mutex.withLock {
+            persist(emptyList())
+            _skills.value = emptyList()
+        }
+    }
+
+    suspend fun setEnabled(id: String, enabled: Boolean) {
+        awaitLoaded()
+        return mutex.withLock {
+            val current = _skills.value.map {
+                if (it.id == id) it.copy(enabled = enabled, updatedAt = System.currentTimeMillis()) else it
+            }
+            persist(current)
+            _skills.value = current
+        }
+    }
+
+    suspend fun duplicate(id: String): SkillDefinition? {
+        awaitLoaded()
+        return mutex.withLock {
+            val source = _skills.value.firstOrNull { it.id == id }
+                ?: SkillPresets.builtIns.firstOrNull { it.id == id }
+                ?: return@withLock null
+            val usedKeys = _skills.value.map { it.key }.toSet() + SkillPresets.builtInKeys
+            val baseKey = source.key.removeSuffix("_copy")
+            var candidate = "${baseKey}_copy"
+            var index = 2
+            while (candidate in usedKeys) {
+                candidate = "${baseKey}_copy$index"
+                index++
+            }
+            val copy = source.copy(
+                id = UUID.randomUUID().toString(),
+                key = candidate,
+                displayName = "${source.displayName} 副本",
+                source = SkillSource.MANUAL,
+                builtIn = false,
+                revision = 1,
+                createdAt = System.currentTimeMillis(),
                 updatedAt = System.currentTimeMillis(),
-            ),
-        ).let { candidate ->
-            val existing = _skills.value.firstOrNull { it.id == candidate.id }
-            if (existing != null) candidate.copy(revision = existing.revision + 1) else candidate
+            )
+            val current = _skills.value + copy
+            persist(current)
+            _skills.value = current
+            copy
         }
-
-        val current = _skills.value.toMutableList()
-        val index = current.indexOfFirst { it.id == normalized.id }
-        if (index >= 0) current[index] = normalized else current.add(normalized)
-        persist(current)
-        _skills.value = current
-        normalized
-    }
-
-    suspend fun delete(id: String) = mutex.withLock {
-        val current = _skills.value.filterNot { it.id == id }
-        persist(current)
-        _skills.value = current
-    }
-
-    suspend fun setEnabled(id: String, enabled: Boolean) = mutex.withLock {
-        val current = _skills.value.map {
-            if (it.id == id) it.copy(enabled = enabled, updatedAt = System.currentTimeMillis()) else it
-        }
-        persist(current)
-        _skills.value = current
-    }
-
-    suspend fun duplicate(id: String): SkillDefinition? = mutex.withLock {
-        val source = _skills.value.firstOrNull { it.id == id } ?: return@withLock null
-        val usedKeys = _skills.value.map { it.key }.toSet()
-        val baseKey = source.key.removeSuffix("_copy")
-        var candidate = "${baseKey}_copy"
-        var index = 2
-        while (candidate in usedKeys) {
-            candidate = "${baseKey}_copy$index"
-            index++
-        }
-        val copy = source.copy(
-            id = UUID.randomUUID().toString(),
-            key = candidate,
-            displayName = "${source.displayName} 副本",
-            source = SkillSource.MANUAL,
-            builtIn = false,
-            revision = 1,
-            createdAt = System.currentTimeMillis(),
-            updatedAt = System.currentTimeMillis(),
-        )
-        val current = _skills.value + copy
-        persist(current)
-        _skills.value = current
-        copy
     }
 
     private suspend fun persist(list: List<SkillDefinition>) = withContext(Dispatchers.IO) {
@@ -203,64 +228,88 @@ class SkillStore(
     data class ImportResult(
         val imported: List<SkillDefinition> = emptyList(),
         val errors: List<String> = emptyList(),
+        val warnings: List<String> = emptyList(),
     )
 
     /** 从 JSON 导入；支持单对象、数组、以及 `{"skills": [...]}` 包装。 */
-    suspend fun importJson(raw: String): ImportResult = mutex.withLock {
-        val errors = mutableListOf<String>()
-        val elements = runCatching {
-            when (val element = json.parseToJsonElement(raw.trim())) {
-                is JsonArray -> element.toList()
-                is JsonObject -> (element["skills"] as? JsonArray)?.toList() ?: listOf(element)
-                else -> emptyList()
+    suspend fun importJson(raw: String): ImportResult = withContext(Dispatchers.Default) {
+        awaitLoaded()
+        mutex.withLock {
+            if (raw.length > 1024 * 1024 || raw.toByteArray(Charsets.UTF_8).size > 1024 * 1024) return@withLock ImportResult(errors = listOf("技能文件超过 1 MB 上限"))
+            var depth = 0
+            var quoted = false
+            var escaped = false
+            for (char in raw) {
+                if (escaped) { escaped = false; continue }
+                if (quoted && char == '\\') { escaped = true; continue }
+                if (char == '"') quoted = !quoted
+                if (!quoted) {
+                    if (char == '{' || char == '[') depth++
+                    if (char == '}' || char == ']') depth--
+                    if (depth > 64) return@withLock ImportResult(errors = listOf("技能 JSON 嵌套超过 64 层上限"))
+                }
             }
-        }.getOrElse {
-            return@withLock ImportResult(errors = listOf("不是合法的 JSON：${it.message ?: "解析失败"}"))
-        }
+            val warnings = mutableListOf<String>()
+            val errors = mutableListOf<String>()
+            val elements = runCatching {
+                when (val element = json.parseToJsonElement(raw.trim())) {
+                    is JsonArray -> element.toList()
+                    is JsonObject -> (element["skills"] as? JsonArray)?.toList() ?: listOf(element)
+                    else -> error("技能 JSON 必须是对象或数组")
+                }
+            }.getOrElse {
+                return@withLock ImportResult(errors = listOf("不是合法的 JSON：${it.message ?: "解析失败"}"))
+            }
 
-        val existingKeys = _skills.value.map { it.key }.toMutableSet()
-        val imported = mutableListOf<SkillDefinition>()
+            if (elements.size > 200) return@withLock ImportResult(errors = listOf("每次最多导入 200 个技能"))
+            val existingKeys = _skills.value.map { it.key }.toMutableSet()
+            val imported = mutableListOf<SkillDefinition>()
 
-        elements.forEachIndexed { index, element ->
-            val decoded = runCatching {
-                json.decodeFromJsonElement(SkillDefinition.serializer(), element)
-            }.getOrNull()
-            if (decoded == null) {
-                errors += "第 ${index + 1} 条不是合法的技能定义"
-                return@forEachIndexed
+            elements.forEachIndexed { index, element ->
+                val decoded = runCatching {
+                    json.decodeFromJsonElement(SkillDefinition.serializer(), element)
+                }.getOrNull()
+                if (decoded == null) {
+                    errors += "第 ${index + 1} 条不是合法的技能定义"
+                    return@forEachIndexed
+                }
+                var key = decoded.key.ifBlank { SkillValidator.slugify(decoded.displayName) }
+                var suffix = 2
+                while (key in existingKeys) {
+                    key = "${decoded.key}_imported$suffix"
+                    suffix++
+                }
+                val candidate = SkillValidator.normalize(
+                    decoded.copy(
+                        guard = decoded.guard.copy(allowSensitiveScreen = false),
+                        id = UUID.randomUUID().toString(),
+                        key = key,
+                        builtIn = false,
+                        source = SkillSource.IMPORTED,
+                        revision = 1,
+                        createdAt = System.currentTimeMillis(),
+                        updatedAt = System.currentTimeMillis(),
+                    ),
+                )
+                val errorsOfCandidate = SkillValidator.errorsOf(candidate)
+                if (errorsOfCandidate.isNotEmpty()) {
+                    errors += "「${candidate.displayName.ifBlank { key }}」未导入：${errorsOfCandidate.first().message}"
+                    return@forEachIndexed
+                }
+                existingKeys += key
+                if (decoded.guard.allowSensitiveScreen) warnings += "「${candidate.displayName}」的敏感页豁免已关闭"
+                imported += candidate
             }
-            var key = decoded.key.ifBlank { SkillValidator.slugify(decoded.displayName) }
-            var suffix = 2
-            while (key in existingKeys) {
-                key = "${decoded.key}_imported$suffix"
-                suffix++
-            }
-            val candidate = SkillValidator.normalize(
-                decoded.copy(
-                    id = UUID.randomUUID().toString(),
-                    key = key,
-                    builtIn = false,
-                    source = SkillSource.IMPORTED,
-                    revision = 1,
-                    createdAt = System.currentTimeMillis(),
-                    updatedAt = System.currentTimeMillis(),
-                ),
-            )
-            val errorsOfCandidate = SkillValidator.errorsOf(candidate)
-            if (errorsOfCandidate.isNotEmpty()) {
-                errors += "「${candidate.displayName.ifBlank { key }}」未导入：${errorsOfCandidate.first().message}"
-                return@forEachIndexed
-            }
-            existingKeys += key
-            imported += candidate
-        }
 
-        if (imported.isNotEmpty()) {
-            val current = _skills.value + imported
-            persist(current)
-            _skills.value = current
+            // A failed batch must not be partially committed: retrying the retained text would duplicate valid entries.
+            if (errors.isNotEmpty()) return@withLock ImportResult(errors = errors)
+            if (imported.isNotEmpty()) {
+                val current = _skills.value + imported
+                persist(current)
+                _skills.value = current
+            }
+            ImportResult(imported, errors, warnings)
         }
-        ImportResult(imported, errors)
     }
 
     // ------------------------------------------------------------- 旧版迁移
@@ -392,25 +441,27 @@ class SkillStore(
         engine: SkillEngine,
     ) {
         awaitLoaded()
-        val snapshot = _skills.value
-        registry.replaceUserSkills(snapshot)
+        mutex.withLock {
+            val snapshot = _skills.value
+            registry.replaceUserSkills(snapshot)
 
-        val desired = snapshot.filter { it.enabled }.associateBy { it.key }
-        val stale = registeredKeys - desired.keys
-        stale.forEach { key ->
-            // 用户技能可以占用内置技能的 key；删除这份覆盖后必须把内置版本恢复回去，
-            // 否则内置能力会从工具表里消失，直到下次启动才回来。
-            val preset = SkillPresets.find(key)
-            if (preset != null) {
-                toolRegistry.register(SkillToolAdapter(preset, engine))
-            } else {
-                toolRegistry.unregister(key)
+            val desired = snapshot.filter { it.enabled }.associateBy { it.key }
+            val stale = registeredKeys - desired.keys
+            stale.forEach { key ->
+                // 用户技能可以占用内置技能的 key；删除这份覆盖后必须把内置版本恢复回去，
+                // 否则内置能力会从工具表里消失，直到下次启动才回来。
+                val preset = SkillPresets.find(key)
+                if (preset != null) {
+                    toolRegistry.register(SkillToolAdapter(preset, engine))
+                } else {
+                    toolRegistry.unregister(key)
+                }
             }
+            desired.forEach { (key, definition) ->
+                toolRegistry.register(SkillToolAdapter(definition, engine))
+            }
+            registeredKeys = desired.keys
         }
-        desired.forEach { (key, definition) ->
-            toolRegistry.register(SkillToolAdapter(definition, engine))
-        }
-        registeredKeys = desired.keys
     }
 
     // ------------------------------------------------------------------ 测试

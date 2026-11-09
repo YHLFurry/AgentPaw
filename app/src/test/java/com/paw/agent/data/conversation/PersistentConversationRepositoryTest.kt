@@ -25,6 +25,25 @@ import java.io.File
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class PersistentConversationRepositoryTest {
+    @Test fun `search results beyond the loaded page can be deleted without returning after restart`() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val scope = TestScope(dispatcher)
+        val dir = tempFolder.newFolder("delete_older_search_result")
+        for (i in 1..120) File(dir, "conv_$i.json").writeText(
+            """{"id":"conv_$i","title":"Task $i","updatedAt":$i,"messages":[{"id":"m$i","role":"user","content":"Goal $i"}]}""",
+        )
+        val repo = PersistentConversationRepository(scope = scope, storageDirectory = dir, ioDispatcher = dispatcher)
+        scope.advanceUntilIdle()
+        assertFalse(repo.historyList.value.any { it.id == "conv_1" })
+        assertTrue(repo.allHistorySummaries.value.any { it.id == "conv_1" })
+        repo.deleteConversation("conv_1")
+        scope.advanceUntilIdle()
+        assertFalse(File(dir, "conv_1.json").exists())
+        assertFalse(repo.allHistorySummaries.value.any { it.id == "conv_1" })
+        val reloaded = PersistentConversationRepository(scope = scope, storageDirectory = dir, ioDispatcher = dispatcher)
+        scope.advanceUntilIdle()
+        assertFalse(reloaded.allHistorySummaries.value.any { it.id == "conv_1" })
+    }
     @Test fun `media write failure preserves original attachment`() = runTest {
         val dispatcher = StandardTestDispatcher(testScheduler)
         val scope = TestScope(dispatcher)
@@ -521,4 +540,86 @@ class PersistentConversationRepositoryTest {
         assertEquals(PersistentConversationRepository.MAX_HISTORY_ITEMS, repo.historyList.value.size)
         assertEquals(100, repo.historyList.value.size)
     }
+
+    @Test fun `invalid image cannot prevent later conversation text from surviving restart`() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val scope = TestScope(dispatcher)
+        val dir = tempFolder.newFolder("invalid_image")
+        val repo = PersistentConversationRepository(scope = scope, storageDirectory = dir, ioDispatcher = dispatcher)
+        scope.advanceUntilIdle()
+        repo.addMessage(Message("bad", MessageRole.USER, "keep this text", images = listOf("not-base64!")))
+        scope.advanceUntilIdle()
+        repo.addMessage(Message("next", MessageRole.ASSISTANT, "later text"))
+        scope.advanceUntilIdle()
+        val reloaded = PersistentConversationRepository(scope = scope, storageDirectory = dir, ioDispatcher = dispatcher)
+        scope.advanceUntilIdle()
+        assertEquals(listOf("keep this text", "later text"), reloaded.conversation.value.messages.map { it.content })
+        assertTrue(reloaded.conversation.value.messages.all { it.images.isEmpty() })
+    }
+
+    @Test fun `removing an image message cleans only files with no retained reference`() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val scope = TestScope(dispatcher)
+        val dir = tempFolder.newFolder("remove_shared_image")
+        val repo = PersistentConversationRepository(scope = scope, storageDirectory = dir, ioDispatcher = dispatcher)
+        scope.advanceUntilIdle()
+        val header = java.util.Base64.getEncoder().encodeToString(byteArrayOf(0x89.toByte(), 80, 78, 71, 13, 10, 26, 10))
+        repo.addMessage(Message("first", MessageRole.USER, "photo", images = listOf(header)))
+        scope.advanceUntilIdle()
+        val reference = repo.conversation.value.messages.single().images.single()
+        val file = File(reference.removePrefix("file://"))
+        repo.addMessage(Message("second", MessageRole.USER, "reuse", images = listOf(reference)))
+        scope.advanceUntilIdle()
+        repo.removeMessage("first")
+        scope.advanceUntilIdle()
+        assertTrue(file.exists())
+        repo.removeMessage("second")
+        repo.addMessage(Message("latest", MessageRole.USER, "must not be overwritten by cleanup"))
+        scope.advanceUntilIdle()
+        assertFalse(file.exists())
+        val reloaded = PersistentConversationRepository(scope = scope, storageDirectory = dir, ioDispatcher = dispatcher)
+        scope.advanceUntilIdle()
+        assertEquals("must not be overwritten by cleanup", reloaded.conversation.value.messages.single().content)
+    }
+
+    @Test fun `bulk history deletion cannot be undone by pending writes or restart`() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val scope = TestScope(dispatcher)
+        val dir = tempFolder.newFolder("bulk_clear")
+        val repo = PersistentConversationRepository(scope = scope, storageDirectory = dir, ioDispatcher = dispatcher)
+        scope.advanceUntilIdle()
+        val old = repo.conversation.value.id
+        repo.addMessage(Message("old", MessageRole.USER, "delete this"))
+        repo.deleteAllHistory()
+        scope.advanceUntilIdle()
+        assertFalse(File(dir, "$old.json").exists())
+        val reloaded = PersistentConversationRepository(scope = scope, storageDirectory = dir, ioDispatcher = dispatcher)
+        scope.advanceUntilIdle()
+        assertTrue(reloaded.conversation.value.messages.isEmpty())
+        assertFalse(reloaded.allHistorySummaries.value.any { it.id == old })
+    }
+
+
+    @Test fun `failed deletion preserves the visible record and can be retried`() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val scope = TestScope(dispatcher)
+        val dir = tempFolder.newFolder("delete_failed")
+        val repo = PersistentConversationRepository(scope = scope, storageDirectory = dir, ioDispatcher = dispatcher)
+        scope.advanceUntilIdle()
+        val id = repo.conversation.value.id
+        repo.addMessage(Message("m", MessageRole.USER, "must survive deletion failure"))
+        scope.advanceUntilIdle()
+        val target = File(dir, "$id.json")
+        val original = target.readText()
+        assertTrue(target.delete()); assertTrue(target.mkdir())
+        val blocker = File(target, "blocker").apply { writeText("prevent deletion") }
+        assertFalse(repo.deleteConversation(id))
+        assertTrue(repo.allHistorySummaries.value.any { it.id == id })
+        assertEquals("must survive deletion failure", repo.conversation.value.messages.single().content)
+        assertTrue(blocker.delete()); assertTrue(target.delete()); target.writeText(original)
+        assertTrue(repo.deleteConversation(id))
+        scope.advanceUntilIdle()
+        assertFalse(repo.allHistorySummaries.value.any { it.id == id })
+    }
+
 }

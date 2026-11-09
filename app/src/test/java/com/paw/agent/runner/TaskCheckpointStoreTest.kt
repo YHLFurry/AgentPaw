@@ -111,4 +111,18 @@ class TaskCheckpointStoreTest {
         runCurrent()
         assertEquals("retry goal", File(directory, "running_task.json").readText())
     }
+
+    @Test fun `in flight progress survives process recovery without resetting completed actions`() = runTest {
+        val directory = temporaryFolder.newFolder()
+        val store = TaskCheckpointStore(directory, backgroundScope, kotlinx.coroutines.test.StandardTestDispatcher(testScheduler))
+        store.recover()
+        val progress = TaskBreakpoint(originalGoal = "send once", stoppedAtStep = 4,
+            completedSteps = listOf(com.paw.agent.core.agent.breakpoint.StepSnapshot(3, "input_text", "{}", "sent")),
+            interruptedStep = com.paw.agent.core.agent.breakpoint.StepSnapshot(4, "tap", "{}", "unknown", isInterrupted = true))
+        store.saveProgress(progress)
+        testScheduler.runCurrent()
+        val recovered = TaskCheckpointStore(directory, backgroundScope, kotlinx.coroutines.test.StandardTestDispatcher(testScheduler)).recover()
+        assertEquals(progress, recovered)
+    }
+
 }

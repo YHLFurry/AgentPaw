@@ -216,7 +216,15 @@ fun SettingsHomeScreen(
             )
         }
 
-        // 仅当在"关于"页面长按大图标解锁专家模式后，方才显示此卡片
+        if (!expertMode) {
+            Spacer(Modifier.height(12.dp))
+            SettingsCard {
+                SettingsNavRow(icon = Icons.Outlined.AutoAwesome,
+                    title = stringResource(R.string.settings_group_expert),
+                    summary = stringResource(R.string.settings_expert_discover), onClick = onOpenAbout)
+            }
+        }
+        // 在“关于”页解锁后显示直接入口。
         if (expertMode) {
             Spacer(Modifier.height(12.dp))
             SettingsCard {
@@ -1089,7 +1097,8 @@ private fun SavedEffect(
     hostState: AppSnackbarHostState,
     error: String? = null,
 ) {
-    LaunchedEffect(error) { error?.let { hostState.showSnackbar(it) } }
+    val saveErrorMessage = stringResource(R.string.error_save_help)
+    LaunchedEffect(error) { error?.let { hostState.showSnackbar(saveErrorMessage) } }
     var lastShown by remember { mutableStateOf(savedAt) }
     LaunchedEffect(savedAt) {
         val at = savedAt ?: return@LaunchedEffect
@@ -1101,6 +1110,7 @@ private fun SavedEffect(
 
 @Composable
 private fun SettingsDraftStatus(state: LlmSettingsUiState) {
+    state.saveError?.let { SettingsErrorDetails(it, R.string.error_save_help) }
     val label = when {
         state.isLoading -> R.string.settings_loading
         state.isResetting -> R.string.settings_resetting
@@ -1240,13 +1250,20 @@ private fun TestResultBanner(testState: TestState) {
 
         is TestState.Failure -> {
             Spacer(Modifier.height(10.dp))
-            ResultBanner(
-                text = stringResource(R.string.settings_test_failed) + "\n" + testState.message,
-                isError = true,
-            )
+            SettingsErrorDetails(testState.message, testState.messageResource)
         }
 
         TestState.Idle, TestState.Running -> Unit
+    }
+}
+
+@Composable
+private fun SettingsErrorDetails(details: String, messageResource: Int) {
+    var expanded by remember(details) { mutableStateOf(false) }
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        ResultBanner(stringResource(messageResource), isError = true)
+        AppTextButton(stringResource(if (expanded) R.string.settings_hide_details else R.string.settings_show_details), { expanded = !expanded })
+        if (expanded) AppText(com.paw.agent.core.agent.SensitiveDataMasker.mask(details).take(1000), style = AppTheme.typography.bodySmall)
     }
 }
 

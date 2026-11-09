@@ -46,6 +46,10 @@ internal class TaskCheckpointStore(
         writes.trySend { atomicWrite(runningTaskFile, goal) }
     }
 
+    fun saveProgress(breakpoint: TaskBreakpoint) {
+        writes.trySend { atomicWrite(runningTaskFile, json.encodeToString(breakpoint)) }
+    }
+
     fun clearRunning() {
         writes.trySend { runningTaskFile.delete() }
     }
@@ -56,11 +60,13 @@ internal class TaskCheckpointStore(
             json.decodeFromString<TaskBreakpoint>(BoundedIO.readFile(breakpointFile))
         }.getOrNull()?.let { return it }
         if (!runningTaskFile.isFile) return null
-        val goal = BoundedIO.readFile(runningTaskFile).trim().ifBlank { "自动化任务" }
+        val raw = BoundedIO.readFile(runningTaskFile)
+        runCatching { json.decodeFromString<TaskBreakpoint>(raw) }.getOrNull()?.let { return it }
+        val goal = raw.trim().ifBlank { "自动化任务" }
         return TaskBreakpoint(
             originalGoal = goal,
             stoppedAtStep = 1,
-            interruptedReason = "任务在执行期间应用被系统中断/进程重启，现场已保存",
+            interruptedReason = "进程中断，旧版检查点未记录执行进度；继续前必须核实页面状态，避免重复操作",
         )
     }
 

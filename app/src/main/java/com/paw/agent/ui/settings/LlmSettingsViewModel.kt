@@ -28,7 +28,7 @@ sealed interface TestState {
     data object Idle : TestState
     data object Running : TestState
     data class Success(val message: String) : TestState
-    data class Failure(val message: String) : TestState
+    data class Failure(val message: String, val messageResource: Int = com.paw.agent.R.string.error_configuration_help) : TestState
 }
 
 /** Editable copy of [LlmConfig] plus per-field validation errors. */
@@ -433,7 +433,7 @@ class LlmSettingsViewModel(
                 .onFailure { error ->
                     currentCoroutineContext().ensureActive()
                     _uiState.value = _uiState.value.copy(
-                        testState = TestState.Failure(error.message ?: "Unknown error"),
+                        testState = TestState.Failure(error.message ?: "Unknown error", settingsErrorResource(error)),
                     )
                 }
         }
@@ -458,7 +458,7 @@ class LlmSettingsViewModel(
                 }
             } catch (cancelled: CancellationException) { throw cancelled
             } catch (error: Exception) {
-                _uiState.value = _uiState.value.copy(testState = TestState.Failure(error.message ?: "诊断失败"))
+                _uiState.value = _uiState.value.copy(testState = TestState.Failure(error.message ?: "诊断失败", settingsErrorResource(error)))
             } finally {
                 if (currentCoroutineContext().isActive) _uiState.value = _uiState.value.copy(diagnosticsRunning = false)
             }

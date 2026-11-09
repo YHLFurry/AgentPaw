@@ -23,6 +23,8 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -52,6 +54,7 @@ import com.paw.agent.ui.settings.SettingsCard
 import com.paw.agent.ui.settings.SettingsGroupLabel
 import com.paw.agent.ui.settings.SettingsRowDivider
 import com.paw.agent.ui.theme.AppTheme
+import kotlinx.coroutines.flow.first
 
 @Composable
 fun TaskCompareScreen(
@@ -62,8 +65,13 @@ fun TaskCompareScreen(
     modifier: Modifier = Modifier,
 ) {
     val historyList by container.conversationRepository.historyList.collectAsStateWithLifecycle()
+    var loading by remember(id1, id2) { mutableStateOf(true) }
     val loaded by produceState<Pair<Conversation?, Conversation?>>(null to null, historyList, id1, id2) {
+        loading = true
+        value = null to null
+        container.conversationRepository.isInitialized.first { it }
         value = container.conversationRepository.getConversation(id1) to container.conversationRepository.getConversation(id2)
+        loading = false
     }
     val conv1 = loaded.first
     val conv2 = loaded.second
@@ -96,7 +104,7 @@ fun TaskCompareScreen(
                     .padding(innerPadding),
                 contentAlignment = Alignment.Center,
             ) {
-                AppText(stringResource(R.string.history_compare_missing))
+                AppText(stringResource(if (loading) R.string.history_loading else R.string.history_compare_missing))
             }
         } else {
             val stats1 = remember(conv1) { PersistentConversationRepository.computeStats(conv1) }
